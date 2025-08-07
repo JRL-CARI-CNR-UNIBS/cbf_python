@@ -143,7 +143,7 @@ def range_state_derivative(v_lin: np.ndarray, v_human: np.ndarray):
 
     return f, g
 
-def jacobian_gamma(p_r,p_h,v_lin,v_human):
+def jacobian_psi(p_r,p_h,v_lin,v_human):
     u_rh=((p_r-p_h)/np.linalg.norm(p_r-p_h)).reshape(-1, 1)
     zero=np.zeros((1, 3))
     P = np.eye(3) - u_rh @ u_rh.T
@@ -324,17 +324,16 @@ def main():
                 h=compute_h(d=distance, v=v_rel, v_h=v_h)
 
                 f, g = range_state_derivative(vel_lineare,v_obs)
-                Jh_gamma=jacobian_h(distance,v_rel,v_h)
-                Jgamma_chi=jacobian_gamma(translation_bt,obs_pos,vel_lineare,v_obs)
+                Jh_psi=jacobian_h(distance,v_rel,v_h)
+                Jpsi_chi=jacobian_psi(translation_bt,obs_pos,vel_lineare,v_obs)
 
                 #derivative_h_on_distance, derivative_h_on_velocity = dh_dx(d=distance, v=v_rel, v_h=v_h)
 
                 #partial_h_on_x = np.array([derivative_h_on_distance, derivative_h_on_velocity]).reshape(1, -1)
-                Lie_f_h = Jh_gamma@Jgamma_chi@f
-                Lie_g_h = Jh_gamma@Jgamma_chi@g
+                Lie_f_h = Jh_psi@Jpsi_chi@f
+                Lie_g_h = Jh_psi@Jpsi_chi@g
 
-                #print(f"Lie_f_h={Lie_f_h} Lie_g_h={Lie_g_h},  Lie_g_h @ Jlin={ Lie_g_h @ Jlin}, -Lie_g_h @ dJlin @ dq - Lie_f_h - gamma * h={-Lie_g_h @ dJlin @ dq - Lie_f_h - gamma * h}")
-
+                
                 constraint_matrix = np.append(constraint_matrix, (Lie_g_h @ Jlin).reshape(1,-1), axis=0)
                 constraint_vector = np.append(
                     constraint_vector,
