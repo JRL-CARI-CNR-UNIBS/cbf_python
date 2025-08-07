@@ -76,51 +76,84 @@ def compute_h(d, v, C=C, Tr=Tr, a_s=a_s, v_h = 0):
 
     return h
 
-def dh_dx(d, v, C=C, Tr=Tr, a_s=a_s, v_h = 0):
-    """Derivative ∂h/∂v_rel used in CBF."""
+def jacobian_h(d, v, v_h=0, C=C, Tr=Tr, a_s=a_s):
+    """Derivative ∂h/∂gamma used in CBF."""
     h = 0.0
     if v < 0.0:
         if v_h>0:
             derivative_h_on_distance = 1.0
-            derivative_h_on_velocity = -(-Tr + (v - v_h) / a_s)  # Tr + (vh-v)/as = Tr+vh/as - v/as
+            derivative_h_on_velocity = Tr + (v_h - v_h) / a_s  # Tr + (vh-v)/as = Tr+vh/as - v/as
+            derivative_h_on_vh       = -Tr + v/a_s
         elif v_h<v:
             derivative_h_on_distance = 1.0
             derivative_h_on_velocity = 0.0
+            derivative_h_on_vh = 0
         else:
             derivative_h_on_distance = 1.0
             derivative_h_on_velocity = Tr + (v_h-v)/a_s
+            derivative_h_on_vh = -Tr - (v_h-v) / a_s
 
 
     else:
         if v_h < 0:
             dmin = C
             coef = Tr
+            partial_coef_vh = 0
         else:
             dmin = C + v_h * Tr
             coef = Tr + v_h / a_s
+            partial_coef_vh =  1.0/a_s
         if d < dmin:
             derivative_h_on_distance = 0.0
-            derivative_h_on_velocity = coef
         else:
             derivative_h_on_distance = 1.0
-            derivative_h_on_velocity = coef
+        derivative_h_on_velocity = coef
+        derivative_h_on_vh = partial_coef_vh * v
 
-    return derivative_h_on_distance, derivative_h_on_velocity
+    dh = np.array([
+        derivative_h_on_distance,
+        derivative_h_on_velocity,
+        derivative_h_on_vh
+    ])
+    return dh
 
 
 
-def range_state_derivative(r: np.ndarray, v: np.ndarray, eps: float = 1e-12):
-    """Range‑differential dynamics: ḋ and d̈ as a linear function of a."""
-    d = np.linalg.norm(r)
-    if d < eps:
-        raise ValueError("Range is zero; direction is undefined.")
-    f1 = np.dot(r, v) / d
-    f2 = np.dot(v, v) / d - np.dot(r, v) ** 2 / (d ** 3)
-    g2 = r.T / d
-    f = np.array([f1, f2]).reshape(-1, 1)
-    g = np.vstack([np.zeros((1, 3)), g2])
+def range_state_derivative(v_lin: np.ndarray, v_human: np.ndarray):
+    """
+    Compute f(chi) and g(chi) in one function.
+
+    Parameters:
+    - v_lin:    (3,) numpy array
+    - v_human:  (3,) numpy array
+
+    Returns:
+    - f:        (12,) numpy array
+    - g:        (12, 3) numpy array
+    """
+    zero3 = np.zeros(3)
+    zero3x3 = np.zeros((3, 3))
+    I3 = np.eye(3)
+
+    # f(chi) = [v_lin; v_human; 0; 0]
+    f = np.concatenate([v_lin, v_human, zero3, zero3])
+
+    # g(chi) = [0; 0; I; 0]
+    g = np.vstack([zero3x3, zero3x3, I3, zero3x3])
+
     return f, g
 
+def jacobian_gamma(p_r,p_h,v_lin,v_human):
+    u_rh=((p_r-p_h)/np.linalg.norm(p_r-p_h)).reshape(-1, 1)
+    zero=np.zeros((1, 3))
+    P = np.eye(3) - u_rh @ u_rh.T
+
+    jacobian = np.vstack([
+        np.hstack([u_rh.T,-u_rh.T,zero,zero]),
+        np.hstack([v_lin.reshape(1,-1)@P,-v_lin.reshape(1,-1)@P,u_rh.T,zero]),
+        np.hstack([v_human.reshape(1, -1) @ P, -v_human.reshape(1, -1) @ P, zero, u_rh.T])
+    ])
+    return jacobian
 
 def damped_pinv_svd(J, lam=1e-4):
     U, S, Vt = np.linalg.svd(J, full_matrices=False)
@@ -290,17 +323,22 @@ def main():
 
                 h=compute_h(d=distance, v=v_rel, v_h=v_h)
 
-                f, g = range_state_derivative(r, vel_lineare)
-                derivative_h_on_distance, derivative_h_on_velocity = dh_dx(d=distance, v=v_rel, v_h=v_h)
+                f, g = range_state_derivative(vel_lineare,v_obs)
+                Jh_gamma=jacobian_h(distance,v_rel,v_h)
+                Jgamma_chi=jacobian_gamma(translation_bt,obs_pos,vel_lineare,v_obs)
 
-                partial_h_on_x = np.array([derivative_h_on_distance, derivative_h_on_velocity]).reshape(1, -1)
-                Lie_f_h = partial_h_on_x @ f
-                Lie_g_h = partial_h_on_x @ g
+                #derivative_h_on_distance, derivative_h_on_velocity = dh_dx(d=distance, v=v_rel, v_h=v_h)
 
-                constraint_matrix = np.append(constraint_matrix, Lie_g_h @ Jlin, axis=0)
+                #partial_h_on_x = np.array([derivative_h_on_distance, derivative_h_on_velocity]).reshape(1, -1)
+                Lie_f_h = Jh_gamma@Jgamma_chi@f
+                Lie_g_h = Jh_gamma@Jgamma_chi@g
+
+                #print(f"Lie_f_h={Lie_f_h} Lie_g_h={Lie_g_h},  Lie_g_h @ Jlin={ Lie_g_h @ Jlin}, -Lie_g_h @ dJlin @ dq - Lie_f_h - gamma * h={-Lie_g_h @ dJlin @ dq - Lie_f_h - gamma * h}")
+
+                constraint_matrix = np.append(constraint_matrix, (Lie_g_h @ Jlin).reshape(1,-1), axis=0)
                 constraint_vector = np.append(
                     constraint_vector,
-                    -Lie_g_h @ dJlin @ dq - Lie_f_h - gamma * h,
+                    (-Lie_g_h @ dJlin @ dq - Lie_f_h - gamma * h).reshape(1,-1),
                     axis=0,
                 )
 
