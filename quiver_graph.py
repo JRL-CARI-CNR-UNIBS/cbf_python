@@ -1,10 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from example_bcf import compute_h
-from example_bcf import dh_dx
+from example_bcf import jacobian_h
 # Constants
 C = 0.25  # [m]
-Tr = 0.015  # [s]
+Tr = 0.15  # [s]
 a_s = 2.5  # [m/s²]
 
 
@@ -22,9 +22,9 @@ for v_h in np.linspace(-1.6,1.6,10):  # [m/s]
     W = np.zeros_like(V)
     for i in range(D.shape[0]):
         for j in range(D.shape[1]):
-            dh_dd, dh_dv = dh_dx(D[i, j], V[i, j])
-            U[i, j] = dh_dd
-            W[i, j] = dh_dv
+            dh_dpsi = jacobian_h(D[i, j], V[i, j])
+            U[i, j] = dh_dpsi[0]
+            W[i, j] = dh_dpsi[1]
 
 
     # Compute h values for the grid
