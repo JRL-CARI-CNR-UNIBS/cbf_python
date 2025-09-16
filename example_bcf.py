@@ -55,7 +55,10 @@ def compute_h(d, v, C=C, Tr=Tr, a_s=a_s, v_h = 0):
             dmin = C + v_h * Tr - v * Tr + v_h * (-v / a_s) + 0.5 * v ** 2 / a_s
             h = d - dmin
         elif v_h<v:
-            h = d - C
+            if d >= C:
+                h = d - C
+            else:
+                h = d - C + (C-d)*Tr/C*v
         else:
             h = d - C + (v - v_h)*Tr - (v_h-v)**2*0.5/a_s
 
@@ -85,9 +88,14 @@ def jacobian_h(d, v, v_h=0, C=C, Tr=Tr, a_s=a_s):
             derivative_h_on_velocity = Tr + (v_h - v_h) / a_s  # Tr + (vh-v)/as = Tr+vh/as - v/as
             derivative_h_on_vh       = -Tr + v/a_s
         elif v_h<v:
-            derivative_h_on_distance = 1.0
-            derivative_h_on_velocity = 0.0
-            derivative_h_on_vh = 0
+            if d >= C:
+                derivative_h_on_distance = 1.0
+                derivative_h_on_velocity = 0.0
+                derivative_h_on_vh = 0
+            else:
+                derivative_h_on_distance = 1.0 - Tr/C*v
+                derivative_h_on_velocity = (C-d)*Tr/C
+                derivative_h_on_vh = 0
         else:
             derivative_h_on_distance = 1.0
             derivative_h_on_velocity = Tr + (v_h-v)/a_s
@@ -117,6 +125,125 @@ def jacobian_h(d, v, v_h=0, C=C, Tr=Tr, a_s=a_s):
     ])
     return dh
 
+def jacobian_h(d, v, v_h=0.0, a_h=0.0, C=0.25, Tr=0.15, a_s=2.5):
+    """
+    Return the Jacobian (∂h/∂d, ∂h/∂v, ∂h/∂v_h) for h computed by your compute_h().
+
+    Matches the piecewise logic of compute_h:
+      - If v < 0: h = min_{t ∈ [0, t_stop]} [ d + d_r(t) - d_h(t) ] - C
+                   with t_stop = Tr - v/a_s, a_s>0
+      - If v >= 0:
+            if d < C:   h = Tr * v
+            else:       h = (d - C) + Tr * v
+
+    Returns
+    -------
+    derivative_h_on_distance, derivative_h_on_velocity, derivative_h_on_vh
+    """
+    eps = 1e-12
+
+    # Helper: integrals and objective
+    def d_r(t, v, Tr, a_s, t_stop):
+        if t <= Tr:
+            return v * t
+        elif t <= t_stop:
+            return v * t + 0.5 * a_s * (t - Tr) ** 2
+        else:
+            return v * Tr - 0.5 * (v ** 2) / a_s
+
+    def d_h_of(t, v_h, a_h):
+        return v_h * t + 0.5 * a_h * t * t
+
+    def d_total(t, d, v, v_h, a_h, Tr, a_s, t_stop):
+        return d + d_r(t, v, Tr, a_s, t_stop) - d_h_of(t, v_h, a_h)
+
+    # -------- Case 1: v >= 0 (use the same simple branch as in your compute_h) --------
+    if v >= 0.0:
+        if d < C:
+            # h = Tr * v
+            dh_dd   = 0.0
+            dh_dv   = Tr
+            dh_dvh  = 0.0
+        else:
+            # h = (d - C) + Tr * v
+            dh_dd   = 1.0
+            dh_dv   = Tr
+            dh_dvh  = 0.0
+        return dh_dd, dh_dv, dh_dvh
+
+    # -------- Case 2: v < 0 (true optimization over [0, t_stop]) --------
+    if a_s <= 0:
+        raise ValueError("a_s must be > 0 when v < 0.")
+    t_stop = Tr - v / a_s
+
+    # Build candidate set just like in compute_h
+    candidates = []
+    # Endpoints
+    candidates.append((0.0, d_total(0.0, d, v, v_h, a_h, Tr, a_s, t_stop)))
+    candidates.append((Tr,  d_total(Tr,  d, v, v_h, a_h, Tr, a_s, t_stop)))
+    candidates.append((t_stop, d_total(t_stop, d, v, v_h, a_h, Tr, a_s, t_stop)))
+
+    # Interior pre-Tr stationary point t* (if any)
+    if abs(a_h) > eps:
+        t_star = (v - v_h) / a_h
+        if 0.0 < t_star < Tr:
+            candidates.append((t_star, d_total(t_star, d, v, v_h, a_h, Tr, a_s, t_stop)))
+
+    # Interior post-Tr stationary point t' (if any)
+    if abs(a_h - a_s) > eps:
+        t_prime = ((v - v_h) - a_s * Tr) / (a_h - a_s)
+        if Tr < t_prime < t_stop:
+            candidates.append((t_prime, d_total(t_prime, d, v, v_h, a_h, Tr, a_s, t_stop)))
+
+    # Pick minimizer
+    t_min, d_min = min(candidates, key=lambda x: x[1])
+
+    # Now compute the Jacobian at the minimizing t_min.
+
+    # ∂h/∂d:
+    #   For v<0 branch, h = min_t d_total(t,·) - C, and d_total is affine in d with coefficient 1.
+    #   Envelope theorem + corners → still 1 (t_min does not depend on d in the corner at t=0; at t=t_stop, t_stop doesn't depend on d).
+    dh_dd = 1.0
+
+    # ∂h/∂v and ∂h/∂v_h:
+    #   d_total(t,·) on [0, Tr]:   d + (v - v_h) t - 0.5 a_h t^2
+    #     ⇒ ∂/∂v =  t,  ∂/∂v_h = -t
+    #   d_total(t,·) on (Tr, t_stop]: d + (v - v_h) t + 0.5 a_s (t - Tr)^2 - 0.5 a_h t^2
+    #     ⇒ ∂/∂v =  t,  ∂/∂v_h = -t
+    #
+    # For interior minima (t_min in (0,Tr) or (Tr,t_stop)), envelope theorem ⇒ ignore dt_min/dθ.
+    # For boundary minima:
+    #   - t=0:           derivative uses t=0 → ∂/∂v = 0, ∂/∂v_h = 0.
+    #   - t=Tr:          treat like corner with fixed boundary (Tr constant) → ∂/∂v = Tr, ∂/∂v_h = -Tr.
+    #   - t=t_stop:      t_stop depends on v. Chain rule:
+    #         h(v) = d_total(t_stop(v), ·) - C
+    #         dh/dv = (∂d_total/∂v)|_{t_stop} + (∂d_total/∂t)|_{t_stop} * (dt_stop/dv)
+    #         where (∂d_total/∂v)|_{t_stop} = t_stop,
+    #               (∂d_total/∂t)|_{t_stop} = v_r(t_stop) - v_h(t_stop) = - v_h(t_stop),
+    #               dt_stop/dv = -1/a_s.
+    #         ⇒ dh/dv = t_stop + v_h(t_stop)/a_s
+    #       For v_h: t_stop does not depend on v_h ⇒ dh/dv_h = - t_stop.
+
+    # Compute derivatives
+    if abs(t_min - 0.0) <= 1e-9:
+        dh_dv  = 0.0
+        dh_dvh = 0.0
+
+    elif abs(t_min - Tr) <= 1e-9:
+        dh_dv  = Tr
+        dh_dvh = -Tr
+
+    elif abs(t_min - t_stop) <= 1e-9:
+        vh_at_stop = v_h + a_h * t_stop
+        dh_dv  = t_stop + vh_at_stop / a_s
+        dh_dvh = - t_stop
+
+    else:
+        # interior (t* or t')
+        dh_dv  = t_min
+        dh_dvh = -t_min
+
+    return dh_dd, dh_dv, dh_dvh
 
 
 def range_state_derivative(v_lin: np.ndarray, v_human: np.ndarray):
