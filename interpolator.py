@@ -160,3 +160,5 @@ class SegmentedSE3Trap:
 
         # Collect the translations of every way-point: shape (N, 3)
         return np.vstack([T.translation for T in self._wps])
+
+

@@ -45,22 +45,23 @@ Tc = 2e-3  # [s]   2 kHz control period
 
 gamma = 5.0  # CBF gain
 
+
 # -------------------------- UTILITY FUNCTIONS --------------------------------
 
-def compute_h(d, v, C=C, Tr=Tr, a_s=a_s, v_h = 0):
+def compute_h(d, v, C=C, Tr=Tr, a_s=a_s, v_h=0):
     """Inverse equation: minimum separation needed to permit speed |v|."""
-    h=0.0
+    h = 0.0
     if v < 0.0:
-        if v_h>0:
+        if v_h > 0:
             dmin = C + v_h * Tr - v * Tr + v_h * (-v / a_s) + 0.5 * v ** 2 / a_s
             h = d - dmin
-        elif v_h<v:
+        elif v_h < v:
             if d >= C:
                 h = d - C
             else:
-                h = d - C + (C-d)*Tr/C*v
+                h = d - C + (C - d) * Tr / C * v
         else:
-            h = d - C + (v - v_h)*Tr - (v_h-v)**2*0.5/a_s
+            h = d - C + (v - v_h) * Tr - (v_h - v) ** 2 * 0.5 / a_s
 
     else:
         if v_h < 0:
@@ -68,38 +69,39 @@ def compute_h(d, v, C=C, Tr=Tr, a_s=a_s, v_h = 0):
             coef = Tr
         else:
             dmin = C + v_h * Tr
-            coef = Tr+v_h/a_s
+            coef = Tr + v_h / a_s
 
         if d < dmin:
-            h = coef*v
+            h = coef * v
         else:
-            #x = np.array([d-dmin, coef*v])
-            #h = np.linalg.norm(x, ord=1)
-            h = (d-dmin)+coef*v
+            # x = np.array([d-dmin, coef*v])
+            # h = np.linalg.norm(x, ord=1)
+            h = (d - dmin) + coef * v
 
     return h
+
 
 def jacobian_h(d, v, v_h=0, C=C, Tr=Tr, a_s=a_s):
     """Derivative ∂h/∂gamma used in CBF."""
     h = 0.0
     if v < 0.0:
-        if v_h>0:
+        if v_h > 0:
             derivative_h_on_distance = 1.0
             derivative_h_on_velocity = Tr + (v_h - v_h) / a_s  # Tr + (vh-v)/as = Tr+vh/as - v/as
-            derivative_h_on_vh       = -Tr + v/a_s
-        elif v_h<v:
+            derivative_h_on_vh = -Tr + v / a_s
+        elif v_h < v:
             if d >= C:
                 derivative_h_on_distance = 1.0
                 derivative_h_on_velocity = 0.0
                 derivative_h_on_vh = 0
             else:
-                derivative_h_on_distance = 1.0 - Tr/C*v
-                derivative_h_on_velocity = (C-d)*Tr/C
+                derivative_h_on_distance = 1.0 - Tr / C * v
+                derivative_h_on_velocity = (C - d) * Tr / C
                 derivative_h_on_vh = 0
         else:
             derivative_h_on_distance = 1.0
-            derivative_h_on_velocity = Tr + (v_h-v)/a_s
-            derivative_h_on_vh = -Tr - (v_h-v) / a_s
+            derivative_h_on_velocity = Tr + (v_h - v) / a_s
+            derivative_h_on_vh = -Tr - (v_h - v) / a_s
 
 
     else:
@@ -110,7 +112,7 @@ def jacobian_h(d, v, v_h=0, C=C, Tr=Tr, a_s=a_s):
         else:
             dmin = C + v_h * Tr
             coef = Tr + v_h / a_s
-            partial_coef_vh =  1.0/a_s
+            partial_coef_vh = 1.0 / a_s
         if d < dmin:
             derivative_h_on_distance = 0.0
         else:
@@ -124,6 +126,7 @@ def jacobian_h(d, v, v_h=0, C=C, Tr=Tr, a_s=a_s):
         derivative_h_on_vh
     ])
     return dh
+
 
 def jacobian_h(d, v, v_h=0.0, a_h=0.0, C=0.25, Tr=0.15, a_s=2.5):
     """
@@ -161,14 +164,14 @@ def jacobian_h(d, v, v_h=0.0, a_h=0.0, C=0.25, Tr=0.15, a_s=2.5):
     if v >= 0.0:
         if d < C:
             # h = Tr * v
-            dh_dd   = 0.0
-            dh_dv   = Tr
-            dh_dvh  = 0.0
+            dh_dd = 0.0
+            dh_dv = Tr
+            dh_dvh = 0.0
         else:
             # h = (d - C) + Tr * v
-            dh_dd   = 1.0
-            dh_dv   = Tr
-            dh_dvh  = 0.0
+            dh_dd = 1.0
+            dh_dv = Tr
+            dh_dvh = 0.0
         return dh_dd, dh_dv, dh_dvh
 
     # -------- Case 2: v < 0 (true optimization over [0, t_stop]) --------
@@ -180,7 +183,7 @@ def jacobian_h(d, v, v_h=0.0, a_h=0.0, C=0.25, Tr=0.15, a_s=2.5):
     candidates = []
     # Endpoints
     candidates.append((0.0, d_total(0.0, d, v, v_h, a_h, Tr, a_s, t_stop)))
-    candidates.append((Tr,  d_total(Tr,  d, v, v_h, a_h, Tr, a_s, t_stop)))
+    candidates.append((Tr, d_total(Tr, d, v, v_h, a_h, Tr, a_s, t_stop)))
     candidates.append((t_stop, d_total(t_stop, d, v, v_h, a_h, Tr, a_s, t_stop)))
 
     # Interior pre-Tr stationary point t* (if any)
@@ -226,21 +229,21 @@ def jacobian_h(d, v, v_h=0.0, a_h=0.0, C=0.25, Tr=0.15, a_s=2.5):
 
     # Compute derivatives
     if abs(t_min - 0.0) <= 1e-9:
-        dh_dv  = 0.0
+        dh_dv = 0.0
         dh_dvh = 0.0
 
     elif abs(t_min - Tr) <= 1e-9:
-        dh_dv  = Tr
+        dh_dv = Tr
         dh_dvh = -Tr
 
     elif abs(t_min - t_stop) <= 1e-9:
         vh_at_stop = v_h + a_h * t_stop
-        dh_dv  = t_stop + vh_at_stop / a_s
+        dh_dv = t_stop + vh_at_stop / a_s
         dh_dvh = - t_stop
 
     else:
         # interior (t* or t')
-        dh_dv  = t_min
+        dh_dv = t_min
         dh_dvh = -t_min
 
     return dh_dd, dh_dv, dh_dvh
@@ -270,22 +273,25 @@ def range_state_derivative(v_lin: np.ndarray, v_human: np.ndarray):
 
     return f, g
 
-def jacobian_psi(p_r,p_h,v_lin,v_human):
-    u_rh=((p_r-p_h)/np.linalg.norm(p_r-p_h)).reshape(-1, 1)
-    zero=np.zeros((1, 3))
+
+def jacobian_psi(p_r, p_h, v_lin, v_human):
+    u_rh = ((p_r - p_h) / np.linalg.norm(p_r - p_h)).reshape(-1, 1)
+    zero = np.zeros((1, 3))
     P = np.eye(3) - u_rh @ u_rh.T
 
     jacobian = np.vstack([
-        np.hstack([u_rh.T,-u_rh.T,zero,zero]),
-        np.hstack([v_lin.reshape(1,-1)@P,-v_lin.reshape(1,-1)@P,u_rh.T,zero]),
+        np.hstack([u_rh.T, -u_rh.T, zero, zero]),
+        np.hstack([v_lin.reshape(1, -1) @ P, -v_lin.reshape(1, -1) @ P, u_rh.T, zero]),
         np.hstack([v_human.reshape(1, -1) @ P, -v_human.reshape(1, -1) @ P, zero, u_rh.T])
     ])
     return jacobian
 
+
 def damped_pinv_svd(J, lam=1e-4):
     U, S, Vt = np.linalg.svd(J, full_matrices=False)
-    S_damped = S / (S ** 2 + lam ** 2) # approssimazione di S^-1
+    S_damped = S / (S ** 2 + lam ** 2)  # approssimazione di S^-1
     return (Vt.T * S_damped) @ U.T
+
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
@@ -311,11 +317,8 @@ def main():
 
     # HUD text node
 
-
     CBF = False
-    renderer = VisualizationDaemon(viz)   # default 60 Hz
-
-
+    renderer = VisualizationDaemon(viz)  # default 60 Hz
 
     # --------------------------- CONTROL INITIALISATION --------------------------
     data = model.createData()
@@ -333,32 +336,30 @@ def main():
     pin.framesForwardKinematics(model, data, q)
 
     # Gains
-    wn=300
-    xi=0.9
-    Kp_tra = np.array([1, 1, 1])*wn**2
-    Kd_tra = np.array([1,1,1])*2.0*xi*wn
-    Kp_rot = np.array([1, 1, 1])*wn**2
-    Kd_rot = np.array([1,1,1])*2.0*xi*wn
+    wn = 300
+    xi = 0.9
+    Kp_tra = np.array([1, 1, 1]) * wn ** 2
+    Kd_tra = np.array([1, 1, 1]) * 2.0 * xi * wn
+    Kp_rot = np.array([1, 1, 1]) * wn ** 2
+    Kd_rot = np.array([1, 1, 1]) * 2.0 * xi * wn
 
     twist_goal = np.zeros(6)
 
-
     planner = SegmentedSE3Trap(vlin_max=0.6, vang_max=1.2,
-                                   alin_max=1.8, aang_max=2.0)
-
+                               alin_max=1.8, aang_max=2.0)
 
     def pose_eul(z, y, x, xyz):
         R = pin.utils.rotate('z', z) @ pin.utils.rotate('y', y) @ pin.utils.rotate('x', x)
         return SE3(R, np.array(xyz))
 
-    goal_pose =  data.oMf[tool_frame_id].copy()
+    goal_pose = data.oMf[tool_frame_id].copy()
     # 2 · add way‑points -------------------------------------------
-    planner.addWayPoint(goal_pose*SE3.Identity())  # start: no rotation, origin
-    planner.addWayPoint(goal_pose*pose_eul(0.0, 0.0, 0.0, [0.30, 0.00, 0.0]))  # pure translation
-    planner.addWayPoint(goal_pose*pose_eul(math.pi / 4, 0.0, 0.0, [0.30, -0.1, 0.020]))  # 45° about Z while moving
-    planner.addWayPoint(goal_pose*pose_eul(math.pi / 4, 0.0, -math.pi / 4, [0.3, -0.1, 0.2]))  # add Y/X tilt
-    planner.addWayPoint(goal_pose*pose_eul(-math.pi/4, 0.0, 0.0, [0.30, 0.0, 0.0]))  # spin 180° back + arc
-    planner.addWayPoint(goal_pose*SE3.Identity())  # start: no rotation, origin
+    planner.addWayPoint(goal_pose * SE3.Identity())  # start: no rotation, origin
+    planner.addWayPoint(goal_pose * pose_eul(0.0, 0.0, 0.0, [0.30, 0.00, 0.0]))  # pure translation
+    planner.addWayPoint(goal_pose * pose_eul(math.pi / 4, 0.0, 0.0, [0.30, -0.1, 0.020]))  # 45° about Z while moving
+    planner.addWayPoint(goal_pose * pose_eul(math.pi / 4, 0.0, -math.pi / 4, [0.3, -0.1, 0.2]))  # add Y/X tilt
+    planner.addWayPoint(goal_pose * pose_eul(-math.pi / 4, 0.0, 0.0, [0.30, 0.0, 0.0]))  # spin 180° back + arc
+    planner.addWayPoint(goal_pose * SE3.Identity())  # start: no rotation, origin
     T_total = planner.computeTime()
 
     renderer.publishPath(planner.publishPath())
@@ -366,17 +367,22 @@ def main():
     # ------------------------------ MAIN LOOP -------------------- ----------------
     try:
         t = 0.0
+        trajectory_time = 0.0
+        Dtrajectory_time = 1.0
+        DDtrajectory_time = 0.0
         while t < 150.0:
             loop_start = time.perf_counter()
 
-            goal_act_pose, twist_goal, goal_dtwist = planner.getMotionLaw(t % T_total)
+            goal_act_pose, nominal_twist_goal, nominal_goal_dtwist = planner.getMotionLaw(trajectory_time % T_total)
+            twist_goal = nominal_twist_goal * Dtrajectory_time
+            goal_dtwist = nominal_goal_dtwist * Dtrajectory_time ** 2.0 + nominal_twist_goal * DDtrajectory_time
 
             # CBF toggle (10 s on / 10 s off)
             CBF = (t % 40) < 20.0
 
-            G=goal_act_pose.translation
+            G = goal_act_pose.translation
 
-            Rbg=goal_act_pose.rotation.copy()
+            Rbg = goal_act_pose.rotation.copy()
             # Robot kinematics
             pin.framesForwardKinematics(model, data, q)
             pin.computeForwardKinematicsDerivatives(model, data, q, dq, ddq)
@@ -418,8 +424,7 @@ def main():
             # Desired Cartesian accelerations
             acc_lin = Kp_tra * (G - translation_bt) + Kd_tra * (twist_goal[:3] - vel_lineare)
             acc_ang = Kp_rot * error_rot + Kd_rot * (twist_goal[3:] - vel_angolare)
-            dtwist_tool = np.hstack([acc_lin, acc_ang])  #+goal_dtwist
-
+            dtwist_tool = np.hstack([acc_lin, acc_ang])  # +goal_dtwist
 
             # ------------------------- CBF QP SET‑UP ------------------------------
             constraint_matrix = np.empty((0, model.nq))
@@ -429,42 +434,39 @@ def main():
 
             for i, obs_pos in enumerate(obstacle_positions):
                 # update obstacle motion
-                w1=2 * np.pi/2
-                w2=2 * np.pi/2.1
-                obs_pos[0] = 0.8 - 0.25 * np.sin(w1* t)
+                w1 = 2 * np.pi / 2
+                w2 = 2 * np.pi / 2.1
+                obs_pos[0] = 0.8 - 0.25 * np.sin(w1 * t)
                 obs_pos[1] = 0.4 + 0.1 * np.sin(w2 * t)
 
-                v_obs=np.array([0]*3)
-                v_obs[0] = -0.25 * np.cos(w1* t)*w1
-                v_obs[1] = 0.1 * np.cos(w2 * t)*w2
-
-
+                v_obs = np.array([0] * 3)
+                v_obs[0] = -0.25 * np.cos(w1 * t) * w1
+                v_obs[1] = 0.1 * np.cos(w2 * t) * w2
 
                 r = translation_bt - obs_pos
                 distance = np.linalg.norm(r)
                 u_hr = r / distance
 
-                v_h = np.dot(u_hr,v_obs)
+                v_h = np.dot(u_hr, v_obs)
 
                 v_rel = np.dot(vel_lineare, u_hr)
 
-                h=compute_h(d=distance, v=v_rel, v_h=v_h)
+                h = compute_h(d=distance, v=v_rel, v_h=v_h)
 
-                f, g = range_state_derivative(vel_lineare,v_obs)
-                Jh_psi=jacobian_h(distance,v_rel,v_h)
-                Jpsi_chi=jacobian_psi(translation_bt,obs_pos,vel_lineare,v_obs)
+                f, g = range_state_derivative(vel_lineare, v_obs)
+                Jh_psi = jacobian_h(distance, v_rel, v_h)
+                Jpsi_chi = jacobian_psi(translation_bt, obs_pos, vel_lineare, v_obs)
 
-                #derivative_h_on_distance, derivative_h_on_velocity = dh_dx(d=distance, v=v_rel, v_h=v_h)
+                # derivative_h_on_distance, derivative_h_on_velocity = dh_dx(d=distance, v=v_rel, v_h=v_h)
 
-                #partial_h_on_x = np.array([derivative_h_on_distance, derivative_h_on_velocity]).reshape(1, -1)
-                Lie_f_h = Jh_psi@Jpsi_chi@f
-                Lie_g_h = Jh_psi@Jpsi_chi@g
+                # partial_h_on_x = np.array([derivative_h_on_distance, derivative_h_on_velocity]).reshape(1, -1)
+                Lie_f_h = Jh_psi @ Jpsi_chi @ f
+                Lie_g_h = Jh_psi @ Jpsi_chi @ g
 
-                
-                constraint_matrix = np.append(constraint_matrix, (Lie_g_h @ Jlin).reshape(1,-1), axis=0)
+                constraint_matrix = np.append(constraint_matrix, (Lie_g_h @ Jlin).reshape(1, -1), axis=0)
                 constraint_vector = np.append(
                     constraint_vector,
-                    (-Lie_g_h @ dJlin @ dq - Lie_f_h - gamma * h).reshape(1,-1),
+                    (-Lie_g_h @ dJlin @ dq - Lie_f_h - gamma * h).reshape(1, -1),
                     axis=0,
                 )
 
@@ -494,17 +496,18 @@ def main():
                 ddq = damped_pinv_svd(J) @ (dtwist_tool - dJ @ dq)
 
             # --------------------------- INTEGRATION ----------------------------
-            q += dq * Tc + 0.5 * ddq * Tc**2
+            q += dq * Tc + 0.5 * ddq * Tc ** 2
             dq += ddq * Tc
 
-
-            vizualization_string=f"h = {h:.2f} m, CBF={CBF}"
+            vizualization_string = f"h = {h:.2f} m, CBF={CBF}"
             renderer.push_state(q,
                                 goal_act_pose,
                                 obstacle_positions,
                                 vizualization_string)
             # ----------------------------- TIMING -------------------------------
             t += Tc
+            trajectory_time += Dtrajectory_time * Tc + 0.5 * DDtrajectory_time * Tc ** 2.0
+            Dtrajectory_time += DDtrajectory_time * Tc
             elapsed = time.perf_counter() - loop_start
             rest = Tc - elapsed
             if rest > 0:

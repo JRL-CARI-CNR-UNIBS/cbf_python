@@ -41,7 +41,7 @@ class VisualizationDaemon:
         self._pathview = viz= viz.viewer["/path"]
 
         self._hud.set_transform(
-            tf.translation_matrix([0.0, -0.5, 0.0])
+            tf.translation_matrix([1.0, -0.5, 1.4])
         )
 
         # launch the thread
@@ -70,41 +70,69 @@ class VisualizationDaemon:
 
     # ----------------------------------------------------------- internals --
     def _flush(self) -> None:
-        """Push the stored state to Meshcat. Skips frame if busy."""
+        """Push the stored state to Meshcat. Locks only to copy state, then releases."""
+        # Try to take the lock non-blocking; if busy, skip this frame.
         if not self._lock.acquire(blocking=False):
             return
+
+        # ---- copy-only critical section ----
         try:
-            if self._q is not None:
-                self.viz.display(self._q)
-
-            self.viz.viewer["goal"].set_transform(self._Tgoal)
-
-            for i, pos in enumerate(self._obstacles):
-                self.viz.viewer[f"obstacle_{i}"].set_transform(
-                    tf.translation_matrix(pos)
-                )
-
-            meshcat_shapes.textarea(
-                self._hud,
-                f"{self._viz_string}",
-                width=1.5,
-                height=1.0,
-                font_size=80,
+            q_copy = None if getattr(self, "_q", None) is None else self._q.copy()
+            Tgoal_copy = None if getattr(self, "_Tgoal", None) is None else self._Tgoal.copy()
+            obstacles_copy = (
+                None if getattr(self, "_obstacles", None) is None
+                else [p.copy() for p in self._obstacles]
             )
-            if len(self._path)>0:
-                print(f"path={self._path}")
+            viz_string_copy = str(getattr(self, "_viz_string", ""))  # strings are immutable anyway
 
-                line_geom = g.LineLoop(
-                    g.PointsGeometry(np.asarray(self._path, dtype=float).T),
-                    g.LineBasicMaterial(color=0xff0000),
-                )
-                #v["line_loop_with_material"].set_object(
-                #    g.LineLoop(g.PointsGeometry(vertices), g.LineBasicMaterial(color=0xff0000)))
-                self._pathview.set_object(line_geom)
-
-                self._path = []
+            # Copy & clear _path atomically; support list or np.ndarray
+            path_src = getattr(self, "_path", None)
+            if path_src is None:
+                path_copy = None
+            elif isinstance(path_src, np.ndarray):
+                path_copy = path_src.copy()
+                # reset to an empty array with same ndim/shape convention (0 points)
+                self._path = path_src[:0].copy()
+            else:
+                # assume list-like of 3D points
+                path_copy = list(path_src)
+                try:
+                    path_src.clear()
+                except AttributeError:
+                    # fallback: reassign to a new empty list
+                    self._path = []
         finally:
             self._lock.release()
+        # ---- end critical section ----
+
+        # Now, outside the lock, do the heavier visualization work.
+        if q_copy is not None:
+            self.viz.display(q_copy)
+
+        if Tgoal_copy is not None:
+            self.viz.viewer["goal"].set_transform(Tgoal_copy)
+
+        if obstacles_copy is not None:
+            for i, pos in enumerate(obstacles_copy):
+                self.viz.viewer[f"obstacle_{i}"].set_transform(tf.translation_matrix(pos))
+
+        meshcat_shapes.textarea(
+            self._hud,
+            f"{viz_string_copy}",
+            width=1.5,
+            height=1.0,
+            font_size=80,
+        )
+
+        if path_copy is not None:
+
+            # Expecting path as Nx3 points; Meshcat wants 3xN
+            vertices = np.asarray(path_copy, dtype=float).T
+            line_geom = g.LineLoop(
+                g.PointsGeometry(vertices),
+                g.LineBasicMaterial(color=0xff0000),
+            )
+            self._pathview.set_object(line_geom)
 
     def _thread_main(self) -> None:
         dt = 1.0 / self.refresh_hz
