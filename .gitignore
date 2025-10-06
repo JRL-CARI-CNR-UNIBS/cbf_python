@@ -214,3 +214,5 @@ __pycache__/
 *.nbi
 *.nbo
 *.numba_cache
+*.dist/
+*.lprof
