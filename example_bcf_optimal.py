@@ -31,11 +31,11 @@ import quadprog
 from example_robot_data import load
 from pinocchio.visualize import MeshcatVisualizer
 
+from cbf_python.ssm_cbf_acc import h_and_jacobian_numba, jacobian_psi_times_fg_fast_numba, compute_h_and_constraints_numba
 from interpolator import SegmentedSE3Trap
 from joint_interpolator import SegmentedJointTrap
 from visualization_daemon import VisualizationDaemon
 from pinocchio import SE3
-from ssm_cbf import *
 from sharework import loadSharework
 
 from human_pose_reader import  PoseReader
@@ -61,6 +61,12 @@ def damped_pinv_svd(J, lam=1e-4):
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
     SHAREWORK = True
+    ACCELERATION = True
+    if ACCELERATION:
+        from ssm_cbf_acc import h_and_jacobian, jacobian_psi_times_fg_fast, range_state_derivative, jacobian_psi
+    else:
+        from ssm_cbf import compute_h, lie_fg_h_fast
+
     if SHAREWORK:
         UR10E_JOINTS = [
             "ur10e_shoulder_pan_joint",
@@ -81,7 +87,7 @@ def main():
     viz.loadViewerModel()
 
     R = pin.utils.rotate('z', 1.9) @ pin.utils.rotate('x', 1.57)
-    T_wc = pin.SE3(R, np.array([-1.45, -0.9, 0.9]))
+    T_wc = pin.SE3(R, np.array([-1.35, -0.9, 0.9]))
     reader = PoseReader("a01_s10_e02_skeleton3D_converted.csv", T_wc)
     obstacle_positions = reader.getHumanPose(0)
     last_obstacle_positions = obstacle_positions.copy()
@@ -134,6 +140,7 @@ def main():
     twist_goal = np.zeros(6)
     scaling_limit_matrix = np.append(np.zeros(model.nq), Tc)
 
+    delta_q_max = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])*0.01
     Dq_max = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])*np.pi
     DDq_max = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])*np.pi*10
 
@@ -174,10 +181,10 @@ def main():
     P4 = block_diag(I,0)
     b4 = np.array([0] * (model.nq + 1)).flatten()
 
-    lambda1 = 1.0e2
-    lambda2 = 1
-    lambda3 = 1e-0
-    lambda4 = 1e-9
+    lambda1 = 1.0e10
+    lambda2 = 1e-3
+    lambda3 = 1e-3
+    lambda4 = 0e-9
 
     v_obs = np.array([0] * 3)
     zeros_nq = np.zeros(model.nq)
@@ -192,6 +199,16 @@ def main():
     J = np.zeros((6, model.nv))
     dJ = np.zeros((6, model.nv))
 
+    def build_free_forced_one_step(Ts, nq):
+        I = np.eye(nq)
+        Forced = 0.5 * (Ts ** 2) * I  # (nq x nq)
+        Free = np.hstack([I, Ts * I])  # (nq x 2nq)
+        return Free, Forced
+
+    Free, Forced = build_free_forced_one_step(Tc,model.nq)
+
+    x0 = np.hstack((q, dq))
+    print(f"Free={Free.shape}, x0={x0.shape}, Free*x0={Free@x0}")
     # ------------------------------ MAIN LOOP -------------------- ----------------
     try:
 
@@ -201,12 +218,17 @@ def main():
         Dtrajectory_time = 1.0
         DDtrajectory_time = 0.0
 
-        n_constraints = 2 + len(obstacle_positions)*len(frames_ids)
+        n_constraints = 2+ 2*model.nq + len(obstacle_positions)*len(frames_ids)
         constraint_matrix = np.zeros((n_constraints, model.nq + 1))
         constraint_vector = np.zeros(n_constraints)
         constraint_matrix[0, :] = -scaling_limit_matrix
         constraint_matrix[1, :] = scaling_limit_matrix
+        row_idx=2
+        constraint_matrix[row_idx:(row_idx + model.nq), 0:model.nq] = -Forced
+        row_idx += model.nq
+        constraint_matrix[row_idx:(row_idx + model.nq), 0:model.nq] = Forced
 
+        row_idx += model.nq
         J = np.zeros((6, model.nv))
         dJ = np.zeros((6, model.nv))
 
@@ -222,14 +244,17 @@ def main():
             h_min = np.inf
 
             loop_start = time.perf_counter()
+
+            x0=np.hstack((q,dq))
             last_obstacle_positions = obstacle_positions
             obstacle_positions = reader.getHumanPose(0.1*t)
             cycles += 1
 
             nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
 
+            trajectory_error=np.linalg.norm(q-nominal_q)
             pin.framesForwardKinematics(model, data, nominal_q)
-            Tbt_nominal = data.oMf[tool_frame_id]
+            Tbt_nominal = data.oMf[tool_frame_id].copy()
 
             elapsed = time.perf_counter() - loop_start
             ct_planner.append(elapsed)
@@ -243,6 +268,11 @@ def main():
 
             constraint_vector[row_idx] = -Dtrajectory_time
             row_idx += 1
+
+            constraint_vector[row_idx:(row_idx + model.nq)] = -nominal_q - delta_q_max + Free @ x0
+            row_idx += model.nq
+            constraint_vector[row_idx:(row_idx+model.nq)] = nominal_q-delta_q_max - Free@x0
+            row_idx += model.nq
 
             t_pin_1 = time.perf_counter()
 
@@ -294,37 +324,20 @@ def main():
 
                     # update obstacle motion
 
-                    #v_obs =0.0*(obs_pos-last_obs_pos)/Tc
-                    r = translation_bt - obs_pos
-                    u_hr = r / np.linalg.norm(r)
-                    v_h = np.dot(u_hr, v_obs)
-                    v_rel = np.dot(u_hr, vel_lineare)
+                    v_obs =(obs_pos-last_obs_pos)/Tc
+                    a_h = 0.0
 
-                    h = compute_h(d=np.linalg.norm(r), v=v_rel, v_h=v_h, C=C, Tr=Tr, a_s=a_s)
+
+                    h, row, bound = compute_h_and_constraints_numba(
+                        translation_bt, obs_pos, vel_lineare, v_obs, Tr, a_s, C, a_h, 1e-12, Jlin, dJlin, dq, gamma
+                    )
                     h_min = min(h_min,h)
 
-                    #f, g = range_state_derivative(v_lin=vel_lineare, v_human=v_obs)
-                    #Jh_psi = jacobian_h(d=distance, v=v_rel, v_h=v_h, C=C, Tr=Tr, a_s=a_s)
-                    #Jpsi_chi = jacobian_psi(translation_bt, obs_pos, vel_lineare, v_obs)
-                    #Jh_chi = Jh_psi @ Jpsi_chi
-
-                    # partial_h_on_x = np.array([derivative_h_on_distance, derivative_h_on_velocity]).reshape(1, -1)
-                    #Lie_f_h = Jh_chi @ f
-                    #Lie_g_h = Jh_chi @ g
-
-                    lie_fg_h_fast(
-                        p_r=translation_bt, p_h=obs_pos,
-                        v_lin=vel_lineare, v_human=v_obs,
-                        C=C, Tr=Tr, a_s=a_s,
-                        Lie_f_h_out=Lie_f_h, Lie_g_h_out=Lie_g_h
-                    )
-
                     # Fill preallocated row
-                    constraint_matrix[row_idx, :-1] = Lie_g_h @ Jlin
-                    #constraint_matrix[row_idx, -1] = 0.0
-                    constraint_vector[row_idx] = (-Lie_g_h @ dJlin @ dq - Lie_f_h - gamma * h)
+                    constraint_matrix[row_idx, :-1] = row
+                    constraint_vector[row_idx] = bound
                     row_idx += 1
-                elapsed_ssm += time.perf_counter() - t_ssm_1
+                elapsed_ssm += min(time.perf_counter() - t_ssm_1,50e-3)
             ct_ssm.append(elapsed_ssm)
             ct_pin.append(elapsed_pin)
 
@@ -374,10 +387,10 @@ def main():
 
             # ----------------------------- TIMING -------------------------------
             elapsed = time.perf_counter() - loop_start
-            ct.append(elapsed)
+            ct.append(min(50e-3,elapsed))
             rest = Tc - elapsed
-            if 1: #rest > 0:
-                vizualization_string = f"h = {h_min:.2f} m, scaling {Dtrajectory_time:4.3f}"
+            if rest > 0:
+                vizualization_string = f"h = {h_min:.2f} m, scaling {Dtrajectory_time:4.3f}, trajectory_error={trajectory_error:.2f}"
                 renderer.push_state(q,
                                     Tbt_nominal,
                                     obstacle_positions,
@@ -422,19 +435,78 @@ def main():
     print(f"timeout cycles = {timeout_cycles} over {cycles}, percentage = {100.0*timeout_cycles/cycles}, average = {np.mean(computation_times)}")
     print_stats_table(stats)
 
-    import matplotlib.pyplot as plt
-    plt.figure(figsize=(10, 6))  # optional: makes the plot larger
+    # import matplotlib.pyplot as plt
+    # plt.figure(figsize=(10, 6))  # optional: makes the plot larger
+    #
+    # plt.hist(computation_times, bins=100, alpha=0.5, label="Computation Times")
+    # plt.hist(computation_times_qp, bins=100, alpha=0.5, label="Computation Times QP")
+    # plt.hist(computation_times_pin, bins=100, alpha=0.5, label="Computation Times PIN")
+    # plt.hist(computation_times_ssm, bins=100, alpha=0.5, label="Computation Times SSM")
+    # plt.hist(computation_times_others, bins=100, alpha=0.5, label="Computation Times Others")
+    #
+    # plt.xlabel("Computation Time")
+    # plt.ylabel("Frequency")
+    # plt.title("Comparison of Computation Times")
+    # plt.legend()
+    # plt.show()
 
-    plt.hist(computation_times, bins=100, alpha=0.5, label="Computation Times")
-    plt.hist(computation_times_qp, bins=100, alpha=0.5, label="Computation Times QP")
-    plt.hist(computation_times_pin, bins=100, alpha=0.5, label="Computation Times PIN")
-    plt.hist(computation_times_ssm, bins=100, alpha=0.5, label="Computation Times SSM")
-    plt.hist(computation_times_others, bins=100, alpha=0.5, label="Computation Times Others")
+    import plotly.graph_objects as go
 
-    plt.xlabel("Computation Time")
-    plt.ylabel("Frequency")
-    plt.title("Comparison of Computation Times")
-    plt.legend()
-    plt.show()
+    # Create a Plotly figure
+    fig = go.Figure()
+
+    # Add histograms for each dataset
+    fig.add_trace(go.Histogram(
+        x=computation_times,
+        name="Computation Times",
+        opacity=0.5,
+        nbinsx=100,
+        marker_color='blue'
+    ))
+
+    fig.add_trace(go.Histogram(
+        x=computation_times_qp,
+        name="Computation Times QP",
+        opacity=0.5,
+        nbinsx=100,
+        marker_color='green'
+    ))
+
+    fig.add_trace(go.Histogram(
+        x=computation_times_pin,
+        name="Computation Times PIN",
+        opacity=0.5,
+        nbinsx=100,
+        marker_color='red'
+    ))
+
+    fig.add_trace(go.Histogram(
+        x=computation_times_ssm,
+        name="Computation Times SSM",
+        opacity=0.5,
+        nbinsx=100,
+        marker_color='purple'
+    ))
+
+    fig.add_trace(go.Histogram(
+        x=computation_times_others,
+        name="Computation Times Others",
+        opacity=0.5,
+        nbinsx=100,
+        marker_color='orange'
+    ))
+
+    # Update layout for titles and labels
+    fig.update_layout(
+        title="Comparison of Computation Times",
+        xaxis_title="Computation Time",
+        yaxis_title="Frequency",
+        barmode='overlay',
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+
+    # Show the figure
+    fig.show()
+
 if __name__ == "__main__":
     main()
