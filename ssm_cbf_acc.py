@@ -16,7 +16,7 @@ def range_state_derivative_numba(v_r: np.ndarray, v_h: np.ndarray):
     f = np.zeros(12, dtype=np.float64)
     f[0:3] = v_r
     f[3:6] = v_h
-    # f[6:12] remain zero
+    # f[6:9] remain zero
 
     g = np.zeros((12, 3), dtype=np.float64)
     g[6, 0] = 1.0
