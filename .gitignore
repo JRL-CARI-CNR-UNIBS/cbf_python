@@ -1,6 +1,7 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
+*.py[cod]
 *$py.class
 
 # C extensions
@@ -207,9 +208,6 @@ marimo/_lsp/
 __marimo__/
 
 
-__pycache__/
-*.py[cod]
-*$py.class
 *.nbc
 *.nbi
 *.nbo

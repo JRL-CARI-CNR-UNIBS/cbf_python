@@ -87,7 +87,7 @@ def main():
     viz.loadViewerModel()
 
     R = pin.utils.rotate('z', 1.9) @ pin.utils.rotate('x', 1.57)
-    T_wc = pin.SE3(R, np.array([-1.35, -0.9, 0.9]))
+    T_wc = pin.SE3(R, np.array([-1.55, -0.9, 0.9]))
     reader = PoseReader("a01_s10_e02_skeleton3D_converted.csv", T_wc)
     obstacle_positions = reader.getHumanPose(0)
     last_obstacle_positions = obstacle_positions.copy()
@@ -140,7 +140,7 @@ def main():
     twist_goal = np.zeros(6)
     scaling_limit_matrix = np.append(np.zeros(model.nq), Tc)
 
-    delta_q_max = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])*0.01
+    delta_q_max = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])*0.1
     Dq_max = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])*np.pi
     DDq_max = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])*np.pi*10
 
@@ -262,13 +262,19 @@ def main():
             # ------------------------- CBF QP SETUP -------------------------
             row_idx = 0  # reset index at each loop
 
+            # u =[DDq,DDtrajectory_time]
             # Scaling constraints
+            # 0 <  Dtrajectory_time + DDtrajectory_time*Tc < 1
+            # Dtrajectory_time + DDtrajectory_time*Tc > 0
+            # DDtrajectory_time*Tc > -Dtrajectory_time
             constraint_vector[row_idx] = -(1 - Dtrajectory_time)
             row_idx += 1
+
 
             constraint_vector[row_idx] = -Dtrajectory_time
             row_idx += 1
 
+            # tube constraints: nominal_q-delta_q_max < q < nominal_q+delta_q_max
             constraint_vector[row_idx:(row_idx + model.nq)] = -nominal_q - delta_q_max + Free @ x0
             row_idx += model.nq
             constraint_vector[row_idx:(row_idx+model.nq)] = nominal_q-delta_q_max - Free@x0
@@ -342,6 +348,11 @@ def main():
             ct_pin.append(elapsed_pin)
 
             # ----------------------------- QP SOLVE -----------------------------
+            # Goal 1: error on q
+            # Goal 2: error on Dq
+            # Goal 3: error on scaling
+            # Goal 4: error on DDq
+
             b1[:-1]=(nominal_q-q-dq*Tc)*0.5*Tc**2
             b3[-1] = -Tc*(Dtrajectory_time-1)
 
@@ -361,8 +372,7 @@ def main():
                     b,
                     constraint_matrix.T,
                     constraint_vector,
-                    0,
-                )
+                    0)
                 elapsed = time.perf_counter() - t_qp_1
                 ct_qp.append(elapsed)
                 ddq = u[:-1]
