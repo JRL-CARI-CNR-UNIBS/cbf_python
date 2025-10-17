@@ -31,7 +31,7 @@ import quadprog
 from example_robot_data import load
 from pinocchio.visualize import MeshcatVisualizer
 
-from cbf_python.ssm_cbf_acc import h_and_jacobian_numba, jacobian_psi_times_fg_fast_numba, compute_h_and_constraints_numba
+from ssm_cbf_acc import h_and_jacobian_numba, jacobian_psi_times_fg_fast_numba, compute_h_and_constraints_numba
 from interpolator import SegmentedSE3Trap
 from joint_interpolator import SegmentedJointTrap
 from visualization_daemon import VisualizationDaemon
@@ -39,16 +39,13 @@ from pinocchio import SE3
 from sharework import loadSharework
 
 from human_pose_reader import  PoseReader
+from bcf_utils import make_summary_figure, print_stats_table
+
+
 
 import math
 
-# ---------------------------- CONSTANTS --------------------------------------
-C = 0.25  # [m]  minimum separation distance
-Tr = 0.15  # [s]  controller‑reaction time
-a_s = 0.5  # [m/s²] robot decel/accel capability
-Tc = 10e-3  # [s]   2 kHz control period
 
-gamma = 50.0  # CBF gain
 from scipy.linalg import block_diag
 
 
@@ -61,11 +58,48 @@ def damped_pinv_svd(J, lam=1e-4):
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
     SHAREWORK = True
-    ACCELERATION = True
-    if ACCELERATION:
-        from ssm_cbf_acc import h_and_jacobian, jacobian_psi_times_fg_fast, range_state_derivative, jacobian_psi
-    else:
-        from ssm_cbf import compute_h, lie_fg_h_fast
+    USE_CBF = True
+    USE_BRIDGE = False
+
+    # ---------------------------- CONSTANTS --------------------------------------
+    C = 0.25  # [m]  minimum separation distance
+    Tr = 0.5  # [s]  controller‑reaction time
+    a_s = 4.5  # [m/s²] robot decel/accel capability
+    Tc = 2e-3  # [s]   2 kHz control period
+
+    delta_q_max = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])*0.01
+    Dq_max = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])*np.pi*1.0
+    DDq_max = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])*np.pi*3.0
+    gamma = 5.0  # CBF gain
+
+    # Dq(k+1)=Dq+DDq*Tc
+    # q(k+1)=q+Dq*Tc+0.5*DDq*Tc**2
+    # Dtrajectory_time(k+1)= Dtrajectory_time+DDtrajectory_time*Tc
+
+    # ----------------------------- QP SOLVE -----------------------------
+    # Goal 1: quadratic error on q(k+1)-nominal_q
+    # Goal 2: quadratic error on Dq(k+1)-Dtrajectory_time(k+1)*nominal_Dq
+    # Goal 3: quadratic error on Dtrajectory_time(k+1)-1
+    # Goal 4: quadratic error on DDq
+
+    # if unfeasible, minimize this problem minizime(0.5*Dq'*Dq+0.5*Dtrajectory_time'*Dtrajectory_time)
+
+    # u =[DDq,DDtrajectory_time]
+    #
+    # Scaling constraints
+    # 0 <  Dtrajectory_time + DDtrajectory_time*Tc < 1
+    # Dtrajectory_time + DDtrajectory_time*Tc > 0
+    # DDtrajectory_time*Tc > -Dtrajectory_time
+
+
+    lambda1 = 1.0e2
+    lambda2 = 1e0
+    lambda3 = 1e-1
+    lambda4 = 0e-9
+    duration = 30.0
+    DDtrajectory_time_max = 1.0
+
+    home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
     if SHAREWORK:
         UR10E_JOINTS = [
@@ -78,19 +112,55 @@ def main():
         ]
         model_wrapper = loadSharework(UR10E_JOINTS)
         prefix = 'ur10e_'
+
+        
+
+        target_name = "ur10e_wrist_3_joint"
+        idx = UR10E_JOINTS.index(target_name)
+        if USE_BRIDGE:
+            bridge = JointStateCommandBridge(
+                ordered_joint_names=UR10E_JOINTS,
+                threshold=1.1)  # radians (or native units)
+            first_joint_position = bridge.wait_for_first_state( target_name, timeout=5.0)
+            if math.isnan(first_joint_position):
+                bridge.shutdown()
+                return
+            first_joint_position = bridge.getPositions()
+            bridge.switch_to_forward_position_controller_service()
+        else:
+
+            from fake_command_bridge import FakeCommandBridge
+            # Build camera pose from your INITI snippet
+            R = pin.utils.rotate('z', 1.9) @ pin.utils.rotate('x', 1.57)
+            T_wc = pin.SE3(R, np.array([-1.85, -0.9, 0.9]))
+
+            bridge = FakeCommandBridge(
+                UR10E_JOINTS,
+                csv_path="a01_s10_e02_skeleton3D_with_savgol_vel_acc.csv",
+                Tworld_to_cam=T_wc,
+                slowdown_factor=0.4,
+            )
+
+            first_joint_position = home
+
+    
     else:
         model_wrapper = load('ur10')
         prefix = ''
+
+        first_joint_position = home
     model = model_wrapper.model
     viz = MeshcatVisualizer(model, model_wrapper.collision_model, model_wrapper.visual_model)
     viz.initViewer(open=True)
     viz.loadViewerModel()
 
-    R = pin.utils.rotate('z', 1.9) @ pin.utils.rotate('x', 1.57)
-    T_wc = pin.SE3(R, np.array([-1.55, -0.9, 0.9]))
-    reader = PoseReader("a01_s10_e02_skeleton3D_converted.csv", T_wc)
-    obstacle_positions = reader.getHumanPose(0)
-    last_obstacle_positions = obstacle_positions.copy()
+    tmp = np.array([-300, 0., 0.])
+    obstacle_positions = [tmp.copy() for _ in range(18*5)]
+    tmp = np.array([0, 0., 0.])
+    obstacle_velocities = [tmp.copy() for _ in range(18*5)]
+    obstacle_accelerations = obstacle_velocities.copy()
+
+    print("Initial obstacle positions number:", len(obstacle_positions))
     for i, pos in enumerate(obstacle_positions):
         viz.viewer[f"obstacle_{i}"].set_object(
             mgeom.Sphere(0.1), mgeom.MeshLambertMaterial(color=0xFF0000)
@@ -107,44 +177,27 @@ def main():
 
     # --------------------------- CONTROL INITIALISATION --------------------------
     data = model.createData()
-    q = np.zeros(model.nq)
-    q[0] = np.pi / 2
-    q[1] = -np.pi / 2
-    q[2] = np.pi / 2
-    q[4] = np.pi / 4  # initial error
-
-    q2 = q.copy()
-    q2[4] = np.pi
-    q2[1] = 0
-    q2[2] = -np.pi/2
+    q = first_joint_position.copy()
 
     dq = np.zeros(model.nq)
-
     ddq = np.zeros(model.nq)
+
+    q2 = home.copy()
+    q2[1] = -np.pi * 0.5
+    q2[2] = np.pi * 0.5
 
     tool_frame_id = model.getFrameId(prefix+"tool0")
     elbow_frame_id = model.getFrameId(prefix+"forearm_link")
     frames_ids=[elbow_frame_id,tool_frame_id]
-    #frames_ids=[tool_frame_id]
+
 
     pin.framesForwardKinematics(model, data, q)
 
-    # Gains
-    wn = 300
-    xi = 0.9
-    Kp_tra = np.array([1, 1, 1]) * wn ** 2
-    Kd_tra = np.array([1, 1, 1]) * 2.0 * xi * wn
-    Kp_rot = np.array([1, 1, 1]) * wn ** 2
-    Kd_rot = np.array([1, 1, 1]) * 2.0 * xi * wn
-
-    twist_goal = np.zeros(6)
     scaling_limit_matrix = np.append(np.zeros(model.nq), Tc)
 
-    delta_q_max = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])*0.1
-    Dq_max = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])*np.pi
-    DDq_max = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])*np.pi*10
 
-    planner = SegmentedJointTrap(Dq_max=Dq_max*.8, DDq_max=DDq_max*.8)
+
+    planner = SegmentedJointTrap(Dq_max=Dq_max*.3, DDq_max=DDq_max*.3)
 
     def pose_eul(z, y, x, xyz):
         R = pin.utils.rotate('z', z) @ pin.utils.rotate('y', y) @ pin.utils.rotate('x', x)
@@ -153,8 +206,9 @@ def main():
     goal_pose = data.oMf[tool_frame_id].copy()
     # 2 · add way‑points -------------------------------------------
     planner.addWayPoint(q)
+    planner.addWayPoint(home)
     planner.addWayPoint(q2)
-    planner.addWayPoint(q)
+    planner.addWayPoint(home)
 
     T_total = planner.computeTime()
 
@@ -165,7 +219,7 @@ def main():
 
     timeout_cycles=0
     cycles=0
-    ct, ct_qp, ct_ssm, ct_planner, ct_pin = [], [], [], [], []
+    ct, ct_qp, ct_ssm, ct_planner, ct_pin, h_log, trj_error_log, scaling_log = [], [], [], [], [], [], [], []
 
     # Goal 1: position error (qn-qn)^2
     P1 = block_diag(0.25 * Tc ** 4 * I, 0)
@@ -181,18 +235,15 @@ def main():
     P4 = block_diag(I,0)
     b4 = np.array([0] * (model.nq + 1)).flatten()
 
-    lambda1 = 1.0e10
-    lambda2 = 1e-3
-    lambda3 = 1e-3
-    lambda4 = 0e-9
+    Punfeasible = block_diag(Tc**2*I , Tc**2)
 
-    v_obs = np.array([0] * 3)
-    zeros_nq = np.zeros(model.nq)
-    zeros3 = np.zeros(3)
+
     b1 = np.zeros(model.nq + 1)
     b2 = np.zeros(model.nq + 1)
     b3 = np.zeros(model.nq + 1)
     b3[:model.nq] = 0.0  # fixed each loop except last entry
+    bunfeasible = np.zeros(model.nq + 1)
+
     P = np.empty((model.nq + 1, model.nq + 1))
     b = np.empty(model.nq + 1)
 
@@ -201,14 +252,15 @@ def main():
 
     def build_free_forced_one_step(Ts, nq):
         I = np.eye(nq)
-        Forced = 0.5 * (Ts ** 2) * I  # (nq x nq)
-        Free = np.hstack([I, Ts * I])  # (nq x 2nq)
-        return Free, Forced
+        ForcedPos = 0.5 * (Ts ** 2) * I  # (nq x nq)
+        FreePos = np.hstack([I, Ts * I])  # (nq x 2nq)
+        ForcedVel = Ts * I  # (nq x nq)
+        FreeVel = np.hstack([0*I, I])  # (nq x 2nq)
+        return FreePos, ForcedPos, FreeVel, ForcedVel
 
-    Free, Forced = build_free_forced_one_step(Tc,model.nq)
+    FreePos, ForcedPos, FreeVel, ForcedVel = build_free_forced_one_step(Tc,model.nq)
 
     x0 = np.hstack((q, dq))
-    print(f"Free={Free.shape}, x0={x0.shape}, Free*x0={Free@x0}")
     # ------------------------------ MAIN LOOP -------------------- ----------------
     try:
 
@@ -218,41 +270,55 @@ def main():
         Dtrajectory_time = 1.0
         DDtrajectory_time = 0.0
 
-        n_constraints = 2+ 2*model.nq + len(obstacle_positions)*len(frames_ids)
+        max_obstacles = 18*5
+
+        n_constraints = 3+ 2*3*model.nq +max_obstacles*len(frames_ids)
         constraint_matrix = np.zeros((n_constraints, model.nq + 1))
         constraint_vector = np.zeros(n_constraints)
         constraint_matrix[0, :] = -scaling_limit_matrix
         constraint_matrix[1, :] = scaling_limit_matrix
-        row_idx=2
-        constraint_matrix[row_idx:(row_idx + model.nq), 0:model.nq] = -Forced
+        constraint_matrix[2, -1] = -1
+        row_idx=3
+        
+        # position limits in tube
+        constraint_matrix[row_idx:(row_idx + model.nq), 0:model.nq] = -ForcedPos
         row_idx += model.nq
-        constraint_matrix[row_idx:(row_idx + model.nq), 0:model.nq] = Forced
+        constraint_matrix[row_idx:(row_idx + model.nq), 0:model.nq] = ForcedPos
+        row_idx += model.nq
+        
+        # velocity limits 
+        constraint_matrix[row_idx:(row_idx + model.nq), 0:model.nq] = -ForcedVel
+        row_idx += model.nq
+        constraint_matrix[row_idx:(row_idx + model.nq), 0:model.nq] = ForcedVel
+        row_idx += model.nq
 
+        # acceleration limits
+        constraint_matrix[row_idx:(row_idx + model.nq), 0:model.nq] = - np.eye(model.nq)
         row_idx += model.nq
+        constraint_matrix[row_idx:(row_idx + model.nq), 0:model.nq] =  np.eye(model.nq)
+        row_idx += model.nq
+        
         J = np.zeros((6, model.nv))
         dJ = np.zeros((6, model.nv))
 
-        h_min = np.inf
-
-        Lie_f_h = 0.0
-        Lie_g_h = np.zeros(3)
-
-
-
-
-        while t < 30.0:
+        while t < duration:
             h_min = np.inf
 
             loop_start = time.perf_counter()
 
             x0=np.hstack((q,dq))
-            last_obstacle_positions = obstacle_positions
-            obstacle_positions = reader.getHumanPose(0.1*t)
+
+
+            obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
+
+
             cycles += 1
 
             nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
 
             trajectory_error=np.linalg.norm(q-nominal_q)
+
+            trj_error_log.append(trajectory_error)
             pin.framesForwardKinematics(model, data, nominal_q)
             Tbt_nominal = data.oMf[tool_frame_id].copy()
 
@@ -262,22 +328,35 @@ def main():
             # ------------------------- CBF QP SETUP -------------------------
             row_idx = 0  # reset index at each loop
 
-            # u =[DDq,DDtrajectory_time]
-            # Scaling constraints
-            # 0 <  Dtrajectory_time + DDtrajectory_time*Tc < 1
-            # Dtrajectory_time + DDtrajectory_time*Tc > 0
-            # DDtrajectory_time*Tc > -Dtrajectory_time
             constraint_vector[row_idx] = -(1 - Dtrajectory_time)
             row_idx += 1
-
 
             constraint_vector[row_idx] = -Dtrajectory_time
             row_idx += 1
 
+            constraint_vector[row_idx] = -DDtrajectory_time_max
+            row_idx += 1
+
             # tube constraints: nominal_q-delta_q_max < q < nominal_q+delta_q_max
-            constraint_vector[row_idx:(row_idx + model.nq)] = -nominal_q - delta_q_max + Free @ x0
+            constraint_vector[row_idx:(row_idx + model.nq)] = -nominal_q - delta_q_max + FreePos @ x0
             row_idx += model.nq
-            constraint_vector[row_idx:(row_idx+model.nq)] = nominal_q-delta_q_max - Free@x0
+            constraint_vector[row_idx:(row_idx+model.nq)] = nominal_q-delta_q_max - FreePos@x0
+            row_idx += model.nq
+
+            # velocity constraints: -Dq_max < Dq < +Dq_max
+            # Dq < +Dq_max => -Dq > -Dq_max => -FreeVel@x0 - ForcedVel@u > -Dq_max => -ForcedVel@u > -Dq_max - FreeVel@x0
+            constraint_vector[row_idx:(row_idx + model.nq)] = -Dq_max + FreeVel @ x0
+            row_idx += model.nq
+            # Dq > -Dq_max  => FreeVel@x0 + ForcedVel@u > -Dq_max => ForcedVel@u > -Dq_max - FreeVel@x0
+            constraint_vector[row_idx:(row_idx + model.nq)] = -Dq_max - FreeVel @ x0
+            row_idx += model.nq
+            # acceleration constraints: -DDq_max < DDq < +DDq_max
+
+            # DDq < +DDq_max => -DDq > -DDq_max => -I@u > -DDq_max => -I@u > -DDq_max
+            constraint_vector[row_idx:(row_idx + model.nq)] = -DDq_max
+            row_idx += model.nq
+            # DDq > -DDq_max => I@u > -DDq_max
+            constraint_vector[row_idx:(row_idx + model.nq)] =  -DDq_max
             row_idx += model.nq
 
             t_pin_1 = time.perf_counter()
@@ -285,73 +364,69 @@ def main():
             pin.computeForwardKinematicsDerivatives(model, data, q, dq, ddq)
 
             elapsed_pin = time.perf_counter() - t_pin_1
-
             elapsed_ssm=0.0
 
-            for frame_id in frames_ids:
-                t_pin_1 = time.perf_counter()
-                Tbt = data.oMf[frame_id]
-                translation_bt = Tbt.translation
+            if USE_CBF:
+            
+                for frame_id in frames_ids:
+                    t_pin_1 = time.perf_counter()
+                    Tbt = data.oMf[frame_id]
+                    translation_bt = Tbt.translation
 
-                # Current twist
-                twist = pin.getFrameVelocity(
-                    model, data, frame_id, pin.ReferenceFrame.LOCAL_WORLD_ALIGNED
-                )
-                vel_lineare = twist.linear
-
-                #
-                J*=0
-                dJ*=0
-                J = pin.computeFrameJacobian(
-                    model,
-                    data,
-                    q,
-                    frame_id,
-                    pin.ReferenceFrame.LOCAL_WORLD_ALIGNED,
-                )
-
-                dJ = pin.frameJacobianTimeVariation(
-                    model,
-                    data,
-                    q,
-                    dq,
-                    frame_id,
-                    pin.ReferenceFrame.LOCAL_WORLD_ALIGNED,
-                )
-                Jlin = J[:3, :]
-                dJlin = dJ[:3, :]
-
-                elapsed_pin += time.perf_counter() - t_pin_1
-
-
-                # append constraints on joint position, joint velocity, joint torque
-                t_ssm_1 = time.perf_counter()
-                for i, (obs_pos, last_obs_pos) in enumerate(zip(obstacle_positions, last_obstacle_positions)):
-
-                    # update obstacle motion
-
-                    v_obs =(obs_pos-last_obs_pos)/Tc
-                    a_h = 0.0
-
-
-                    h, row, bound = compute_h_and_constraints_numba(
-                        translation_bt, obs_pos, vel_lineare, v_obs, Tr, a_s, C, a_h, 1e-12, Jlin, dJlin, dq, gamma
+                    # Current twist
+                    twist = pin.getFrameVelocity(
+                        model, data, frame_id, pin.ReferenceFrame.LOCAL_WORLD_ALIGNED
                     )
-                    h_min = min(h_min,h)
+                    vel_lineare = twist.linear
 
-                    # Fill preallocated row
-                    constraint_matrix[row_idx, :-1] = row
-                    constraint_vector[row_idx] = bound
-                    row_idx += 1
+                    #
+                    J*=0
+                    dJ*=0
+                    J = pin.computeFrameJacobian(
+                        model,
+                        data,
+                        q,
+                        frame_id,
+                        pin.ReferenceFrame.LOCAL_WORLD_ALIGNED,
+                    )
+
+                    dJ = pin.frameJacobianTimeVariation(
+                        model,
+                        data,
+                        q,
+                        dq,
+                        frame_id,
+                        pin.ReferenceFrame.LOCAL_WORLD_ALIGNED,
+                    )
+                    Jlin = J[:3, :]
+                    dJlin = dJ[:3, :]
+
+                    elapsed_pin += time.perf_counter() - t_pin_1
+
+
+                    # append constraints on joint position, joint velocity, joint torque
+                    t_ssm_1 = time.perf_counter()
+                    for i, (obs_pos, obs_vel, obs_acc) in enumerate(zip(obstacle_positions, obstacle_velocities, obstacle_accelerations)):
+
+                        h, row, bound = compute_h_and_constraints_numba(
+                            translation_bt, obs_pos, vel_lineare, obs_vel, Tr, a_s, C, obs_acc, 1e-12, Jlin, dJlin, dq, gamma
+                        )
+                        h_min = min(h_min,h)
+
+                        # Fill preallocated row
+                        constraint_matrix[row_idx, :-1] = row
+                        constraint_vector[row_idx] = bound
+                        row_idx += 1
+
                 elapsed_ssm += min(time.perf_counter() - t_ssm_1,50e-3)
+            for i in range(row_idx,n_constraints):
+                constraint_matrix[i,:]=0.0
+                constraint_vector[i]=-1.0
+
+            h_log.append(h_min)
             ct_ssm.append(elapsed_ssm)
             ct_pin.append(elapsed_pin)
 
-            # ----------------------------- QP SOLVE -----------------------------
-            # Goal 1: error on q
-            # Goal 2: error on Dq
-            # Goal 3: error on scaling
-            # Goal 4: error on DDq
 
             b1[:-1]=(nominal_q-q-dq*Tc)*0.5*Tc**2
             b3[-1] = -Tc*(Dtrajectory_time-1)
@@ -361,29 +436,47 @@ def main():
             P2[-1, -1] = Tc ** 2 * nominal_Dq.dot(nominal_Dq)
 
             b2[:-1] = (nominal_Dq*Dtrajectory_time-dq)*Tc
-            b2[-1] = (nominal_Dq*Dtrajectory_time-dq).dot(nominal_Dq*Tc)
+            b2[-1] = -(nominal_Dq*Dtrajectory_time-dq).dot(nominal_Dq*Tc)
+
+
 
             P=lambda1*P1+lambda2*P2+lambda3*P3+lambda4*P4
             b=lambda1*b1+lambda2*b2+lambda3*b3+lambda4*b4
+            t_qp_1 = time.perf_counter()
             try:
-                t_qp_1 = time.perf_counter()
                 u, *_ = quadprog.solve_qp(
                     P,
                     b,
                     constraint_matrix.T,
                     constraint_vector,
                     0)
-                elapsed = time.perf_counter() - t_qp_1
-                ct_qp.append(elapsed)
                 ddq = u[:-1]
                 DDtrajectory_time=u[-1]
             except ValueError as err:
                 if "constraints are inconsistent" in str(err):
-                    print("QP infeasible – applying fallback damping.")
-                    ddq = -10.0 * dq
-                    DDtrajectory_time = -10.0 * Dtrajectory_time
+
+                    bunfeasible[:-1] = -Tc * dq
+                    bunfeasible[-1] = -Tc * Dtrajectory_time
+                    u, *_ = quadprog.solve_qp(
+                        Punfeasible,
+                        bunfeasible,
+                        constraint_matrix[:(2+model.nq*3),:].T,
+                        constraint_vector[:(2+model.nq*3)])
+                    ddq = u[:-1]
+                    DDtrajectory_time=u[-1]
+                    #print("QP infeasible – applying fallback damping.")
+                    #exit(0)
+                    #ddq = -10.0 * dq
+                    #DDtrajectory_time = -10.0 * Dtrajectory_time
                 else:
                     raise
+
+
+            ddq = u[:-1]
+            DDtrajectory_time = u[-1]
+
+            elapsed = time.perf_counter() - t_qp_1
+            ct_qp.append(elapsed)
 
             # --------------------------- INTEGRATION ----------------------------
             t += Tc
@@ -393,14 +486,22 @@ def main():
 
             trajectory_time += Dtrajectory_time * Tc + 0.5 * DDtrajectory_time * Tc ** 2.0
             Dtrajectory_time += DDtrajectory_time * Tc
-
+            if SHAREWORK and USE_BRIDGE:
+                bridge.sendCommand(q)
 
             # ----------------------------- TIMING -------------------------------
             elapsed = time.perf_counter() - loop_start
             ct.append(min(50e-3,elapsed))
+            scaling_log.append(Dtrajectory_time)
             rest = Tc - elapsed
             if rest > 0:
-                vizualization_string = f"h = {h_min:.2f} m, scaling {Dtrajectory_time:4.3f}, trajectory_error={trajectory_error:.2f}"
+                vizualization_string = (
+                    f"h = {h_min:.2f} m, "
+                    f"scaling {Dtrajectory_time:4.3f}, "
+                    f"trajectory_error = {trajectory_error:.2f}"
+                )
+
+                #vizualization_string = f"h = {h_min:.2f} m, scaling {Dtrajectory_time:4.3f}, trajectory_error={trajectory_error:.2f}"
                 renderer.push_state(q,
                                     Tbt_nominal,
                                     obstacle_positions,
@@ -416,22 +517,16 @@ def main():
         print("Simulation interrupted by user.")
 
 
-    def print_stats_table(stats):
-        # Print header
-        print(f"{'Name':<30} {'Mean':>12} {'50%':>12} {'90%':>12} {'95%':>12} {'99%':>12}")
-        print("-" * 90)
-        # Print each row
-        for name, data in stats.items():
-            mean_val = np.mean(data*1000)
-            q50, q90, q95, q99 = np.quantile(data*1000, [0.50, 0.90, 0.95, 0.99])
-            print(f"{name:<30} {mean_val:12.6f} {q50:12.6f} {q90:12.6f} {q95:12.6f} {q99:12.6f}")
-
     # Call with your
     computation_times_planner = np.array(ct_planner)
     computation_times_qp = np.array(ct_qp)
     computation_times_ssm = np.array(ct_ssm)
     computation_times_pin = np.array(ct_pin)
     computation_times = np.array(ct)
+    scaling_log = np.array(scaling_log)
+    h_log = np.array(h_log)
+    trj_error_log = np.array(trj_error_log)
+
     computation_times_others=computation_times-(computation_times_planner+computation_times_pin+computation_times_qp+computation_times_ssm)
     stats = {
         "computation_times": computation_times,
@@ -444,79 +539,17 @@ def main():
 
     print(f"timeout cycles = {timeout_cycles} over {cycles}, percentage = {100.0*timeout_cycles/cycles}, average = {np.mean(computation_times)}")
     print_stats_table(stats)
-
-    # import matplotlib.pyplot as plt
-    # plt.figure(figsize=(10, 6))  # optional: makes the plot larger
-    #
-    # plt.hist(computation_times, bins=100, alpha=0.5, label="Computation Times")
-    # plt.hist(computation_times_qp, bins=100, alpha=0.5, label="Computation Times QP")
-    # plt.hist(computation_times_pin, bins=100, alpha=0.5, label="Computation Times PIN")
-    # plt.hist(computation_times_ssm, bins=100, alpha=0.5, label="Computation Times SSM")
-    # plt.hist(computation_times_others, bins=100, alpha=0.5, label="Computation Times Others")
-    #
-    # plt.xlabel("Computation Time")
-    # plt.ylabel("Frequency")
-    # plt.title("Comparison of Computation Times")
-    # plt.legend()
-    # plt.show()
-
-    import plotly.graph_objects as go
-
-    # Create a Plotly figure
-    fig = go.Figure()
-
-    # Add histograms for each dataset
-    fig.add_trace(go.Histogram(
-        x=computation_times,
-        name="Computation Times",
-        opacity=0.5,
-        nbinsx=100,
-        marker_color='blue'
-    ))
-
-    fig.add_trace(go.Histogram(
-        x=computation_times_qp,
-        name="Computation Times QP",
-        opacity=0.5,
-        nbinsx=100,
-        marker_color='green'
-    ))
-
-    fig.add_trace(go.Histogram(
-        x=computation_times_pin,
-        name="Computation Times PIN",
-        opacity=0.5,
-        nbinsx=100,
-        marker_color='red'
-    ))
-
-    fig.add_trace(go.Histogram(
-        x=computation_times_ssm,
-        name="Computation Times SSM",
-        opacity=0.5,
-        nbinsx=100,
-        marker_color='purple'
-    ))
-
-    fig.add_trace(go.Histogram(
-        x=computation_times_others,
-        name="Computation Times Others",
-        opacity=0.5,
-        nbinsx=100,
-        marker_color='orange'
-    ))
-
-    # Update layout for titles and labels
-    fig.update_layout(
-        title="Comparison of Computation Times",
-        xaxis_title="Computation Time",
-        yaxis_title="Frequency",
-        barmode='overlay',
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    _ = make_summary_figure(
+        computation_times,
+        computation_times_qp,
+        computation_times_pin,
+        computation_times_ssm,
+        computation_times_others,
+        h_log,
+        trj_error_log,
+        scaling_log,
     )
 
-    # Show the figure
-    fig.show()
 
 if __name__ == "__main__":
     main()

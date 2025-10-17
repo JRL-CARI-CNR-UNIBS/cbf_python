@@ -116,9 +116,9 @@ class VisualizationDaemon:
             for i, pos in enumerate(obstacles_copy):
                 self.viz.viewer[f"obstacle_{i}"].set_transform(tf.translation_matrix(pos))
 
-        meshcat_shapes.textarea(
+            meshcat_shapes.textarea(
             self._hud,
-            f"{viz_string_copy}",
+            viz_string_copy,
             width=1.5,
             height=1.0,
             font_size=80,

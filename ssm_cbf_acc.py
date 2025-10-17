@@ -1,9 +1,22 @@
+# ssm_cbf_acc.py — ordered and comment‑cleaned
+# ------------------------------------------------------------
+# Imports & setup
+# ------------------------------------------------------------
+import math
 import numpy as np
 from numba import njit, float64
 
-# ---------------------------
+# Safe no‑op decorator if not running under line_profiler
+try:
+    profile  # provided by line_profiler at runtime
+except NameError:  # pragma: no cover
+    def profile(func):
+        return func
+
+
+# ------------------------------------------------------------
 # 1) Dynamics: f(x) and g(x)
-# ---------------------------
+# ------------------------------------------------------------
 @njit(cache=True)
 def range_state_derivative_numba(v_r: np.ndarray, v_h: np.ndarray):
     """
@@ -16,7 +29,6 @@ def range_state_derivative_numba(v_r: np.ndarray, v_h: np.ndarray):
     f = np.zeros(12, dtype=np.float64)
     f[0:3] = v_r
     f[3:6] = v_h
-    # f[6:9] remain zero
 
     g = np.zeros((12, 3), dtype=np.float64)
     g[6, 0] = 1.0
@@ -24,16 +36,22 @@ def range_state_derivative_numba(v_r: np.ndarray, v_h: np.ndarray):
     g[8, 2] = 1.0
     return f, g
 
-# If you also compile others, import types you need only once.
 
-# -----------------------------------------
-# d_min and Jacobian  (typed signature)
-# -----------------------------------------
+@profile
+def range_state_derivative(v_r, v_h):
+    zero3 = np.zeros(3)
+    f = np.concatenate([v_r, v_h, zero3, zero3])
+    g = np.zeros((12, 3))
+    g[6:9] = np.eye(3)
+    return f, g
+
+
+# ------------------------------------------------------------
+# 2) Core distance computations
+# ------------------------------------------------------------
 @njit((float64, float64, float64, float64, float64, float64, float64), cache=True)
-def dmin_and_jacobian_numba(
-    d, v_r, v_h, a_h, tr, a_max, atol
-):
-    # Guard (kept; numba supports raises in nopython)
+def dmin_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, atol):
+    # Guard (Numba supports raises in nopython)
     if a_max <= 0.0:
         raise ValueError("a_max must be positive.")
 
@@ -47,12 +65,7 @@ def dmin_and_jacobian_numba(
     m = a_h + a_max
     v_diff = v_r - v_h
 
-    # slopes
-    #dotd_t0 = v_diff
-    #dotd_t2 = v_diff + a_max * t2 - m * t2
-    #dotd_t4 = v_diff + a_max * t2 - m * t4
-
-    # intersections (use boolean flags instead of NaN sentinels)
+    # Intersections (use boolean flags instead of NaN sentinels)
     has_t1 = False
     t1 = 0.0
     if abs(a_h) > atol:
@@ -69,18 +82,13 @@ def dmin_and_jacobian_numba(
             t3 = t3_raw
             has_t3 = True
 
-    # conditions
-    #C0 = (dotd_t0 > 0.0)
-    #C2 = (dotd_t2 > 0.0)
-    #C4 = (dotd_t4 > 0.0)
-    C1 = has_t1 #(abs(a_h) > atol) and (C0 != C2) and has_t1
-    C3 = has_t3 #(abs(m) > atol) and (C2 != C4) and has_t3
+    C1 = has_t1
+    C3 = has_t3
 
-    # candidates (fixed-size buffers; no Python lists)
+    # Candidates (fixed-size buffers; no Python lists)
     uniq = np.empty(4, dtype=np.float64)
     n = 0
 
-    # local helper
     def add_candidate(tt):
         nonlocal n
         for k in range(n):
@@ -112,7 +120,7 @@ def dmin_and_jacobian_numba(
         else:
             vals[i] = d_t2 + (v_diff + a_max * t2) * (tt - t2) - 0.5 * (m) * (tt * tt - t2 * t2)
 
-    # argmin without np.argmin (keeps typing simple)
+    # Argmin without np.argmin (keeps typing simple)
     i_min = 0
     best = vals[0]
     for i in range(1, n):
@@ -123,8 +131,8 @@ def dmin_and_jacobian_numba(
     t_star = uniq[i_min]
     d_min = best
 
-    # jacobian (4,)
-    jac = np.zeros(4, dtype=np.float64)  # [d, v_r, v_h, a_h]
+    # Jacobian (order: [d, v_r, v_h, a_h])
+    jac = np.zeros(4, dtype=np.float64)
 
     if abs(t_star - t0) <= atol:
         jac[0] = 1.0
@@ -164,17 +172,83 @@ def dmin_and_jacobian_numba(
             jac[1] += dotd_t4_now / a_max
         return d_min, jac
 
-    # Fallback (shouldn't happen)
+    # Fallback
     return d_min, jac
 
 
-# --------------------------------------------------------
-# h and Jacobian (typed signature)
-# --------------------------------------------------------
+@profile
+def dmin_and_jacobian(d: float, v_r: float, v_h: float, a_h: float, tr: float, a_max: float, atol: float = 1e-12):
+    """
+    Compute the minimum separation distance d_min over candidate times and
+    the gradient at the minimizing instant, following the MD spec (a_r=0).
+    """
+    if a_max <= 0:
+        raise ValueError("a_max must be positive.")
+
+    t0, t2 = 0.0, tr
+    t_dec = max(0.0, v_r / a_max)
+    t4 = t2 + t_dec
+    m = a_h + a_max
+    v_diff = v_r - v_h
+
+    dotd_t0 = v_diff - a_h * t0
+    dotd_t2 = v_diff + a_max * t2 - m * t2
+    dotd_t4 = v_diff + a_max * t2 - m * t4
+
+    t1 = (v_diff / a_h) if (abs(a_h) > atol and (t0 + atol) < (v_diff / a_h) < (t2 - atol)) else None
+    t3 = ((v_diff + a_max * t2) / m) if (abs(m) > atol and (t4 - t2) > atol and
+                                          (t2 + atol) < ((v_diff + a_max * t2) / m) < (t4 - atol)) else None
+
+    C0, C2, C4 = dotd_t0 > 0, dotd_t2 > 0, dotd_t4 > 0
+    C1 = (abs(a_h) > atol) and (C0 != C2) and (t1 is not None)
+    C3 = (abs(m) > atol) and (C2 != C4) and (t3 is not None)
+
+    candidates = [t0, t4] if v_r < 0 else [t0, t2]
+    if C1: candidates.append(t1)
+    if C3: candidates.append(t3)
+
+    uniq = []
+    for tt in candidates:
+        if not any(abs(tt - uu) <= atol for uu in uniq):
+            uniq.append(tt)
+
+    d_t2 = d + v_diff * t2 - 0.5 * a_h * t2**2
+
+    vals = []
+    for tt in uniq:
+        if tt <= t2 + atol:
+            val = d + v_diff * tt - 0.5 * a_h * tt**2
+        else:
+            val = d_t2 + (v_diff + a_max * t2) * (tt - t2) - 0.5 * m * (tt**2 - t2**2)
+        vals.append(val)
+
+    i_min = int(np.argmin(vals))
+    t_star = uniq[i_min]
+    d_min = vals[i_min]
+
+    if abs(t_star - t0) <= atol:
+        jac = np.array([1.0, 0.0, 0.0, 0.0])
+    elif t1 is not None and abs(t_star - t1) <= atol:
+        jac = np.array([1.0, t1, -t1, -0.5 * t1**2])
+    elif abs(t_star - t2) <= atol:
+        jac = np.array([1.0, t2, -t2, -0.5 * t2**2])
+    elif t3 is not None and abs(t_star - t3) <= atol:
+        jac = np.array([1.0, t3, -t3, -0.5 * t3**2])
+    elif abs(t_star - t4) <= atol:
+        jac = np.array([1.0, t4, -t4, -0.5 * t4**2])
+        if t_dec > atol:
+            jac[1] += dotd_t4 / a_max
+    else:
+        raise RuntimeError("Unexpected candidate time for Jacobian.")
+
+    return d_min, jac
+
+
+# ------------------------------------------------------------
+# 3) Barrier function
+# ------------------------------------------------------------
 @njit((float64, float64, float64, float64, float64, float64, float64, float64), cache=True)
-def h_and_jacobian_numba(
-    d, v_r, v_h, a_h, tr, a_max, C, atol
-):
+def h_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, C, atol):
     d_min, dist_jac = dmin_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, atol)
 
     h_val = d_min - C
@@ -185,10 +259,8 @@ def h_and_jacobian_numba(
     h_jac[3] = dist_jac[3]
 
     if d_min < C:
-        # ss_term = ((C - d_min)/C) * tr * v_r
         factor = (tr / C) * v_r
         h_val += ((C - d_min) / C) * tr * v_r
-        # -(factor)*dist_jac + ((C - d_min)*tr/C)*e_vr
         h_jac[0] += -factor * dist_jac[0]
         h_jac[1] += -factor * dist_jac[1] + ((C - d_min) * tr / C)
         h_jac[2] += -factor * dist_jac[2]
@@ -197,20 +269,39 @@ def h_and_jacobian_numba(
     return h_val, h_jac
 
 
+@profile
+def h_and_jacobian(d: float, v_r: float, v_h: float, a_h: float, tr: float, a_max: float, C: float, atol: float = 1e-12):
+    """
+    Barrier function h and its gradient, including Cat.2 correction term.
 
-# --------------------------------------------------------
-# 4) Geometric Jacobian block J_psi (4x12)
-# --------------------------------------------------------
+    h = min_t d(t) - C + h_ss_cat2,
+    where h_ss_cat2 = max(0, (C - d_min)/C * tr * v_r).
+    """
+    d_min, dist_jac = dmin_and_jacobian(d=d, v_r=v_r, v_h=v_h, a_h=a_h, tr=tr, a_max=a_max, atol=atol)
+
+    ss_term = 0.0
+    h_jac = dist_jac.copy()
+
+    if d_min < C:
+        ss_term = ((C - d_min) / C) * tr * v_r
+        h_jac = h_jac + (-dist_jac * (tr / C) * v_r) + ((C - d_min) * (tr / C)) * np.array([0.0, 1.0, 0.0, 0.0])
+
+    h = d_min - C + ss_term
+    return h, h_jac
+
+
+# ------------------------------------------------------------
+# 4) Geometric Jacobian blocks
+# ------------------------------------------------------------
 @njit(cache=True)
-def jacobian_psi_numba(p_r: np.ndarray, p_h: np.ndarray,
-                       v_lin: np.ndarray, v_human: np.ndarray):
+def jacobian_psi_numba(p_r: np.ndarray, p_h: np.ndarray, v_lin: np.ndarray, v_human: np.ndarray):
     """
     Numba version of jacobian_psi.
     p_r, p_h: (3,)
     v_lin, v_human: (3,)
     Returns:
         J (4,12)
-    Layout matches your original:
+    Layout:
       row0: [ u^T | -u^T | 0 | 0 ]
       row1: [ (v_lin P) | -(v_lin P) | u^T | 0 ]
       row2: [ (v_hum P) | -(v_hum P) | 0 | u^T ]
@@ -219,15 +310,12 @@ def jacobian_psi_numba(p_r: np.ndarray, p_h: np.ndarray,
     diff = p_r - p_h
     norm = np.sqrt(np.dot(diff, diff))
     if norm == 0.0:
-        # Robust fallback: choose unit-x
         u = np.zeros(3, dtype=np.float64)
         u[0] = 1.0
     else:
         u = diff / norm
 
-    # P = I - u u^T
     P = np.eye(3, dtype=np.float64)
-    # outer(u,u)
     P[0, 0] -= u[0] * u[0]
     P[0, 1] -= u[0] * u[1]
     P[0, 2] -= u[0] * u[2]
@@ -249,28 +337,38 @@ def jacobian_psi_numba(p_r: np.ndarray, p_h: np.ndarray,
     vhumP[2] = v_human[0] * P[0, 2] + v_human[1] * P[1, 2] + v_human[2] * P[2, 2]
 
     J = np.zeros((4, 12), dtype=np.float64)
-
-    # row 0
     J[0, 0:3] = u
     J[0, 3:6] = -u
-
-    # row 1
     J[1, 0:3] = vlinP
     J[1, 3:6] = -vlinP
     J[1, 6:9] = u
-
-    # row 2
     J[2, 0:3] = vhumP
     J[2, 3:6] = -vhumP
     J[2, 9:12] = u
-
-    # row 3 already zeros
     return J
 
 
-# --------------------------------------------------------
+@profile
+def jacobian_psi(p_r, p_h, v_lin, v_human):
+    diff = p_r - p_h
+    norm = math.sqrt(np.dot(diff, diff))
+    u_rh = (diff / norm).reshape(3, 1)
+    P = np.eye(3) - u_rh @ u_rh.T
+
+    vlinP = v_lin @ P
+    vhumP = v_human @ P
+
+    return np.vstack((
+        np.hstack((u_rh.T, -u_rh.T, np.zeros((1, 3)), np.zeros((1, 3)))),
+        np.hstack((vlinP.reshape(1, -1), -vlinP.reshape(1, -1), u_rh.T, np.zeros((1, 3)))),
+        np.hstack((vhumP.reshape(1, -1), -vhumP.reshape(1, -1), np.zeros((1, 3)), u_rh.T)),
+        np.zeros((1, 12))
+    ))
+
+
+# ------------------------------------------------------------
 # 5) Fast contractions: (Jpsi @ f) and (Jpsi @ g)
-# --------------------------------------------------------
+# ------------------------------------------------------------
 @njit(cache=True)
 def jacobian_psi_times_fg_fast_numba(
     p_r: np.ndarray, p_h: np.ndarray,
@@ -278,14 +376,14 @@ def jacobian_psi_times_fg_fast_numba(
     atol: float = 1e-12,
 ):
     """
-    Numba version returning:
-        Jpsi_f: (4,) and Jpsi_g: (4,3)
+    Returns:
+        Jpsi_f: (4,)
+        Jpsi_g: (4,3)
     """
     r = p_r - p_h
-    d = np.sqrt(np.dot(r, r))
+    d = max(np.sqrt(np.dot(r, r)), 0.001)
 
     if d <= atol:
-        # fallback for u: use v_r direction if possible
         u = np.copy(v_r)
         nrm = np.sqrt(np.dot(u, u))
         if nrm <= atol:
@@ -301,824 +399,22 @@ def jacobian_psi_times_fg_fast_numba(
 
     v_diff = v_r - v_h
 
-    # projections
     vr_rel = u[0] * v_r[0] + u[1] * v_r[1] + u[2] * v_r[2]
     vh_rel = u[0] * v_h[0] + u[1] * v_h[1] + u[2] * v_h[2]
     vr_tan = v_r - u * vr_rel
     vh_tan = v_h - u * vh_rel
 
-    # (Jpsi @ f)
     Jpsi_f = np.zeros(4, dtype=np.float64)
     Jpsi_f[0] = u[0] * v_diff[0] + u[1] * v_diff[1] + u[2] * v_diff[2]
     Jpsi_f[1] = vr_tan[0] * v_diff[0] + vr_tan[1] * v_diff[1] + vr_tan[2] * v_diff[2]
     Jpsi_f[2] = vh_tan[0] * v_diff[0] + vh_tan[1] * v_diff[1] + vh_tan[2] * v_diff[2]
-    # Jpsi_f[3] = 0 already
 
-    # (Jpsi @ g) — zero except row 1 equals u
     Jpsi_g = np.zeros((4, 3), dtype=np.float64)
     Jpsi_g[1, 0] = u[0]
     Jpsi_g[1, 1] = u[1]
     Jpsi_g[1, 2] = u[2]
 
     return Jpsi_f, Jpsi_g
-
-
-
-@njit(cache=True)
-def compute_g_Lie_terms_numba(
-    translation_bt: np.ndarray,   # shape (3,)
-    obs_pos: np.ndarray,          # shape (3,)
-    vel_lineare: np.ndarray,      # shape (3,)
-    v_obs: np.ndarray,            # shape (3,)
-    a_h: float,
-    Tr: float,
-    a_s: float,
-    C: float,
-    atol: float = 1e-12,
-):
-    """
-    Compute:
-      - g (12x3)
-      - Lie_f_h (scalar)
-      - Lie_g_h (3,)
-
-    Using:
-        r = translation_bt - obs_pos
-        u_hr = r / ||r||           (robust fallback if ||r|| ~ 0)
-        v_rel = <u_hr, vel_lineare>
-        v_h   = <u_hr, v_obs>
-
-        h, Jh_psi = h_and_jacobian_numba(d=||r||, v_r=v_rel, v_h=v_h, a_h=a_h,
-                                         tr=Tr, a_max=a_s, C=C, atol=atol)
-
-        Jpsi_f, Jpsi_g = jacobian_psi_times_fg_fast_numba(translation_bt, obs_pos,
-                                                          vel_lineare, v_obs)
-
-        Lie_f_h = Jh_psi @ Jpsi_f           # scalar
-        Lie_g_h = Jh_psi @ Jpsi_g           # (3,)
-
-    Returns:
-        g: (12,3) control matrix
-        Lie_f_h: float
-        Lie_g_h: (3,) array
-    """
-    # --- geometry
-    r0 = translation_bt[0] - obs_pos[0]
-    r1 = translation_bt[1] - obs_pos[1]
-    r2 = translation_bt[2] - obs_pos[2]
-    d2 = r0*r0 + r1*r1 + r2*r2
-
-    if d2 <= atol*atol:
-        # Robust u_hr: use vel_lineare direction if available, else +x
-        nrm2 = vel_lineare[0]*vel_lineare[0] + vel_lineare[1]*vel_lineare[1] + vel_lineare[2]*vel_lineare[2]
-        if nrm2 <= atol*atol:
-            u0, u1, u2 = 1.0, 0.0, 0.0
-        else:
-            inv = 1.0 / np.sqrt(nrm2)
-            u0 = vel_lineare[0] * inv
-            u1 = vel_lineare[1] * inv
-            u2 = vel_lineare[2] * inv
-        d = np.sqrt(d2) if d2 > 0.0 else atol
-    else:
-        inv = 1.0 / np.sqrt(d2)
-        u0, u1, u2 = r0*inv, r1*inv, r2*inv
-        d = 1.0 / inv  # = sqrt(d2)
-
-    # projections onto u_hr
-    v_rel = u0*vel_lineare[0] + u1*vel_lineare[1] + u2*vel_lineare[2]
-    v_h   = u0*v_obs[0]       + u1*v_obs[1]       + u2*v_obs[2]
-
-    # barrier value and gradient wrt [d, v_r, v_h, a_h]
-    # NOTE: requires your h_and_jacobian_numba to be @njit-compiled
-    h_val, Jh_psi = h_and_jacobian_numba(d, v_rel, v_h, a_h, Tr, a_s, C, atol)
-
-    # fast contractions: Jpsi_f (4,), Jpsi_g (4,3)
-    Jpsi_f, Jpsi_g = jacobian_psi_times_fg_fast_numba(
-        p_r=translation_bt, p_h=obs_pos,
-        v_r=vel_lineare, v_h=v_obs
-    )
-
-    # Lie derivatives
-    # Lie_f_h = Jh_psi @ Jpsi_f
-    Lie_f_h = Jh_psi[0]*Jpsi_f[0] + Jh_psi[1]*Jpsi_f[1] + Jh_psi[2]*Jpsi_f[2] + Jh_psi[3]*Jpsi_f[3]
-
-    # Lie_g_h = Jh_psi @ Jpsi_g  -> shape (3,)
-    Lie_g_h = np.zeros(3, dtype=np.float64)
-    # column 0
-    Lie_g_h[0] = Jh_psi[0]*Jpsi_g[0,0] + Jh_psi[1]*Jpsi_g[1,0] + Jh_psi[2]*Jpsi_g[2,0] + Jh_psi[3]*Jpsi_g[3,0]
-    # column 1
-    Lie_g_h[1] = Jh_psi[0]*Jpsi_g[0,1] + Jh_psi[1]*Jpsi_g[1,1] + Jh_psi[2]*Jpsi_g[2,1] + Jh_psi[3]*Jpsi_g[3,1]
-    # column 2
-    Lie_g_h[2] = Jh_psi[0]*Jpsi_g[0,2] + Jh_psi[1]*Jpsi_g[1,2] + Jh_psi[2]*Jpsi_g[2,2] + Jh_psi[3]*Jpsi_g[3,2]
-
-    # control matrix g (12x3): zeros except rows 6..8 are identity
-    g = np.zeros((12, 3), dtype=np.float64)
-    g[6, 0] = 1.0
-    g[7, 1] = 1.0
-    g[8, 2] = 1.0
-
-    return g, Lie_f_h, Lie_g_h
-
-import numpy as np
-from numba import njit, float64
-
-# Assumes these two are already defined (from our previous messages):
-# @njit((float64, float64, float64, float64, float64, float64, float64, float64), cache=True)
-# def h_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, C, atol): ...
-#
-# @njit(cache=True)
-# def jacobian_psi_times_fg_fast_numba(p_r, p_h, v_r, v_h, atol=1e-12): ...
-
-@njit(
-    (
-        float64[:],  # translation_bt (3,)
-        float64[:],  # obs_pos       (3,)
-        float64[:],  # vel_lineare   (3,)
-        float64[:],  # v_obs         (3,)
-        float64,     # Tr
-        float64,     # a_s  (a_max)
-        float64,     # C
-        float64,     # a_h
-        float64,     # atol
-    ),
-    cache=True,
-)
-def compute_h_and_lie_numba(
-    translation_bt, obs_pos, vel_lineare, v_obs,
-    Tr, a_s, C, a_h, atol
-):
-    """
-    Returns:
-        h: float
-        Lie_f_h: float
-        Lie_g_h: (3,) ndarray
-    """
-
-    # r, distance, unit vector u_hr
-    r0 = translation_bt[0] - obs_pos[0]
-    r1 = translation_bt[1] - obs_pos[1]
-    r2 = translation_bt[2] - obs_pos[2]
-    d = np.sqrt(r0*r0 + r1*r1 + r2*r2)
-
-    if d <= atol:
-        # robust fallback direction
-        u0, u1, u2 = 1.0, 0.0, 0.0
-        if d < atol:
-            d = atol
-    else:
-        invd = 1.0 / d
-        u0, u1, u2 = r0*invd, r1*invd, r2*invd
-
-    # relative speeds along u_hr
-    v_r = u0*vel_lineare[0] + u1*vel_lineare[1] + u2*vel_lineare[2]
-    v_h = u0*v_obs[0]       + u1*v_obs[1]       + u2*v_obs[2]
-
-    # h and ∂h/∂psi (psi = [d, v_r, v_h, a_h])
-    h, Jh_psi = h_and_jacobian_numba(d, v_r, v_h, a_h, Tr, a_s, C, atol)
-
-    # Contractions (Jpsi@f) and (Jpsi@g)
-    Jpsi_f, Jpsi_g = jacobian_psi_times_fg_fast_numba(
-        translation_bt, obs_pos, vel_lineare, v_obs, atol
-    )
-
-    # Lie_f_h = Jh_psi · (Jpsi_f)
-    Lie_f_h = Jh_psi[0]*Jpsi_f[0] + Jh_psi[1]*Jpsi_f[1] + Jh_psi[2]*Jpsi_f[2] + Jh_psi[3]*Jpsi_f[3]
-
-    # Lie_g_h = sum_i Jh_psi[i] * (row i of Jpsi_g)
-    Lie_g_h = np.zeros(3, dtype=np.float64)
-    # i = 0
-    Lie_g_h[0] += Jh_psi[0] * Jpsi_g[0, 0]
-    Lie_g_h[1] += Jh_psi[0] * Jpsi_g[0, 1]
-    Lie_g_h[2] += Jh_psi[0] * Jpsi_g[0, 2]
-    # i = 1
-    Lie_g_h[0] += Jh_psi[1] * Jpsi_g[1, 0]
-    Lie_g_h[1] += Jh_psi[1] * Jpsi_g[1, 1]
-    Lie_g_h[2] += Jh_psi[1] * Jpsi_g[1, 2]
-    # i = 2
-    Lie_g_h[0] += Jh_psi[2] * Jpsi_g[2, 0]
-    Lie_g_h[1] += Jh_psi[2] * Jpsi_g[2, 1]
-    Lie_g_h[2] += Jh_psi[2] * Jpsi_g[2, 2]
-    # i = 3
-    Lie_g_h[0] += Jh_psi[3] * Jpsi_g[3, 0]
-    Lie_g_h[1] += Jh_psi[3] * Jpsi_g[3, 1]
-    Lie_g_h[2] += Jh_psi[3] * Jpsi_g[3, 2]
-
-    return h, Lie_f_h, Lie_g_h
-
-
-import numpy as np
-import math
-
-# --- Safe no-op decorator if not running under line_profiler ---
-try:
-    profile  # provided by line_profiler at runtime
-except NameError:
-    def profile(func):
-        return func
-
-@profile
-def range_state_derivative(v_r, v_h):
-    """No change needed, already efficient."""
-    zero3 = np.zeros(3)
-    f = np.concatenate([v_r, v_h, zero3, zero3])
-    g = np.zeros((12, 3))
-    g[6:9] = np.eye(3)
-    return f, g
-
-import numpy as np
-
-# Optional: keep @profile safe if not using line_profiler
-try:
-    profile
-except NameError:
-    def profile(f): return f
-
-# @profile
-# def dmin_and_jacobian(
-#     d: float,
-#     v_r: float,
-#     v_h: float,
-#     a_h: float,
-#     tr: float,
-#     a_max: float,
-#     atol: float = 1e-12,
-# ):
-#     """
-#     Compute the minimum separation distance d_min over candidate times and
-#     the gradient at the minimizing instant, following the MD spec (a_r=0).
-#     No inner helper functions; everything is computed inline.
-#     """
-#     if a_max <= 0:
-#         raise ValueError("a_max must be positive.")
-#
-#     # Notation
-#     t0 = 0.0
-#     t2 = float(tr)
-#     m  = a_h + a_max
-#
-#     # Braking end: t4 = t2 + max(0, v_r/a_max)
-#     t_dec_raw = v_r / a_max
-#     t_dec = t_dec_raw if t_dec_raw > 0.0 else 0.0
-#     t4 = t2 + t_dec
-#
-#     # Precompute pieces
-#     t2_sq = t2 * t2
-#     d_t2 = d + (v_r - v_h) * t2 - 0.5 * a_h * t2_sq
-#
-#     # --- d(t0)
-#     d0 = float(d)
-#
-#     # --- d(t1) (valid only if a_h != 0 and t1 in (t0, t2))
-#     if abs(a_h) > atol:
-#         t1 = (v_r - v_h) / a_h
-#         if (t1 > t0 + atol) and (t1 < t2 - atol):
-#             t1_sq = t1 * t1
-#             d1 = d + (v_r - v_h) * t1 - 0.5 * a_h * t1_sq
-#         else:
-#             t1 = None
-#             d1 = float('inf')
-#     else:
-#         t1 = None
-#         d1 = float('inf')
-#
-#     # --- d(t2)
-#     d2 = d_t2
-#
-#     # --- d(t3) (valid only if m != 0, t_dec>0 and t3 in (t2, t4))
-#     if (abs(m) > atol) and (t_dec > atol):
-#         t3 = (v_r - v_h + a_max * t2) / m
-#         if (t3 > t2 + atol) and (t3 < t4 - atol):
-#             t3_sq = t3 * t3
-#             d3 = d_t2 + (v_r - v_h + a_max * t2) * (t3 - t2) \
-#                  - 0.5 * (a_h + a_max) * (t3_sq - t2_sq)
-#         else:
-#             t3 = None
-#             d3 = float('inf')
-#     else:
-#         t3 = None
-#         d3 = float('inf')
-#
-#     # --- d(t4) (always computable)
-#     t4_sq = t4 * t4
-#     d4 = d_t2 + (v_r - v_h + a_max * t2) * (t4 - t2) \
-#          - 0.5 * (a_h + a_max) * (t4_sq - t2_sq)
-#
-#     # Collect and select minimum
-#     d_list = (d0, d1, d2, d3, d4)
-#     i_min = int(np.argmin(d_list))
-#     d_min = float(d_list[i_min])
-#
-#     # Jacobian at argmin (order: [d, v_r, v_h, a_h])
-#     if i_min == 0:
-#         jac = np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
-#
-#     elif i_min == 1:
-#         # t1 exists by construction here
-#         jac = np.array([1.0, t1, -t1, -0.5 * (t1 * t1)], dtype=float)
-#
-#     elif i_min == 2:
-#         jac = np.array([1.0, t2, -t2, -0.5 * t2_sq], dtype=float)
-#
-#     elif i_min == 3:
-#         # t3 exists by construction here
-#         jac = np.array([1.0, t3, -t3, -0.5 * (t3 * t3)], dtype=float)
-#
-#     else:  # i_min == 4 (t4)
-#         # Base term at fixed t4
-#         jac = np.array([1.0, t4, -t4, -0.5 * t4_sq], dtype=float)
-#         # Chain correction through t4(v_r) only if braking interval is non-zero
-#         if t_dec > atol:
-#             # Per spec: \dot d(t4) = v_r(t4) - v_h(t4) = -(v_h + a_h * t4)
-#             dotd_t4 = -(v_h + a_h * t4)
-#             jac[1] += dotd_t4 / a_max  # add to ∂/∂v_r
-#
-#     return d_min, jac
-
-import numpy as np
-import numpy as np
-@njit
-def dmin_and_jacobian_numba(
-    d: float,
-    v_r: float,
-    v_h: float,
-    a_h: float,
-    tr: float,
-    a_max: float,
-    atol: float = 1e-12,
-):
-    """
-    Compute the minimum separation distance d_min over candidate times and
-    the gradient at the minimizing instant, following the MD spec (a_r=0).
-    Optimized with Numba.
-    """
-    if a_max <= 0:
-        raise ValueError("a_max must be positive.")
-
-    t0, t2 = 0.0, tr
-    t_dec = max(0.0, v_r / a_max)
-    t4 = t2 + t_dec
-    m = a_h + a_max
-    v_diff = v_r - v_h
-
-    # Precompute dotd at key times
-    dotd_t0 = v_diff - a_h * t0
-    dotd_t2 = v_diff + a_max * t2 - m * t2
-    dotd_t4 = v_diff + a_max * t2 - m * t4
-
-    # Intersections
-    t1 = None
-    if abs(a_h) > atol:
-        t1_raw = v_diff / a_h
-        if (t0 + atol) < t1_raw < (t2 - atol):
-            t1 = t1_raw
-
-    t3 = None
-    if abs(m) > atol and (t4 - t2) > atol:
-        t3_raw = (v_diff + a_max * t2) / m
-        if (t2 + atol) < t3_raw < (t4 - atol):
-            t3 = t3_raw
-
-    # Conditions
-    C0, C2, C4 = dotd_t0 > 0, dotd_t2 > 0, dotd_t4 > 0
-    C1 = (abs(a_h) > atol) and (C0 != C2) and (t1 is not None)
-    C3 = (abs(m) > atol) and (C2 != C4) and (t3 is not None)
-
-    # Candidate times
-    candidates = [t0, t4] if v_r < 0 else [t0, t2]
-    if C1:
-        candidates.append(t1)
-    if C3:
-        candidates.append(t3)
-
-    # Unique candidates
-    uniq = []
-    for tt in candidates:
-        unique = True
-        for uu in uniq:
-            if abs(tt - uu) <= atol:
-                unique = False
-                break
-        if unique:
-            uniq.append(tt)
-
-    # Precompute d_t2
-    d_t2 = d + v_diff * t2 - 0.5 * a_h * t2**2
-
-    # Evaluate distance for each candidate
-    vals = np.empty(len(uniq))
-    for i, tt in enumerate(uniq):
-        if tt <= t2 + atol:
-            val = d + v_diff * tt - 0.5 * a_h * tt**2
-        else:
-            val = d_t2 + (v_diff + a_max * t2) * (tt - t2) - 0.5 * m * (tt**2 - t2**2)
-        vals[i] = val
-
-    i_min = np.argmin(vals)
-    t_star = uniq[i_min]
-    d_min = vals[i_min]
-
-    # Jacobian
-    if abs(t_star - t0) <= atol:
-        jac = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
-    elif t1 is not None and abs(t_star - t1) <= atol:
-        jac = np.array([1.0, t1, -t1, -0.5 * t1**2], dtype=np.float64)
-    elif abs(t_star - t2) <= atol:
-        jac = np.array([1.0, t2, -t2, -0.5 * t2**2], dtype=np.float64)
-    elif t3 is not None and abs(t_star - t3) <= atol:
-        jac = np.array([1.0, t3, -t3, -0.5 * t3**2], dtype=np.float64)
-    elif abs(t_star - t4) <= atol:
-        jac = np.array([1.0, t4, -t4, -0.5 * t4**2], dtype=np.float64)
-        if t_dec > atol:
-            jac[1] += dotd_t4 / a_max
-    else:
-        raise RuntimeError("Unexpected candidate time for Jacobian.")
-
-    return d_min, jac
-
-import numpy as np
-
-@profile
-def dmin_and_jacobian(
-    d: float,
-    v_r: float,
-    v_h: float,
-    a_h: float,
-    tr: float,
-    a_max: float,
-    atol: float = 1e-12,
-):
-    """
-    Compute the minimum separation distance d_min over candidate times and
-    the gradient at the minimizing instant, following the MD spec (a_r=0).
-    """
-    if a_max <= 0:
-        raise ValueError("a_max must be positive.")
-
-    # Precompute constants
-    t0, t2 = 0.0, tr
-    t_dec = max(0.0, v_r / a_max)
-    t4 = t2 + t_dec
-    m = a_h + a_max
-    v_diff = v_r - v_h
-
-    # Precompute dotd at key times
-    dotd_t0 = v_diff - a_h * t0
-    dotd_t2 = v_diff + a_max * t2 - m * t2
-    dotd_t4 = v_diff + a_max * t2 - m * t4
-
-    # Intersections
-    t1 = (v_diff / a_h) if (abs(a_h) > atol and (t0 + atol) < (v_diff / a_h) < (t2 - atol)) else None
-    t3 = ((v_diff + a_max * t2) / m) if (abs(m) > atol and (t4 - t2) > atol and
-                                          (t2 + atol) < ((v_diff + a_max * t2) / m) < (t4 - atol)) else None
-
-    # Conditions
-    C0, C2, C4 = dotd_t0 > 0, dotd_t2 > 0, dotd_t4 > 0
-    C1 = (abs(a_h) > atol) and (C0 != C2) and (t1 is not None)
-    C3 = (abs(m) > atol) and (C2 != C4) and (t3 is not None)
-
-    # Candidate times
-    candidates = [t0, t4] if v_r < 0 else [t0, t2]
-    if C1: candidates.append(t1)
-    if C3: candidates.append(t3)
-
-    # Unique candidates
-    uniq = []
-    for tt in candidates:
-        if not any(abs(tt - uu) <= atol for uu in uniq):
-            uniq.append(tt)
-
-    # Precompute d_t2
-    d_t2 = d + v_diff * t2 - 0.5 * a_h * t2**2
-
-    # Evaluate distance for each candidate
-    vals = []
-    for tt in uniq:
-        if tt <= t2 + atol:
-            val = d + v_diff * tt - 0.5 * a_h * tt**2
-        else:
-            val = d_t2 + (v_diff + a_max * t2) * (tt - t2) - 0.5 * m * (tt**2 - t2**2)
-        vals.append(val)
-
-    i_min = np.argmin(vals)
-    t_star = uniq[i_min]
-    d_min = vals[i_min]
-
-    # Jacobian
-    if abs(t_star - t0) <= atol:
-        jac = np.array([1.0, 0.0, 0.0, 0.0])
-    elif t1 is not None and abs(t_star - t1) <= atol:
-        jac = np.array([1.0, t1, -t1, -0.5 * t1**2])
-    elif abs(t_star - t2) <= atol:
-        jac = np.array([1.0, t2, -t2, -0.5 * t2**2])
-    elif t3 is not None and abs(t_star - t3) <= atol:
-        jac = np.array([1.0, t3, -t3, -0.5 * t3**2])
-    elif abs(t_star - t4) <= atol:
-        jac = np.array([1.0, t4, -t4, -0.5 * t4**2])
-        if t_dec > atol:
-            jac[1] += dotd_t4 / a_max
-    else:
-        raise RuntimeError("Unexpected candidate time for Jacobian.")
-
-    return d_min, jac
-
-#
-# @profile
-# def dmin_and_jacobian(
-#     d: float,
-#     v_r: float,
-#     v_h: float,
-#     a_h: float,
-#     tr: float,
-#     a_max: float,
-#     atol: float = 1e-12,
-# ):
-#     """
-#     Compute the minimum separation distance d_min over candidate times and
-#     the gradient at the minimizing instant, following the MD spec (a_r=0).
-#     """
-#     if a_max <= 0:
-#         raise ValueError("a_max must be positive.")
-#
-#     # Notation from the spec
-#     t0 = 0.0
-#     t2 = tr
-#     t_dec_raw = v_r / a_max
-#     t_dec = max(0.0, t_dec_raw)
-#     t4 = t2 + t_dec
-#     m = a_h + a_max  # used in phase-2 and for t3
-#
-#     # -- Intersections per §3 and §9
-#     t1 = None
-#     if abs(a_h) > atol:
-#         t1_raw = (v_r - v_h) / a_h
-#         if (t0 + atol) < t1_raw < (t2 - atol):
-#             t1 = t1_raw
-#
-#     t3 = None
-#     if abs(m) > atol and (t4 - t2) > atol:
-#         t3_raw = (v_r - v_h + a_max * t2) / m
-#         if (t2 + atol) < t3_raw < (t4 - atol):
-#             t3 = t3_raw
-#
-#     # -- Conditions per §4 and existence flags per §7
-#     dotd_t0 = (v_r - v_h) - a_h * t0
-#     dotd_t2 = (v_r - v_h + a_max * t2) - (a_h + a_max) * t2
-#     dotd_t4 = (v_r - v_h + a_max * t2) - (a_h + a_max) * t4
-#
-#     C0 = bool(dotd_t0 > 0)
-#     C2 = bool(dotd_t2 > 0)
-#     C4 = bool(dotd_t4 > 0)
-#     C1 = (abs(a_h) > atol) and (C0 != C2) and (t1 is not None)
-#     C3 = (abs(m) > atol) and (C2 != C4) and (t3 is not None)
-#
-#     # -- Candidate set per §6
-#     v_r_t2 = v_r  # since a_r=0 pre-t2
-#     candidates = []
-#     if v_r_t2 < 0:
-#         candidates.extend([t0, t4])
-#         if C1:
-#             candidates.append(t1)
-#         if C3:
-#             candidates.append(t3)
-#     else:
-#         candidates.extend([t0, t2])
-#         if C1:
-#             candidates.append(t1)
-#
-#     # Unique and evaluate
-#     uniq = []
-#     for tt in candidates:
-#         if not any(abs(tt - uu) <= atol for uu in uniq):
-#             uniq.append(tt)
-#
-#     # Evaluate dist for each unique candidate
-#     vals = []
-#     d_t2 = d + (v_r - v_h) * t2 - 0.5 * a_h * (t2**2)
-#     for tt in uniq:
-#         if tt <= t2 + atol:
-#             val = d + (v_r - v_h) * tt - 0.5 * a_h * (tt ** 2)
-#         else:
-#             val = d_t2 + (v_r - v_h + a_max * t2) * (tt - t2) \
-#                   - 0.5 * (a_h + a_max) * (tt ** 2 - t2 ** 2)
-#         vals.append(val)
-#
-#     i_min = int(np.argmin(vals))
-#     t_star = uniq[i_min]
-#     d_min = vals[i_min]
-#
-#     # -- Jacobian at candidate instants per §9
-#     if abs(t_star - t0) <= atol:
-#         jac = np.array([1.0, 0.0, 0.0, 0.0])
-#     elif (t1 is not None) and (abs(t_star - t1) <= atol):
-#         jac = np.array([1.0, t1, -t1, -0.5 * (t1 ** 2)])
-#     elif abs(t_star - t2) <= atol:
-#         jac = np.array([1.0, t2, -t2, -0.5 * (t2 ** 2)])
-#     elif (t3 is not None) and (abs(t_star - t3) <= atol):
-#         jac = np.array([1.0, t3, -t3, -0.5 * (t3 ** 2)])
-#     elif abs(t_star - t4) <= atol:
-#         base = np.array([1.0, t4, -t4, -0.5 * (t4 ** 2)])
-#         if t_dec > atol:
-#             dotd_t4 = (v_r - v_h + a_max * t2) - (a_h + a_max) * t4
-#             corr = np.array([0.0, dotd_t4 / a_max, 0.0, 0.0])
-#             jac = base + corr
-#         else:
-#             jac = base
-#     else:
-#         raise RuntimeError("Unexpected candidate time for Jacobian.")
-#
-#     return d_min, jac
-
-#
-# @profile
-# def dmin_and_jacobian(
-#     d: float,
-#     v_r: float,
-#     v_h: float,
-#     a_h: float,
-#     tr: float,
-#     a_max: float,
-#     atol: float = 1e-12,
-# ):
-#     """
-#     Compute the minimum separation distance d_min over candidate times and
-#     the gradient at the minimizing instant, following the MD spec (a_r=0).
-#     """
-#     if a_max <= 0:
-#         raise ValueError("a_max must be positive.")
-#
-#     # Notation from the spec
-#     t0 = 0.0
-#     t2 = tr
-#
-#     # End of braking phase. Per spec, t4 = t2 + v_r/a_max.
-#     # If v_r <= 0, no braking is needed; clamp so phase-2 length is non-negative.
-#     t_dec_raw = v_r / a_max
-#     t_dec = max(0.0, t_dec_raw)
-#     t4 = t2 + t_dec
-#
-#     m = a_h + a_max  # used in phase-2 and for t3
-#
-#     # -- Relative speed \dot d(t) per §5
-#     def dotd(t):
-#         t = np.asarray(t, dtype=float)
-#         out = np.empty_like(t)
-#         mask1 = (t <= t2 + atol)
-#         out[mask1] = (v_r - v_h) - a_h * t[mask1]
-#         mask2 = ~mask1
-#         out[mask2] = (v_r - v_h + a_max * t2) - (a_h + a_max) * t[mask2]
-#         return out
-#
-#     # -- Distance d(t) per §5 (with t0=0 so t0 terms drop)
-#     d_t2 = d + (v_r - v_h) * t2 - 0.5 * a_h * (t2**2)
-#
-#     def dist(t):
-#         t = np.asarray(t, dtype=float)
-#         out = np.empty_like(t)
-#         mask1 = (t <= t2 + atol)
-#         out[mask1] = d + (v_r - v_h) * t[mask1] - 0.5 * a_h * (t[mask1] ** 2)
-#         mask2 = ~mask1
-#         out[mask2] = d_t2 + (v_r - v_h + a_max * t2) * (t[mask2] - t2) \
-#                      - 0.5 * (a_h + a_max) * (t[mask2] ** 2 - t2 ** 2)
-#         return out
-#
-#     # -- Intersections per §3 and §9
-#     t1 = None
-#     if abs(a_h) > atol:
-#         t1_raw = (v_r - v_h) / a_h
-#         if (t0 + atol) < t1_raw < (t2 - atol):
-#             t1 = t1_raw
-#
-#     t3 = None
-#     if abs(m) > atol and (t4 - t2) > atol:
-#         t3_raw = (v_r - v_h + a_max * t2) / m
-#         if (t2 + atol) < t3_raw < (t4 - atol):
-#             t3 = t3_raw
-#
-#     # -- Conditions per §4 and existence flags per §7
-#     C0 = bool(dotd(t0) > 0)
-#     C2 = bool(dotd(t2) > 0)
-#     C4 = bool(dotd(t4) > 0)
-#     C1 = (abs(a_h) > atol) and (C0 != C2) and (t1 is not None)
-#     C3 = (abs(m) > atol) and (C2 != C4) and (t3 is not None)
-#
-#     # -- Candidate set per §6
-#     v_r_t2 = v_r  # since a_r=0 pre-t2
-#     candidates = []
-#     if v_r_t2 < 0:
-#         candidates.extend([t0, t4])
-#         if C1:
-#             candidates.append(t1)
-#         if C3:
-#             candidates.append(t3)
-#     else:
-#         candidates.extend([t0, t2])
-#         if C1:
-#             candidates.append(t1)
-#
-#     # Unique and evaluate
-#     uniq = []
-#     for tt in candidates:
-#         if not any(abs(tt - uu) <= atol for uu in uniq):
-#             uniq.append(tt)
-#
-#     vals = dist(np.array(uniq, dtype=float))
-#     i_min = int(np.argmin(vals))
-#     t_star = uniq[i_min]
-#     d_min = vals[i_min]
-#
-#     # -- Jacobian at candidate instants per §9
-#     def jac_at_time(tk: float) -> np.ndarray:
-#         # Order: (d, v_r, v_h, a_h)
-#         if abs(tk - t0) <= atol:
-#             return np.array([1.0, 0.0, 0.0, 0.0])
-#
-#         if (t1 is not None) and (abs(tk - t1) <= atol):
-#             return np.array([1.0,
-#                              t1,
-#                              -t1,
-#                              -0.5 * (t1 ** 2)])
-#
-#         if abs(tk - t2) <= atol:
-#             return np.array([1.0,
-#                              t2,
-#                              -t2,
-#                              -0.5 * (t2 ** 2)])
-#
-#         if (t3 is not None) and (abs(tk - t3) <= atol):
-#             return np.array([1.0,
-#                              t3,
-#                              -t3,
-#                              -0.5 * (t3 ** 2)])
-#
-#         if abs(tk - t4) <= atol:
-#             base = np.array([1.0,
-#                              t4,
-#                              -t4,
-#                              -0.5 * (t4 ** 2)])
-#             if t_dec > atol:
-#                 # Chain correction only for v_r through t4 (∂t4/∂v_r = 1/a_max)
-#                 dotd_t4 = dotd(t4)  # = -(v_h + a_h * t4)
-#                 corr = np.array([0.0, dotd_t4 / a_max, 0.0, 0.0])
-#                 return base + corr
-#             else:
-#                 return base
-#
-#         raise RuntimeError("Unexpected candidate time for Jacobian.")
-#
-#     jac = jac_at_time(t_star)
-#     return d_min, jac
-
-
-@profile
-def h_and_jacobian(
-    d: float,
-    v_r: float,
-    v_h: float,
-    a_h: float,
-    tr: float,
-    a_max: float,
-    C: float,
-    atol: float = 1e-12,
-):
-    """
-    Barrier function h and its gradient, including Cat.2 correction term.
-
-    h = min_t d(t) - C + h_ss_cat2,
-    where h_ss_cat2 = max(0, (C - d_min)/C * tr * v_r).
-    """
-    d_min, dist_jac = dmin_and_jacobian(d=d, v_r=v_r, v_h=v_h, a_h=a_h, tr=tr, a_max=a_max, atol=atol)
-
-    # Cat.2 term and gradient per §10
-    ss_term = 0.0
-    h_jac = dist_jac.copy()
-
-    if d_min < C:
-        ss_term = ((C - d_min) / C) * tr * v_r
-        # derivative of ss_term:
-        # ∂/∂θ [ ((C - d_min)/C)*tr*v_r ] = ( -dist_jac/C * tr * v_r ) + ((C - d_min)/C) * tr * [0,1,0,0]
-        h_jac = h_jac + (-dist_jac * (tr / C) * v_r) + ((C - d_min) * (tr / C)) * np.array([0.0, 1.0, 0.0, 0.0])
-
-    h = d_min - C + ss_term
-    return h, h_jac
-
-
-@profile
-def jacobian_psi(p_r, p_h, v_lin, v_human):
-    """Optimized to avoid repeated allocations and @ operator overhead."""
-    diff = p_r - p_h
-    norm = math.sqrt(np.dot(diff, diff))
-    u_rh = (diff / norm).reshape(3, 1)
-    P = np.eye(3) - u_rh @ u_rh.T
-
-    vlinP = v_lin @ P
-    vhumP = v_human @ P
-
-    return np.vstack((
-        np.hstack((u_rh.T, -u_rh.T, np.zeros((1, 3)), np.zeros((1, 3)))),
-        np.hstack((vlinP.reshape(1, -1), -vlinP.reshape(1, -1), u_rh.T, np.zeros((1, 3)))),
-        np.hstack((vhumP.reshape(1, -1), -vhumP.reshape(1, -1), np.zeros((1, 3)), u_rh.T)),
-        np.zeros((1,12))
-    ))
 
 
 @profile
@@ -1129,13 +425,9 @@ def jacobian_psi_times_fg_fast(
     out_Jf: np.ndarray | None = None,
     out_Jg: np.ndarray | None = None,
 ):
-    """
-    Compute (Jpsi_chi @ f) and (Jpsi_chi @ g) without explicitly forming Jpsi_chi.
-    """
     r = p_r - p_h
     d = math.sqrt(np.dot(r, r))
     if d <= atol:
-        # Robust fallback for u
         u = v_r.copy()
         nrm = math.sqrt(np.dot(u, u))
         if nrm <= atol:
@@ -1148,13 +440,11 @@ def jacobian_psi_times_fg_fast(
 
     v_diff = v_r - v_h
 
-    # Project to tangential parts (Pv = v - u (u·v))
     vr_rel = np.dot(u, v_r)
     vh_rel = np.dot(u, v_h)
     vr_tan = v_r - u * vr_rel
     vh_tan = v_h - u * vh_rel
 
-    # Jpsi@f components
     jf0 = np.dot(u, v_diff)
     jf1 = np.dot(vr_tan, v_diff)
     jf2 = np.dot(vh_tan, v_diff)
@@ -1168,7 +458,6 @@ def jacobian_psi_times_fg_fast(
         out_Jf[3] = 0.0
         Jpsi_f = out_Jf
 
-    # Jpsi@g is zero except middle row equals u
     if out_Jg is None:
         Jpsi_g = np.zeros((4, 3), dtype=float)
         Jpsi_g[1, :] = u
@@ -1180,7 +469,127 @@ def jacobian_psi_times_fg_fast(
     return Jpsi_f, Jpsi_g
 
 
-# Exact version with the time-variation term: -Lie_g_h @ dJlin @ dq and custom gamma
+# ------------------------------------------------------------
+# 6) Lie derivatives
+# ------------------------------------------------------------
+@njit(cache=True)
+def compute_g_Lie_terms_numba(
+    translation_bt: np.ndarray,
+    obs_pos: np.ndarray,
+    vel_lineare: np.ndarray,
+    v_obs: np.ndarray,
+    a_h: float,
+    Tr: float,
+    a_s: float,
+    C: float,
+    atol: float = 1e-12,
+):
+    """
+    Compute:
+      - g (12x3)
+      - Lie_f_h (scalar)
+      - Lie_g_h (3,)
+    """
+    r0 = translation_bt[0] - obs_pos[0]
+    r1 = translation_bt[1] - obs_pos[1]
+    r2 = translation_bt[2] - obs_pos[2]
+    d2 = r0*r0 + r1*r1 + r2*r2
+
+    if d2 <= atol*atol:
+        nrm2 = vel_lineare[0]*vel_lineare[0] + vel_lineare[1]*vel_lineare[1] + vel_lineare[2]*vel_lineare[2]
+        if nrm2 <= atol*atol:
+            u0, u1, u2 = 1.0, 0.0, 0.0
+        else:
+            inv = 1.0 / np.sqrt(nrm2)
+            u0 = vel_lineare[0] * inv
+            u1 = vel_lineare[1] * inv
+            u2 = vel_lineare[2] * inv
+        d = np.sqrt(d2) if d2 > 0.0 else atol
+    else:
+        inv = 1.0 / np.sqrt(d2)
+        u0, u1, u2 = r0*inv, r1*inv, r2*inv
+        d = 1.0 / inv
+
+    v_rel = u0*vel_lineare[0] + u1*vel_lineare[1] + u2*vel_lineare[2]
+    v_h   = u0*v_obs[0]       + u1*v_obs[1]       + u2*v_obs[2]
+
+    h_val, Jh_psi = h_and_jacobian_numba(d, v_rel, v_h, a_h, Tr, a_s, C, atol)
+
+    Jpsi_f, Jpsi_g = jacobian_psi_times_fg_fast_numba(
+        p_r=translation_bt, p_h=obs_pos, v_r=vel_lineare, v_h=v_obs
+    )
+
+    Lie_f_h = Jh_psi[0]*Jpsi_f[0] + Jh_psi[1]*Jpsi_f[1] + Jh_psi[2]*Jpsi_f[2] + Jh_psi[3]*Jpsi_f[3]
+
+    Lie_g_h = np.zeros(3, dtype=np.float64)
+    Lie_g_h[0] = Jh_psi[0]*Jpsi_g[0,0] + Jh_psi[1]*Jpsi_g[1,0] + Jh_psi[2]*Jpsi_g[2,0] + Jh_psi[3]*Jpsi_g[3,0]
+    Lie_g_h[1] = Jh_psi[0]*Jpsi_g[0,1] + Jh_psi[1]*Jpsi_g[1,1] + Jh_psi[2]*Jpsi_g[2,1] + Jh_psi[3]*Jpsi_g[3,1]
+    Lie_g_h[2] = Jh_psi[0]*Jpsi_g[0,2] + Jh_psi[1]*Jpsi_g[1,2] + Jh_psi[2]*Jpsi_g[2,2] + Jh_psi[3]*Jpsi_g[3,2]
+
+    g = np.zeros((12, 3), dtype=np.float64)
+    g[6, 0] = 1.0
+    g[7, 1] = 1.0
+    g[8, 2] = 1.0
+
+    return g, Lie_f_h, Lie_g_h
+
+
+@njit(
+    (
+        float64[:],  # translation_bt (3,)
+        float64[:],  # obs_pos       (3,)
+        float64[:],  # vel_lineare   (3,)
+        float64[:],  # v_obs         (3,)
+        float64,     # Tr
+        float64,     # a_s
+        float64,     # C
+        float64[:],  # obs_acc
+        float64,     # atol
+    ),
+    cache=True,
+)
+def compute_h_and_lie_numba(translation_bt, obs_pos, vel_lineare, v_obs, Tr, a_s, C, obs_acc, atol):
+    """
+    Returns:
+        h: float
+        Lie_f_h: float
+        Lie_g_h: (3,) ndarray
+    """
+    r0 = translation_bt[0] - obs_pos[0]
+    r1 = translation_bt[1] - obs_pos[1]
+    r2 = translation_bt[2] - obs_pos[2]
+    d = np.sqrt(r0*r0 + r1*r1 + r2*r2)
+
+    if d <= atol:
+        u0, u1, u2 = 1.0, 0.0, 0.0
+        if d < atol:
+            d = atol
+    else:
+        invd = 1.0 / d
+        u0, u1, u2 = r0*invd, r1*invd, r2*invd
+
+    v_r = u0*vel_lineare[0] + u1*vel_lineare[1] + u2*vel_lineare[2]
+    v_h = u0*v_obs[0]       + u1*v_obs[1]       + u2*v_obs[2]
+    a_h = u0*obs_acc[0]     + u1*obs_acc[1]     + u2*obs_acc[2]
+
+    h, Jh_psi = h_and_jacobian_numba(d, v_r, v_h, a_h, Tr, a_s, C, atol)
+
+    Jpsi_f, Jpsi_g = jacobian_psi_times_fg_fast_numba(translation_bt, obs_pos, vel_lineare, v_obs, atol)
+
+    Lie_f_h = Jh_psi[0]*Jpsi_f[0] + Jh_psi[1]*Jpsi_f[1] + Jh_psi[2]*Jpsi_f[2] + Jh_psi[3]*Jpsi_f[3]
+
+    Lie_g_h = np.zeros(3, dtype=np.float64)
+    Lie_g_h[0] += Jh_psi[0] * Jpsi_g[0, 0]; Lie_g_h[1] += Jh_psi[0] * Jpsi_g[0, 1]; Lie_g_h[2] += Jh_psi[0] * Jpsi_g[0, 2]
+    Lie_g_h[0] += Jh_psi[1] * Jpsi_g[1, 0]; Lie_g_h[1] += Jh_psi[1] * Jpsi_g[1, 1]; Lie_g_h[2] += Jh_psi[1] * Jpsi_g[1, 2]
+    Lie_g_h[0] += Jh_psi[2] * Jpsi_g[2, 0]; Lie_g_h[1] += Jh_psi[2] * Jpsi_g[2, 1]; Lie_g_h[2] += Jh_psi[2] * Jpsi_g[2, 2]
+    Lie_g_h[0] += Jh_psi[3] * Jpsi_g[3, 0]; Lie_g_h[1] += Jh_psi[3] * Jpsi_g[3, 1]; Lie_g_h[2] += Jh_psi[3] * Jpsi_g[3, 2]
+
+    return h, Lie_f_h, Lie_g_h
+
+
+# ------------------------------------------------------------
+# 7) Full constraint assembly
+# ------------------------------------------------------------
 @njit(
     (
         float64[:],    # translation_bt (3,)
@@ -1190,7 +599,7 @@ def jacobian_psi_times_fg_fast(
         float64,       # Tr
         float64,       # a_s
         float64,       # C
-        float64,       # a_h
+        float64[:],    # obs_acc
         float64,       # atol
         float64[:, :], # Jlin  (3 x n)
         float64[:, :], # dJlin (3 x n)
@@ -1201,7 +610,7 @@ def jacobian_psi_times_fg_fast(
 )
 def compute_h_and_constraints_numba(
     translation_bt, obs_pos, vel_lineare, v_obs,
-    Tr, a_s, C, a_h, atol, Jlin, dJlin, dq, gamma
+    Tr, a_s, C, obs_acc, atol, Jlin, dJlin, dq, gamma
 ):
     """
     Returns:
@@ -1211,7 +620,7 @@ def compute_h_and_constraints_numba(
         constraint_bound= -(Lie_g_h @ dJlin @ dq) - Lie_f_h - gamma*h
     """
     h, Lie_f_h, Lie_g_h = compute_h_and_lie_numba(
-        translation_bt, obs_pos, vel_lineare, v_obs, Tr, a_s, C, a_h, atol
+        translation_bt, obs_pos, vel_lineare, v_obs, Tr, a_s, C, obs_acc, atol
     )
 
     n = Jlin.shape[1]
@@ -1223,7 +632,6 @@ def compute_h_and_constraints_numba(
             Lie_g_h[2] * Jlin[2, j]
         )
 
-    # tmp = Lie_g_h @ dJlin   -> (n,)
     tmp = np.zeros(n, dtype=np.float64)
     for j in range(n):
         tmp[j] = (
