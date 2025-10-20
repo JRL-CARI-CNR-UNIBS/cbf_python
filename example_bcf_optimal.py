@@ -57,7 +57,6 @@ def damped_pinv_svd(J, lam=1e-4):
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
-    SHAREWORK = True
     USE_CBF = True
     USE_BRIDGE = False
 
@@ -101,54 +100,47 @@ def main():
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
-    if SHAREWORK:
-        UR10E_JOINTS = [
-            "ur10e_shoulder_pan_joint",
-            "ur10e_shoulder_lift_joint",
-            "ur10e_elbow_joint",
-            "ur10e_wrist_1_joint",
-            "ur10e_wrist_2_joint",
-            "ur10e_wrist_3_joint",
-        ]
-        model_wrapper = loadSharework(UR10E_JOINTS)
-        prefix = 'ur10e_'
+    UR10E_JOINTS = [
+        "ur10e_shoulder_pan_joint",
+        "ur10e_shoulder_lift_joint",
+        "ur10e_elbow_joint",
+        "ur10e_wrist_1_joint",
+        "ur10e_wrist_2_joint",
+        "ur10e_wrist_3_joint",
+    ]
+    model_wrapper = loadSharework(UR10E_JOINTS)
+    prefix = 'ur10e_'
 
-        
 
-        target_name = "ur10e_wrist_3_joint"
-        idx = UR10E_JOINTS.index(target_name)
-        if USE_BRIDGE:
-            bridge = JointStateCommandBridge(
-                ordered_joint_names=UR10E_JOINTS,
-                threshold=1.1)  # radians (or native units)
-            first_joint_position = bridge.wait_for_first_state( target_name, timeout=5.0)
-            if math.isnan(first_joint_position):
-                bridge.shutdown()
-                return
-            first_joint_position = bridge.getPositions()
-            bridge.switch_to_forward_position_controller_service()
-        else:
 
-            from fake_command_bridge import FakeCommandBridge
-            # Build camera pose from your INITI snippet
-            R = pin.utils.rotate('z', 1.9) @ pin.utils.rotate('x', 1.57)
-            T_wc = pin.SE3(R, np.array([-1.85, -0.9, 0.9]))
-
-            bridge = FakeCommandBridge(
-                UR10E_JOINTS,
-                csv_path="a01_s10_e02_skeleton3D_with_savgol_vel_acc.csv",
-                Tworld_to_cam=T_wc,
-                slowdown_factor=0.4,
-            )
-
-            first_joint_position = home
-
-    
+    target_name = "ur10e_wrist_3_joint"
+    idx = UR10E_JOINTS.index(target_name)
+    if USE_BRIDGE:
+        bridge = JointStateCommandBridge(
+            ordered_joint_names=UR10E_JOINTS,
+            threshold=1.1)  # radians (or native units)
+        first_joint_position = bridge.wait_for_first_state( target_name, timeout=5.0)
+        if math.isnan(first_joint_position):
+            bridge.shutdown()
+            return
+        first_joint_position = bridge.getPositions()
+        bridge.switch_to_forward_position_controller_service()
     else:
-        model_wrapper = load('ur10')
-        prefix = ''
+
+        from fake_command_bridge import FakeCommandBridge
+        # Build camera pose from your INITI snippet
+        R = pin.utils.rotate('z', 1.9) @ pin.utils.rotate('x', 1.57)
+        T_wc = pin.SE3(R, np.array([-1.85, -0.9, 0.9]))
+
+        bridge = FakeCommandBridge(
+            UR10E_JOINTS,
+            csv_path="a01_s10_e02_skeleton3D_with_savgol_vel_acc.csv",
+            Tworld_to_cam=T_wc,
+            slowdown_factor=0.4,
+        )
 
         first_joint_position = home
+
     model = model_wrapper.model
     viz = MeshcatVisualizer(model, model_wrapper.collision_model, model_wrapper.visual_model)
     viz.initViewer(open=True)
@@ -160,7 +152,6 @@ def main():
     obstacle_velocities = [tmp.copy() for _ in range(18*5)]
     obstacle_accelerations = obstacle_velocities.copy()
 
-    print("Initial obstacle positions number:", len(obstacle_positions))
     for i, pos in enumerate(obstacle_positions):
         viz.viewer[f"obstacle_{i}"].set_object(
             mgeom.Sphere(0.1), mgeom.MeshLambertMaterial(color=0xFF0000)
@@ -195,15 +186,8 @@ def main():
 
     scaling_limit_matrix = np.append(np.zeros(model.nq), Tc)
 
-
-
     planner = SegmentedJointTrap(Dq_max=Dq_max*.3, DDq_max=DDq_max*.3)
 
-    def pose_eul(z, y, x, xyz):
-        R = pin.utils.rotate('z', z) @ pin.utils.rotate('y', y) @ pin.utils.rotate('x', x)
-        return SE3(R, np.array(xyz))
-
-    goal_pose = data.oMf[tool_frame_id].copy()
     # 2 · add way‑points -------------------------------------------
     planner.addWayPoint(q)
     planner.addWayPoint(home)
@@ -213,7 +197,6 @@ def main():
     T_total = planner.computeTime()
 
     renderer.publishPath(planner.publishPath())
-    print(f"Total time = {T_total:.3f} s")
 
     I=np.eye(model.nq)
 
@@ -486,7 +469,7 @@ def main():
 
             trajectory_time += Dtrajectory_time * Tc + 0.5 * DDtrajectory_time * Tc ** 2.0
             Dtrajectory_time += DDtrajectory_time * Tc
-            if SHAREWORK and USE_BRIDGE:
+            if USE_BRIDGE:
                 bridge.sendCommand(q)
 
             # ----------------------------- TIMING -------------------------------
