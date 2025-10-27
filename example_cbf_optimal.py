@@ -18,27 +18,18 @@
 # • Added graceful keyboard‑interrupt handling: Ctrl‑C shuts down cleanly.
 # -----------------------------------------------------------------------------
 
-import threading
 import time
-from typing import List
 
 import meshcat.geometry as mgeom
-import meshcat.transformations as tf
-import meshcat_shapes
+
 import numpy as np
 import pinocchio as pin
-import quadprog
-from example_robot_data import load
 from pinocchio.visualize import MeshcatVisualizer
 
-from ssm_cbf_acc import h_and_jacobian_numba, jacobian_psi_times_fg_fast_numba, compute_h_and_constraints_numba
-from interpolator import SegmentedSE3Trap
 from joint_interpolator import SegmentedJointTrap
 from visualization_daemon import VisualizationDaemon
-from pinocchio import SE3
 from sharework import loadSharework
 
-from human_pose_reader import  PoseReader
 from bcf_utils import make_summary_figure, print_stats_table
 
 
@@ -56,7 +47,7 @@ def main():
 
 
 
-    duration = 10.0
+    duration = 40.0
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
@@ -73,6 +64,10 @@ def main():
 
     Tc =2e-3
     cfg = ControllerConfig(Tc=Tc)
+    cfg.lambda1 = 1.0e2
+    cfg.lambda2 = 1.0
+    cfg.lambda3 = 1.0e-1
+    cfg.lambda4 = 0.0
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg)
 
     target_name = "ur10e_wrist_3_joint"
@@ -98,7 +93,7 @@ def main():
             UR10E_JOINTS,
             csv_path="a01_s10_e02_skeleton3D_with_savgol_vel_acc.csv",
             Tworld_to_cam=T_wc,
-            slowdown_factor=0.14,
+            slowdown_factor=0.4,
         )
 
         first_joint_position = home
@@ -156,8 +151,6 @@ def main():
         t = 0.0
 
         trajectory_time = 0.0
-        Dtrajectory_time = 1.0
-        DDtrajectory_time = 0.0
 
 
         timeout_cycles = cycles =0
@@ -206,10 +199,11 @@ def main():
 
             # ----------------------------- TIMING -------------------------------
             elapsed = time.perf_counter() - loop_start
-            ct.append(min(50e-3,elapsed))
-            scaling_log.append(Dtrajectory_time)
-            h_log.append(out["h_min"])
-            trj_error_log.append(out["trajectory_error"])
+            if cycles>1:
+                ct.append(elapsed)
+                scaling_log.append(Dtrajectory_time)
+                h_log.append(out["h_min"])
+                trj_error_log.append(out["trajectory_error"])
 
             rest = Tc - elapsed
             if rest > 0:
@@ -227,10 +221,6 @@ def main():
 
 
     # Call with your
-    computation_times_planner = np.array(ct_planner)
-    computation_times_qp = np.array(ct_qp)
-    computation_times_ssm = np.array(ct_ssm)
-    computation_times_pin = np.array(ct_pin)
     computation_times = np.array(ct)
     scaling_log = np.array(scaling_log)
     h_log = np.array(h_log)
@@ -239,21 +229,12 @@ def main():
     #computation_times_others=computation_times-(computation_times_planner+computation_times_pin+computation_times_qp+computation_times_ssm)
     stats = {
         "computation_times": computation_times,
-     #   "computation_times_qp": computation_times_qp,
-      #  "computation_times_ssm": computation_times_ssm,
-       # "computation_times_planner": computation_times_planner,
-       # "computation_times_pin": computation_times_pin,
-       # "computation_times_others": computation_times_others,
     }
 
     print(f"timeout cycles = {timeout_cycles} over {cycles}, percentage = {100.0*timeout_cycles/cycles}, average = {np.mean(computation_times)}")
     print_stats_table(stats)
     _ = make_summary_figure(
         computation_times,
-        #computation_times_qp,
-        #computation_times_pin,
-        #computation_times_ssm,
-        #computation_times_others,
         h_log,
         trj_error_log,
         scaling_log,
