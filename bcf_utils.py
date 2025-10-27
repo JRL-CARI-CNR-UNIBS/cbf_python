@@ -4,10 +4,6 @@ import numpy as np
 
 def make_summary_figure(
     computation_times,
-    computation_times_qp,
-    computation_times_pin,
-    computation_times_ssm,
-    computation_times_others,
     h_log,
     trj_error_log,
     scaling_log,
@@ -60,22 +56,22 @@ def make_summary_figure(
         go.Histogram(x=computation_times, name="Total", opacity=0.5, nbinsx=nbins),
         row=1, col=1
     )
-    fig.add_trace(
-        go.Histogram(x=computation_times_qp, name="QP", opacity=0.5, nbinsx=nbins),
-        row=1, col=1
-    )
-    fig.add_trace(
-        go.Histogram(x=computation_times_pin, name="Pinocchio", opacity=0.5, nbinsx=nbins),
-        row=1, col=1
-    )
-    fig.add_trace(
-        go.Histogram(x=computation_times_ssm, name="SSM", opacity=0.5, nbinsx=nbins),
-        row=1, col=1
-    )
-    fig.add_trace(
-        go.Histogram(x=computation_times_others, name="Other", opacity=0.5, nbinsx=nbins),
-        row=1, col=1
-    )
+    # fig.add_trace(
+    #     go.Histogram(x=computation_times_qp, name="QP", opacity=0.5, nbinsx=nbins),
+    #     row=1, col=1
+    # )
+    # fig.add_trace(
+    #     go.Histogram(x=computation_times_pin, name="Pinocchio", opacity=0.5, nbinsx=nbins),
+    #     row=1, col=1
+    # )
+    # fig.add_trace(
+    #     go.Histogram(x=computation_times_ssm, name="SSM", opacity=0.5, nbinsx=nbins),
+    #     row=1, col=1
+    # )
+    # fig.add_trace(
+    #     go.Histogram(x=computation_times_others, name="Other", opacity=0.5, nbinsx=nbins),
+    #     row=1, col=1
+    # )
 
     # --- Row 2: h evolution ---
     fig.add_trace(

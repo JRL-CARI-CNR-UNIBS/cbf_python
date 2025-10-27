@@ -56,8 +56,10 @@ class FakeCommandBridge(BaseCommandBridgeABC):
         self._on_publish = on_publish
         self.last_command: Optional[np.ndarray] = None  # for inspection/tests
         self.actual_joint_positions_ = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
+        self.last_command = self.actual_joint_positions_
         self.actual_joint_velocities_= np.array([0.0]*6)
         self.actual_joint_accelerations_ = np.array([0.0] * 6)
+
 
     # --------------------- ABC: command publish ---------------------
     def _do_publish(self, q: np.ndarray) -> None:

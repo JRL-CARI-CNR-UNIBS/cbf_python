@@ -175,6 +175,7 @@ def assemble_objective_parts_inplace(P2, b1, b2, b3,
         val = -(Tc * Tc) * nominal_Dq[i]
         P2[i, nq] = val
         P2[nq, i] = val
+        P2[i,i] = Tc**2
         ndq_dot += nominal_Dq[i] * nominal_Dq[i]
     P2[nq, nq] = (Tc * Tc) * ndq_dot
 
@@ -212,7 +213,7 @@ def assemble_qp_inplace(
     Dq_max, DDq_max, delta_q_max,
     # CBF inputs (optional; pass empty arrays if unused)
     frames_p, frames_vlin, Jlins, dJlins, obs_p, obs_v, obs_a,
-    Tr, a_s, C, gamma, atol
+    Tr, a_s, C, gamma, DDtraj_max, atol
 ):
     nq = q.size
     # zero A, c
@@ -223,7 +224,7 @@ def assemble_qp_inplace(
 
     # constraint rows
     row = 0
-    row = fill_scaling_rows(A, c, row, nq, Tc, Dtraj, DDq_max=nq*0.0 + 1.0)  # placeholder overwritten below
+    row = fill_scaling_rows(A, c, row, nq, Tc, Dtraj, DDtraj_max=DDtraj_max)  # placeholder overwritten below
     # overwrite last line's rhs to -DDtraj_max using c[row_idx] once caller fixes it if needed
 
     x0 = np.empty(nq * 2)
