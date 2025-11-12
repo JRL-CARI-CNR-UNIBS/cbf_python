@@ -18,7 +18,7 @@ class ControllerConfig:
 
     # ✅ use default_factory for mutable defaults
     delta_q_max: np.ndarray = field(
-        default_factory=lambda: np.deg2rad(np.array([1,1,1,1,1,1], dtype=np.float64) * 0.1)
+        default_factory=lambda: np.deg2rad(np.array([1,1,1,1,1,1], dtype=np.float64) * 5)
     )
     Dq_max: np.ndarray = field(
         default_factory=lambda: np.pi * np.array([1,1,1,1,1,1], dtype=np.float64) * np.pi
@@ -27,12 +27,14 @@ class ControllerConfig:
         default_factory=lambda: np.pi * np.array([1,1,1,1,1,1], dtype=np.float64) * np.pi*5.0
     )
 
-    lambda1: float = 1.0e2
-    lambda2: float = 1.0
-    lambda3: float = 1.0e-1
+    lambda1: float = 1.0e-2
+    lambda2: float = 1.0e-2
+    lambda3: float = 1.0e3
     lambda4: float = 0.0
     DDtrajectory_time_max: float = 1.0
 
+    delta_unfeasible: np.ndarray = field(
+        default_factory=lambda: np.array([1.0,1.0,1.0,1.0,1.0,1.0]) * 500)
     prefix: str = "ur10e_"
     tool_frame: str = "tool0"
     elbow_frame: str = "forearm_link"
@@ -181,18 +183,43 @@ class BCFOptimalController:
         except ValueError as err:
             if "constraints are inconsistent" in str(err):
                 # if h_min>-10:
-                #     print(f"UNFEASIBLE but h={h_min}")
-                #     print(f"unfeasible     q = {(np.abs(self.q - nominal_q) > self.cfg.delta_q_max).T}")
-                #     print(f"unfeasible    dq = {(np.abs(self.dq) > self.cfg.Dq_max).T}")
-                #     print(f"unfeasible  Dtrj = {self.Dtrajectory_time<0 or self.Dtrajectory_time>1}. Dtrj={self.Dtrajectory_time}")
-                #
+                # print(f"UNFEASIBLE but h={h_min}")
+                # print(f"unfeasible     q = {(np.abs(self.q - nominal_q) > self.cfg.delta_q_max).T}")
+                # print(f"unfeasible    dq = {(np.abs(self.dq) > self.cfg.Dq_max).T}")
+                # print(f"unfeasible  Dtrj = {self.Dtrajectory_time<0 or self.Dtrajectory_time>1}. Dtrj={self.Dtrajectory_time}")
+
+                A_unfeasible = np.zeros((3 + 6*nq, nq + 1), dtype=np.float64)
+                c_unfeasible = np.zeros(3 + 6*nq, dtype=np.float64)
+                A_unfeasible[:(3 + 4*nq), :] = A[:(3 + 4*nq), :]
+                c_unfeasible[:(3 + 4*nq)] = c[:(3 + 4*nq)]   
+                row = 3 + 4 * nq
+                # I*u <= ddq + delta_unfeasible
+                for i in range(nq):
+                    for j in range(nq):
+                        A_unfeasible[row + i, j] = -1.0 if i == j else 0.0
+                    c_unfeasible[row + i] = -self.ddq[i] - self.cfg.delta_unfeasible[i]
+                row += nq
+
+                # -I*u <= delta_unfeasible - ddq
+                for i in range(nq):
+                    for j in range(nq):
+                        A_unfeasible[row + i, j] = 1.0 if i == j else 0.0
+                    c_unfeasible[row + i] = self.ddq[i] - self.cfg.delta_unfeasible[i]
+                row += nq
+
+
 
                 self.bunfeasible[:-1] = -Tc * self.dq
                 self.bunfeasible[-1]  = -Tc * self.Dtrajectory_time
+                # u, *_ = quadprog.solve_qp(
+                #     self.Punfeasible, self.bunfeasible,
+                #     A[:(3 + nq * 4), :].T,
+                #     c[:(3 + nq * 4)]
+                # )
                 u, *_ = quadprog.solve_qp(
                     self.Punfeasible, self.bunfeasible,
-                    A[:(3 + nq * 4), :].T,
-                    c[:(3 + nq * 4)]
+                    A_unfeasible.T,
+                    c_unfeasible
                 )
             else:
                 raise

@@ -43,11 +43,11 @@ from scipy.linalg import block_diag
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
-    USE_BRIDGE = False
+    USE_BRIDGE = True
 
 
 
-    duration = 40.0
+    duration = 150.0
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
@@ -64,10 +64,14 @@ def main():
 
     Tc =2e-3
     cfg = ControllerConfig(Tc=Tc)
-    cfg.lambda1 = 1.0e2
-    cfg.lambda2 = 1.0
-    cfg.lambda3 = 1.0e-1
-    cfg.lambda4 = 0.0
+    cfg.lambda1 = 500.0
+    cfg.lambda2 = 2.55
+    cfg.lambda3 = 130#1.0e3
+    cfg.lambda4 = 4.0e-05 
+    cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * 1.5)
+    cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * 3)
+    cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * 6)
+    cfg.gamma = 10.0
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg)
 
     target_name = "ur10e_wrist_3_joint"
@@ -86,14 +90,19 @@ def main():
     else:
         from fake_command_bridge import FakeCommandBridge
         # Build camera pose from your INITI snippet
-        R = pin.utils.rotate('z', 1.9) @ pin.utils.rotate('x', 1.57)
-        T_wc = pin.SE3(R, np.array([-1.85, -0.9, 0.9]))
+        quat = pin.Quaternion(0.814, 0.178, 0.535, 0.137)
+        quat.normalize()
+        R = quat.toRotationMatrix()
+
+        T_wc = pin.SE3(R, np.array([0.108, -0.883, 2.351]))
 
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
-            csv_path="a01_s10_e02_skeleton3D_with_savgol_vel_acc.csv",
+            csv_path="/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/zed_skeleton_kinematics/skeleton_vectors.csv",
             Tworld_to_cam=T_wc,
-            slowdown_factor=0.4,
+            # slowdown_factor=0.1,
+            slowdown_factor=1.0,
+
         )
 
         first_joint_position = home
@@ -128,16 +137,21 @@ def main():
     q2 = home.copy()
     q2[1] = -np.pi * 0.5
     q2[2] = np.pi * 0.5
-
+    q3 = np.array([ 40.0, -80.0, 100.0, -120.0, 90.0, 0.0])*np.pi/180.0
+    q4 = np.array([ 122.0, -70.0, 100.0, -120.0, 90.0, 0.0])*np.pi/180.0
     print(f"q={q.T}\nq={q2.T}")
 
-    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*.3, DDq_max=cfg.DDq_max*.3)
+    cfg.Dq_max = cfg.Dq_max*0.2
+    cfg.DDq_max = cfg.DDq_max*0.2
+    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.1, DDq_max=cfg.DDq_max*0.1)
 
     # 2 · add way‑points -------------------------------------------
-    planner.addWayPoint(q)
-    planner.addWayPoint(home)
-    planner.addWayPoint(q2)
-    planner.addWayPoint(home)
+    for _ in range(3):
+        planner.addWayPoint(q)
+        planner.addWayPoint(q4)
+        planner.addWayPoint(home)        
+        planner.addWayPoint(q3)
+        planner.addWayPoint(q)
 
     T_total = planner.computeTime()
 
@@ -225,6 +239,8 @@ def main():
     scaling_log = np.array(scaling_log)
     h_log = np.array(h_log)
     trj_error_log = np.array(trj_error_log)
+
+    print(f"average scaling = {np.mean(scaling_log)}")
 
     #computation_times_others=computation_times-(computation_times_planner+computation_times_pin+computation_times_qp+computation_times_ssm)
     stats = {

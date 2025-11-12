@@ -9,7 +9,8 @@ from sharework import loadSharework
 from fake_command_bridge import FakeCommandBridge
 from optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
 from plotly.io import show
-
+from multiprocessing import Process, Queue
+from queue import Empty
 # Database connection (for dashboard)
 POSTGRES_URL = "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
 # ----------------- STATIC INITIALIZATION (only once) -----------------
@@ -37,18 +38,18 @@ q3 = np.array([ 40.0, -80.0, 100.0, -120.0, 90.0, 0.0])*np.pi/180.0
 q4 = np.array([ 122.0, -70.0, 100.0, -120.0, 90.0, 0.0])*np.pi/180.0
 
 # CONFIG 1
-# planner.addWayPoint(q)
-# planner.addWayPoint(home)
+planner.addWayPoint(q)
+planner.addWayPoint(home)
 
-# planner.addWayPoint(q2)
-# planner.addWayPoint(home)
+planner.addWayPoint(q2)
+planner.addWayPoint(home)
 
 # CONFIG 2
-planner.addWayPoint(q)
-planner.addWayPoint(q3)
-planner.addWayPoint(home)        
-planner.addWayPoint(q4)
-planner.addWayPoint(q)
+# planner.addWayPoint(q)
+# planner.addWayPoint(q3)
+# planner.addWayPoint(home)        
+# planner.addWayPoint(q4)
+# planner.addWayPoint(q)
 
 # planner.addWayPoint(home)
 # planner.addWayPoint(home + np.deg2rad([0, 20, -20, 0, 0, 0]))
@@ -151,6 +152,42 @@ def run_episode(lambda1, lambda2, lambda3, lambda4, gamma, delta, Tc=2e-3, durat
     mean_trajectory_error = trajectory_error_sum / max(1, nsteps)
     return viol_rate, mean_scale, mean_trajectory_error
 
+
+def _run_episode_worker(args, kwargs, q):
+    """Runs run_episode and returns either ('ok', result) or ('err', repr(exception))."""
+    try:
+        result = run_episode(*args, **kwargs)
+        q.put(("ok", result))
+    except Exception as e:
+        q.put(("err", repr(e)))
+
+def run_episode_with_timeout(*args, timeout=600, **kwargs):
+    """
+    Run run_episode(...), but stop it if it takes longer than `timeout` seconds.
+    Returns the tuple from run_episode on success.
+    Raises TimeoutError if exceeded, or RuntimeError if the worker failed.
+    """
+    q = Queue()
+    p = Process(target=_run_episode_worker, args=(args, kwargs, q), daemon=True)
+    p.start()
+    p.join(timeout)
+
+    if p.is_alive():
+        # Hard timeout: terminate the process and clean up
+        p.terminate()
+        p.join()
+        raise TimeoutError(f"run_episode exceeded {timeout}s and was terminated")
+
+    try:
+        status, payload = q.get_nowait()
+    except Empty:
+        raise RuntimeError("Worker exited without returning a result (crash or early exit).")
+
+    if status == "ok":
+        return payload
+    else:
+        raise RuntimeError(f"run_episode failed in worker: {payload}")
+
 # -------------------- OPTUNA OPTIMIZATION --------------------
 def objective(trial):
     l1 = trial.suggest_float("lambda1", 1, 1e5, log=True)
@@ -159,7 +196,11 @@ def objective(trial):
     l4 = trial.suggest_float("lambda4", 1e-14, 1e-2, log=True)
     gamma = trial.suggest_float("gamma", 2, 10, log=True)
     delta = trial.suggest_float("delta_deg", 1, 10, log=True)
-    viol_rate, mean_scale, mean_trajectory_error = run_episode(l1, l2, l3, l4, gamma, delta)
+    try:
+        viol_rate, mean_scale, mean_trajectory_error = run_episode_with_timeout(l1, l2, l3, l4, gamma, delta)
+    except TimeoutError as e:
+        print(f"Trial timed out: {e}")
+        return 1000.0, -1.0, 1000.0  # Penalize timeout
 
     return viol_rate, mean_scale, mean_trajectory_error  # minimize violations, maximize scaling
 
@@ -181,7 +222,7 @@ study = optuna.create_study(
     sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
     storage=storage,
     load_if_exists=True,
-    study_name=f"config_2_viol_rate_mean_scaling_traj_error_study_{time.strftime('%Y%m%d-%H%M%S')}",
+    study_name=f"config_1_viol_rate_mean_scaling_traj_error_study_{time.strftime('%Y%m%d-%H%M%S')}",
 )
 study.optimize(objective, n_trials=2500, show_progress_bar=True, n_jobs=30)
 # fig = optuna.visualization.plot_pareto_front(study, target_names=["Violation Rate", "Mean Time Scaling"])
