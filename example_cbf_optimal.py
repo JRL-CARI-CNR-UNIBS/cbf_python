@@ -32,6 +32,7 @@ from sharework import loadSharework
 
 from bcf_utils import make_summary_figure, print_stats_table
 
+import functools
 
 from optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
 
@@ -40,11 +41,28 @@ import math
 
 from scipy.linalg import block_diag
 
+import test_publish_utils as pub_utils
+import rclpy
+
+import signal
+import threading
+
+
+stop_event = threading.Event()
+
+def _on_sigint_with_bridge(bridge, signum, frame):
+    stop_event.set()
+    try:
+        bridge.shutdown()
+    except Exception:
+        pass
+
+signal.signal(signal.SIGINT, _on_sigint_with_bridge)
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
     USE_BRIDGE = True
-
+    # rclpy.init()
 
 
     duration = 150.0
@@ -61,16 +79,18 @@ def main():
     ]
     model_wrapper = loadSharework(UR10E_JOINTS)
     prefix = 'ur10e_'
+   
 
+    # ------------------------ CONTROLLER SETUP -----------------------------------
     Tc =2e-3
     cfg = ControllerConfig(Tc=Tc)
     cfg.lambda1 = 500.0
     cfg.lambda2 = 2.55
     cfg.lambda3 = 130#1.0e3
     cfg.lambda4 = 4.0e-05 
-    cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * 1.5)
-    cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * 3)
-    cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * 6)
+    cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * 1.5)*3
+    cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * 3)*3
+    cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * 6)*3
     cfg.gamma = 10.0
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg)
 
@@ -82,11 +102,24 @@ def main():
             ordered_joint_names=UR10E_JOINTS,
             threshold=1.1)  # radians (or native units)
         first_joint_position = bridge.wait_for_first_state( target_name, timeout=5.0)
+        signal.signal(signal.SIGINT,
+                  functools.partial(_on_sigint_with_bridge, bridge))
         if math.isnan(first_joint_position):
             bridge.shutdown()
             return
         first_joint_position = bridge.getPositions()
         bridge.switch_to_forward_position_controller_service()
+
+         # ------------------------ PUBLISHER TARGETS  SETUP-----------------------------------
+        joint_target_publisher = pub_utils.JointTargetPublisher(
+            topic='joint_target',
+            joint_names=UR10E_JOINTS,
+            frame_id='world'
+        )
+
+        test_start_publisher = pub_utils.TestStartPublisher(
+            topic='test_start'
+        )
     else:
         from fake_command_bridge import FakeCommandBridge
         # Build camera pose from your INITI snippet
@@ -106,6 +139,7 @@ def main():
         )
 
         first_joint_position = home
+        
 
     model = model_wrapper.model
     viz = MeshcatVisualizer(model, model_wrapper.collision_model, model_wrapper.visual_model)
@@ -160,6 +194,9 @@ def main():
     ct, ct_qp, ct_ssm, ct_planner, ct_pin, h_log, trj_error_log, scaling_log = [], [], [], [], [], [], [], []
 
     # ------------------------------ MAIN LOOP -------------------- ----------------
+    if USE_BRIDGE:
+        test_start_publisher.publish_once(True)
+
     try:
 
         t = 0.0
@@ -170,8 +207,15 @@ def main():
         timeout_cycles = cycles =0
 
         ctrl.reset_state(q)
-
-        while t < duration:
+        # test_start = True
+        while t < duration and not stop_event.is_set():
+            # if t%T_total == 0:
+            #     test_start = False
+            #     test_start_publisher.publish_once(test_start)
+            # elif not test_start:
+            #     test_start = True
+            #     test_start_publisher.publish_once(test_start)
+            # print(f"{T_total}")
             h_min = np.inf
 
             loop_start = time.perf_counter()
@@ -184,12 +228,14 @@ def main():
             cycles += 1
 
             nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
+            if USE_BRIDGE and not stop_event.is_set():
+                joint_target_publisher.publish_once(nominal_q, nominal_Dq, nominal_DDq)
             out = ctrl.step(
                 obs_pos=obstacle_positions,
                 obs_vel=obstacle_velocities,
                 obs_acc=obstacle_accelerations,
                 nominal_q=nominal_q,
-                nominal_Dq=nominal_Dq,
+                nominal_Dq=nominal_Dq, 
                 nominal_DDq=nominal_DDq
             )
 
@@ -208,7 +254,7 @@ def main():
             # --------------------------- INTEGRATION ----------------------------
             t += Tc
 
-            if USE_BRIDGE:
+            if USE_BRIDGE and not stop_event.is_set():
                 bridge.sendCommand(q)
 
             # ----------------------------- TIMING -------------------------------
@@ -229,11 +275,29 @@ def main():
                 time.sleep(rest)
             else:
                 timeout_cycles+=1
+        if USE_BRIDGE and not stop_event.is_set():
+            test_start_publisher.publish_once(False)
 
     except KeyboardInterrupt:
-        print("Simulation interrupted by user.")
-
-
+        # request a graceful stop; loop condition will exit on next iteration
+        stop_event.set()
+# 
+    finally:
+        # bridge.shutdown()
+        # time.sleep(0.1)
+        # # 1) stop components that may be spinning their own executors (e.g., the bridge)
+        # try:
+        #     if 'bridge' in locals() and hasattr(bridge, 'shutdown'):
+        #         bridge.shutdown()
+        # except Exception:
+        #     print("Error during bridge shutdown")
+        # print(286)
+       
+        try:
+            pub_utils.publish_test_start_once(False)
+        except Exception as e:
+            print(f"[shutdown] one-shot publish failed: {e}")
+        print(304)
     # Call with your
     computation_times = np.array(ct)
     scaling_log = np.array(scaling_log)
