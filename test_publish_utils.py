@@ -5,6 +5,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.context import Context
 from sensor_msgs.msg import JointState
+from std_msgs.msg import Float64MultiArray
 from std_msgs.msg import Bool
 from builtin_interfaces.msg import Time
 from contextlib import contextmanager
@@ -12,6 +13,106 @@ from typing import Sequence, Optional, overload
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 import time
+
+import threading
+import queue
+from typing import Optional, Sequence
+
+# ... your existing imports ...
+# from rclpy.node import Node
+# from std_msgs.msg import Bool
+# from sensor_msgs.msg import JointState
+# etc.
+
+# -------------------------------------------------------------------
+# Global async publish bus: single queue, single worker thread
+# -------------------------------------------------------------------
+
+class _AsyncPublishBus:
+    """
+    Global bus that executes arbitrary callables on a single background thread.
+    Items in the queue are (callable, args, kwargs).
+    """
+    def __init__(self, maxsize: int = 2000):
+        self._queue: "queue.Queue[tuple]" = queue.Queue(maxsize=maxsize)
+        self._stop_event = threading.Event()
+        self._worker = threading.Thread(
+            target=self._worker_loop,
+            name="AsyncPublishBusWorker",
+            daemon=True,
+        )
+        self._worker.start()
+
+    def _worker_loop(self):
+        while not self._stop_event.is_set():
+            try:
+                fn, args, kwargs = self._queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
+            if fn is None:
+                self._queue.task_done()
+                break
+
+            try:
+                fn(*args, **kwargs)
+            except Exception as e:
+                # You can replace this with any logging you like
+                print(f"[AsyncPublishBus] error in task {fn}: {e}")
+            finally:
+                self._queue.task_done()
+
+    def submit(
+        self,
+        fn,
+        *args,
+        block: bool = False,
+        timeout: Optional[float] = None,
+        **kwargs,
+    ):
+        """
+        Enqueue a callable to be executed on the worker thread.
+        If block=False, drop tasks when the queue is full.
+        """
+        if self._stop_event.is_set():
+            return
+
+        item = (fn, args, kwargs)
+        if block:
+            self._queue.put(item, timeout=timeout)
+        else:
+            try:
+                self._queue.put_nowait(item)
+            except queue.Full:
+                # Drop instead of blocking the caller
+                pass
+
+    def shutdown(self, wait: bool = True):
+        self._stop_event.set()
+        try:
+            self._queue.put_nowait((None, (), {}))
+        except queue.Full:
+            pass
+        if wait:
+            try:
+                self._worker.join(timeout=1.0)
+            except Exception:
+                pass
+
+
+# Singleton instance getter
+_bus_lock = threading.Lock()
+_global_bus: Optional[_AsyncPublishBus] = None
+
+
+def _get_global_bus() -> _AsyncPublishBus:
+    global _global_bus
+    with _bus_lock:
+        if _global_bus is None:
+            _global_bus = _AsyncPublishBus(maxsize=2000)
+    return _global_bus
+
+
 def _to_list(x):
     # Accept numpy arrays or anything sequence-like; fall back to single-item list
     if isinstance(x, (list, tuple)):
@@ -40,8 +141,12 @@ class JointTargetPublisher(Node):
         self.pub = self.create_publisher(JointState, topic, 10)
         self.joint_names = list(joint_names) if joint_names is not None else None
         self.frame_id = frame_id
+
+        # shared bus for all publishers:
+        self._bus = _get_global_bus()
+
     
-    def publish_once(self, q, dq, ddq):
+    def _publish_now(self, q, dq, ddq):
         q  = _to_list(q)
         dq = _to_list(dq)
         ddq = _to_list(ddq)
@@ -69,8 +174,60 @@ class JointTargetPublisher(Node):
         msg.effort   = ddq
 
         self.pub.publish(msg)
+    def publish_once(self, q, dq, ddq, *, block: bool = False, timeout: Optional[float] = None):
+        """
+        Public API (same signature as before, with extra optional args):
+        - Non-blocking by default; drops messages if the queue is full.
+        - Set block=True if you ever want back-pressure in non-RT contexts.
+        """
+        self._bus.submit(self._publish_now, q, dq, ddq, block=block, timeout=timeout)
 
-        
+class DoubleArrayPublisher(Node):
+    """
+    Minimal publisher that exposes publish_once(arr).
+    """
+    
+    def __init__(
+        self,
+        topic: str = 'human_state',
+        node_name: str = 'double_array_publisher',
+        dim : int = 0,
+        frame_id: str = ''
+    ):
+        super().__init__(node_name)
+        self.pub = self.create_publisher(Float64MultiArray, topic, 10)
+        self.frame_id = frame_id
+        self.dim = dim
+        # shared bus for all publishers:
+        self._bus = _get_global_bus()
+
+    
+    def _publish_now(self, array):
+        array = _to_list(array)
+
+        n = len(array)
+        if n != self.dim:
+            raise ValueError(
+                f'Length mismatch: requested: {self.dim}, got: {len(array)}'
+            )
+       
+        msg = Float64MultiArray()
+        now = self.get_clock().now().nanoseconds/1e09  # builtin_interfaces/Time
+        msg.data = []
+        msg.data.append(now)
+        msg.data.extend(array)
+        self.pub.publish(msg)
+
+
+    def publish_once(self, array, *, block: bool = False, timeout: Optional[float] = None):
+        """
+        Public API (same signature as before, with extra optional args):
+        - Non-blocking by default; drops messages if the queue is full.
+        - Set block=True if you ever want back-pressure in non-RT contexts.
+        """
+        self._bus.submit(self._publish_now, array, block=block, timeout=timeout)
+
+
 class TestStartPublisher(Node):
     """
     Minimal publisher that exposes publish_once(bool)
@@ -81,14 +238,21 @@ class TestStartPublisher(Node):
     ):
         super().__init__('test_start_publisher')
         self.publisher = self.create_publisher(Bool, topic, 10)
-        
-    def publish_once(self, bool_value: bool):
+        self._bus = _get_global_bus()
+
+    def _publish_now(self, bool_value: bool):
     
         msg = Bool()
         msg.data = bool_value
         self.publisher.publish(msg)
         # Give the executor a chance to process the outgoing message if you’re exiting right away.
         #rclpy.spin_once(self, timeout_sec=0.0)
+
+    def publish_once(self, bool_value: bool, *, block: bool = False, timeout: Optional[float] = None):
+        """
+        Enqueue a single Bool publish on the global bus.
+        """
+        self._bus.submit(self._publish_now, bool_value, block=block, timeout=timeout)
 
 def publish_test_start_once(value: bool, topic: str = 'test_start', wait_match_sec: float = 1.0, wait_acked_sec: float = 0.5):
     """

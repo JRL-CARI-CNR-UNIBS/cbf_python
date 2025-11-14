@@ -584,7 +584,7 @@ def compute_h_and_lie_numba(translation_bt, obs_pos, vel_lineare, v_obs, Tr, a_s
     Lie_g_h[0] += Jh_psi[2] * Jpsi_g[2, 0]; Lie_g_h[1] += Jh_psi[2] * Jpsi_g[2, 1]; Lie_g_h[2] += Jh_psi[2] * Jpsi_g[2, 2]
     Lie_g_h[0] += Jh_psi[3] * Jpsi_g[3, 0]; Lie_g_h[1] += Jh_psi[3] * Jpsi_g[3, 1]; Lie_g_h[2] += Jh_psi[3] * Jpsi_g[3, 2]
 
-    return h, Lie_f_h, Lie_g_h
+    return h, Lie_f_h, Lie_g_h, d, v_r-v_h
 
 
 # ------------------------------------------------------------
@@ -619,7 +619,7 @@ def compute_h_and_constraints_numba(
         constraint_row  = Lie_g_h @ Jlin
         constraint_bound= -(Lie_g_h @ dJlin @ dq) - Lie_f_h - gamma*h
     """
-    h, Lie_f_h, Lie_g_h = compute_h_and_lie_numba(
+    h, Lie_f_h, Lie_g_h, d, vrel = compute_h_and_lie_numba(
         translation_bt, obs_pos, vel_lineare, v_obs, Tr, a_s, C, obs_acc, atol
     )
 
@@ -645,4 +645,4 @@ def compute_h_and_constraints_numba(
         lg_dJ_dq += tmp[j] * dq[j]
 
     constraint_bound = -lg_dJ_dq - Lie_f_h - gamma * h
-    return h, constraint_row, constraint_bound
+    return h, constraint_row, constraint_bound, d,vrel

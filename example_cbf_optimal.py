@@ -57,7 +57,7 @@ def _on_sigint_with_bridge(bridge, signum, frame):
     except Exception:
         pass
 
-signal.signal(signal.SIGINT, _on_sigint_with_bridge)
+#signal.signal(signal.SIGINT, _on_sigint_with_bridge)
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
@@ -120,6 +120,10 @@ def main():
         test_start_publisher = pub_utils.TestStartPublisher(
             topic='test_start'
         )
+        cbf_out_publisher = pub_utils.DoubleArrayPublisher(
+            topic='cbf_output',
+            node_name='cbf_output_publisher',
+            dim = 10)
     else:
         from fake_command_bridge import FakeCommandBridge
         # Build camera pose from your INITI snippet
@@ -195,7 +199,7 @@ def main():
 
     # ------------------------------ MAIN LOOP -------------------- ----------------
     if USE_BRIDGE:
-        test_start_publisher.publish_once(True)
+        test_start_publisher.publish_once(True) # pyright: ignore[reportPossiblyUnboundVariable]
 
     try:
 
@@ -228,8 +232,7 @@ def main():
             cycles += 1
 
             nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
-            if USE_BRIDGE and not stop_event.is_set():
-                joint_target_publisher.publish_once(nominal_q, nominal_Dq, nominal_DDq)
+           
             out = ctrl.step(
                 obs_pos=obstacle_positions,
                 obs_vel=obstacle_velocities,
@@ -238,6 +241,28 @@ def main():
                 nominal_Dq=nominal_Dq, 
                 nominal_DDq=nominal_DDq
             )
+            if USE_BRIDGE and not stop_event.is_set():
+                joint_target_publisher.publish_once(nominal_q, nominal_Dq, nominal_DDq) # pyright: ignore[reportPossiblyUnboundVariable]
+                hmin = out["h_min"]
+                dmin = out["d_min"]
+                trj_error = out["trajectory_error"] 
+                end_eff_pos = out["end_effector_pos"]
+                end_eff_vel = out["end_effector_vel"]
+                vrel_min = out["vrel_min"]
+                cbf_out_publisher.publish_once(
+                    [
+                        hmin,
+                        dmin,
+                        trj_error,
+                        end_eff_pos[0],
+                        end_eff_pos[1],
+                        end_eff_pos[2],
+                        end_eff_vel[0],
+                        end_eff_vel[1],
+                        end_eff_vel[2],
+                        vrel_min
+                    ]
+                ) # pyright: ignore[reportPossiblyUnboundVariable]
 
             q = out["q"]
 
@@ -276,7 +301,7 @@ def main():
             else:
                 timeout_cycles+=1
         if USE_BRIDGE and not stop_event.is_set():
-            test_start_publisher.publish_once(False)
+            test_start_publisher.publish_once(False) # pyright: ignore[reportPossiblyUnboundVariable]
 
     except KeyboardInterrupt:
         # request a graceful stop; loop condition will exit on next iteration

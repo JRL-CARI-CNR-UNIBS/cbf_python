@@ -143,7 +143,7 @@ class BCFOptimalController:
             dJlins[i, :, :] = dJ[:3, :]
 
         # NUMBA: assemble constraints + objective partials
-        row, h_min = assemble_qp_inplace(
+        row, h_min, d_min, vrel_min = assemble_qp_inplace(
             self.P2, self.b1, self.b2, self.b3,
             self.A, self.c,
             self.FreePos, self.ForcedPos, self.FreeVel, self.ForcedVel,
@@ -188,39 +188,39 @@ class BCFOptimalController:
                 # print(f"unfeasible    dq = {(np.abs(self.dq) > self.cfg.Dq_max).T}")
                 # print(f"unfeasible  Dtrj = {self.Dtrajectory_time<0 or self.Dtrajectory_time>1}. Dtrj={self.Dtrajectory_time}")
 
-                A_unfeasible = np.zeros((3 + 6*nq, nq + 1), dtype=np.float64)
-                c_unfeasible = np.zeros(3 + 6*nq, dtype=np.float64)
-                A_unfeasible[:(3 + 4*nq), :] = A[:(3 + 4*nq), :]
-                c_unfeasible[:(3 + 4*nq)] = c[:(3 + 4*nq)]   
-                row = 3 + 4 * nq
-                # I*u <= ddq + delta_unfeasible
-                for i in range(nq):
-                    for j in range(nq):
-                        A_unfeasible[row + i, j] = -1.0 if i == j else 0.0
-                    c_unfeasible[row + i] = -self.ddq[i] - self.cfg.delta_unfeasible[i]
-                row += nq
+                # A_unfeasible = np.zeros((3 + 6*nq, nq + 1), dtype=np.float64)
+                # c_unfeasible = np.zeros(3 + 6*nq, dtype=np.float64)
+                # A_unfeasible[:(3 + 4*nq), :] = A[:(3 + 4*nq), :]
+                # c_unfeasible[:(3 + 4*nq)] = c[:(3 + 4*nq)]   
+                # row = 3 + 4 * nq
+                # # I*u <= ddq + delta_unfeasible
+                # for i in range(nq):
+                #     for j in range(nq):
+                #         A_unfeasible[row + i, j] = -1.0 if i == j else 0.0
+                #     c_unfeasible[row + i] = -self.ddq[i] - self.cfg.delta_unfeasible[i]
+                # row += nq
 
-                # -I*u <= delta_unfeasible - ddq
-                for i in range(nq):
-                    for j in range(nq):
-                        A_unfeasible[row + i, j] = 1.0 if i == j else 0.0
-                    c_unfeasible[row + i] = self.ddq[i] - self.cfg.delta_unfeasible[i]
-                row += nq
+                # # -I*u <= delta_unfeasible - ddq
+                # for i in range(nq):
+                #     for j in range(nq):
+                #         A_unfeasible[row + i, j] = 1.0 if i == j else 0.0
+                #     c_unfeasible[row + i] = self.ddq[i] - self.cfg.delta_unfeasible[i]
+                # row += nq
 
 
 
                 self.bunfeasible[:-1] = -Tc * self.dq
                 self.bunfeasible[-1]  = -Tc * self.Dtrajectory_time
-                # u, *_ = quadprog.solve_qp(
-                #     self.Punfeasible, self.bunfeasible,
-                #     A[:(3 + nq * 4), :].T,
-                #     c[:(3 + nq * 4)]
-                # )
                 u, *_ = quadprog.solve_qp(
                     self.Punfeasible, self.bunfeasible,
-                    A_unfeasible.T,
-                    c_unfeasible
+                    A[:(3 + nq * 4), :].T,
+                    c[:(3 + nq * 4)]
                 )
+                # u, *_ = quadprog.solve_qp(
+                #     self.Punfeasible, self.bunfeasible,
+                #     A_unfeasible.T,
+                #     c_unfeasible
+                # )
             else:
                 raise
 
@@ -236,6 +236,10 @@ class BCFOptimalController:
 
         return {
             "h_min": float(h_min),
+            "d_min": float(d_min),
+            "vrel_min": float(vrel_min),
+            "end_effector_pos": frames_p[-1, :].copy(),
+            "end_effector_vel": frames_v[-1, :].copy(),
             "trajectory_error": float(trajectory_err),
             "Tbt_nominal": Tbt_nominal,
             "obs_pos": obs_pos,

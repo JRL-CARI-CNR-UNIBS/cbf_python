@@ -125,6 +125,8 @@ def append_cbf_rows_loop(
     Tr, a_s, C, gamma, atol
 ):
     hmin = 1e9
+    dmin = 1e9
+    vrel_min = 0.0  # unused placeholder
     if not HAS_CBF:
         return row, hmin
 
@@ -139,16 +141,20 @@ def append_cbf_rows_loop(
         dJlin = dJlins[f]
         for o in range(nO):
             op = obs_p[o]; ov = obs_v[o]; oa = obs_a[o]
-            h, row_vec, bound = compute_h_and_constraints_numba(
+            h, row_vec, bound, d, vrel = compute_h_and_constraints_numba(
                 p_bt, op, vlin, ov, Tr, a_s, C, oa, atol, Jlin, dJlin, dq, gamma
             )
             if h < hmin:
                 hmin = h
+            if d < dmin:
+                dmin = d
+            if vrel < vrel_min:
+                vrel_min = vrel
             for j in range(nq):
                 A[row, j] = row_vec[j]
             c[row] = bound
             row += 1
-    return row, hmin
+    return row, hmin, dmin, vrel_min
 
 
 # ------------------------------------------------------------
@@ -238,13 +244,14 @@ def assemble_qp_inplace(
 
     # CBF rows (if any)
     if frames_p.size != 0 and obs_p.size != 0 and HAS_CBF:
-        row, hmin = append_cbf_rows_loop(
+        row, hmin, dmin, vrel_min = append_cbf_rows_loop(
             A, c, row, frames_p, frames_vlin, obs_p, obs_v, obs_a, Jlins, dJlins, dq, Tr, a_s, C, gamma, atol
         )
     else:
         hmin = 1e9
-
+        dmin = 1e9
+        vrel_min = 1e9  # unused placeholder
     # objective parts
     assemble_objective_parts_inplace(P2, b1, b2, b3, q, dq, nominal_q, nominal_Dq, Dtraj, Tc)
 
-    return row, hmin
+    return row, hmin, dmin, vrel_min
