@@ -213,9 +213,12 @@ class DoubleArrayPublisher(Node):
        
         msg = Float64MultiArray()
         now = self.get_clock().now().nanoseconds/1e09  # builtin_interfaces/Time
+        # self._logger.warning(f"Publishing at time: {now}, OF TYPE: {type(now)}")
+
         msg.data = []
         msg.data.append(now)
         msg.data.extend(array)
+        # self._logger.warning(f"Publishing time: {msg.data[0]}")    
         self.pub.publish(msg)
 
 
