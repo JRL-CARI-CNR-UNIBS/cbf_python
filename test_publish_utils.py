@@ -16,6 +16,7 @@ import time
 
 import threading
 import queue
+import numpy as np
 from typing import Optional, Sequence
 
 # ... your existing imports ...
@@ -27,6 +28,12 @@ from typing import Optional, Sequence
 # -------------------------------------------------------------------
 # Global async publish bus: single queue, single worker thread
 # -------------------------------------------------------------------
+
+def ndarray2list(array):
+    list_out = []
+    for element in array:
+        list_out.extend(element)
+    return list_out
 
 class _AsyncPublishBus:
     """
@@ -191,26 +198,32 @@ class DoubleArrayPublisher(Node):
         self,
         topic: str = 'human_state',
         node_name: str = 'double_array_publisher',
-        dim : int = 0,
+        #dim : int = 0,
         frame_id: str = ''
     ):
         super().__init__(node_name)
         self.pub = self.create_publisher(Float64MultiArray, topic, 10)
         self.frame_id = frame_id
-        self.dim = dim
+        #self.dim = dim
         # shared bus for all publishers:
         self._bus = _get_global_bus()
 
     
     def _publish_now(self, array):
-        array = _to_list(array)
 
-        n = len(array)
-        if n != self.dim:
-            raise ValueError(
-                f'Length mismatch: requested: {self.dim}, got: {len(array)}'
-            )
-       
+        if isinstance(array, np.ndarray):
+            array = ndarray2list(array)
+            # print(array)
+            # print("Length: ",len(array))
+        else:
+            array = _to_list(array)
+
+        # n = len(array)
+        # if n != self.dim:
+        #     raise ValueError(
+        #         f'Length mismatch: requested: {self.dim}, got: {len(array)}'
+        #     )
+
         msg = Float64MultiArray()
         now = self.get_clock().now().nanoseconds/1e09  # builtin_interfaces/Time
         # self._logger.warning(f"Publishing at time: {now}, OF TYPE: {type(now)}")

@@ -61,7 +61,7 @@ def _on_sigint_with_bridge(bridge, signum, frame):
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
-    USE_BRIDGE = True
+    USE_BRIDGE = False
     # rclpy.init()
 
 
@@ -109,21 +109,6 @@ def main():
             return
         first_joint_position = bridge.getPositions()
         bridge.switch_to_forward_position_controller_service()
-
-         # ------------------------ PUBLISHER TARGETS  SETUP-----------------------------------
-        joint_target_publisher = pub_utils.JointTargetPublisher(
-            topic='joint_target',
-            joint_names=UR10E_JOINTS,
-            frame_id='world'
-        )
-
-        test_start_publisher = pub_utils.TestStartPublisher(
-            topic='test_start'
-        )
-        cbf_out_publisher = pub_utils.DoubleArrayPublisher(
-            topic='cbf_output',
-            node_name='cbf_output_publisher',
-            dim = 10)
     else:
         from fake_command_bridge import FakeCommandBridge
         # Build camera pose from your INITI snippet
@@ -135,15 +120,31 @@ def main():
 
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
-            csv_path="/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/zed_skeleton_kinematics/skeleton_vectors.csv",
+            csv_path="/home/galileo/Desktop/skeleton_vectors.csv",
             Tworld_to_cam=T_wc,
             # slowdown_factor=0.1,
             slowdown_factor=1.0,
 
         )
-
+        rclpy.init()
         first_joint_position = home
-        
+    # ------------------------ PUBLISHER TARGETS  SETUP-----------------------------------
+    joint_target_publisher = pub_utils.JointTargetPublisher(
+        topic='joint_target',
+        joint_names=UR10E_JOINTS,
+        frame_id='world'
+    )
+
+    test_start_publisher = pub_utils.TestStartPublisher(
+        topic='test_start'
+    )
+    cbf_out_publisher = pub_utils.DoubleArrayPublisher(
+        topic='cbf_output',
+        node_name='cbf_output_publisher',)
+        # dim = 10)
+    human_pos_publisher = pub_utils.DoubleArrayPublisher(
+        topic='human_pos_keypoints',
+        node_name='human_pos_publisher',)
 
     model = model_wrapper.model
     viz = MeshcatVisualizer(model, model_wrapper.collision_model, model_wrapper.visual_model)
@@ -198,8 +199,8 @@ def main():
     ct, ct_qp, ct_ssm, ct_planner, ct_pin, h_log, trj_error_log, scaling_log = [], [], [], [], [], [], [], []
 
     # ------------------------------ MAIN LOOP -------------------- ----------------
-    if USE_BRIDGE:
-        test_start_publisher.publish_once(True) # pyright: ignore[reportPossiblyUnboundVariable]
+
+    test_start_publisher.publish_once(True) # pyright: ignore[reportPossiblyUnboundVariable]
 
     try:
 
@@ -228,7 +229,9 @@ def main():
 
             obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
 
-
+            # print ("obstacle_positions:", obstacle_positions)
+            # print ("type(obstacle_positions):", type(obstacle_positions))
+            # print("size(obstacle_positions): ", len(obstacle_positions))
             cycles += 1
 
             nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
@@ -241,7 +244,7 @@ def main():
                 nominal_Dq=nominal_Dq, 
                 nominal_DDq=nominal_DDq
             )
-            if USE_BRIDGE and not stop_event.is_set():
+            if not stop_event.is_set():
                 joint_target_publisher.publish_once(nominal_q, nominal_Dq, nominal_DDq) # pyright: ignore[reportPossiblyUnboundVariable]
                 hmin = out["h_min"]
                 dmin = out["d_min"]
@@ -249,6 +252,7 @@ def main():
                 end_eff_pos = out["end_effector_pos"]
                 end_eff_vel = out["end_effector_vel"]
                 vrel_min = out["vrel_min"]
+                scaling = out["Dtrajectory_time"]
                 cbf_out_publisher.publish_once(
                     [
                         hmin,
@@ -260,10 +264,11 @@ def main():
                         end_eff_vel[0],
                         end_eff_vel[1],
                         end_eff_vel[2],
-                        vrel_min
+                        vrel_min,
+                        scaling,
                     ]
                 ) # pyright: ignore[reportPossiblyUnboundVariable]
-
+                human_pos_publisher.publish_once(obstacle_positions)
             q = out["q"]
 
             if cycles<5:
@@ -300,7 +305,7 @@ def main():
                 time.sleep(rest)
             else:
                 timeout_cycles+=1
-        if USE_BRIDGE and not stop_event.is_set():
+        if not stop_event.is_set():
             test_start_publisher.publish_once(False) # pyright: ignore[reportPossiblyUnboundVariable]
 
     except KeyboardInterrupt:
