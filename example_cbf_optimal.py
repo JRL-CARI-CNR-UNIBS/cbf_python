@@ -61,7 +61,7 @@ def _on_sigint_with_bridge(bridge, signum, frame):
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
-    USE_BRIDGE = False
+    USE_BRIDGE = True
     # rclpy.init()
 
 
@@ -174,25 +174,36 @@ def main():
 
     # --------------------------- CONTROL INITIALISATION --------------------------
     q = first_joint_position.copy()
-    q2 = home.copy()
-    q2[1] = -np.pi * 0.5
-    q2[2] = np.pi * 0.5
-    q3 = np.array([ 40.0, -80.0, 100.0, -120.0, 90.0, 0.0])*np.pi/180.0
-    q4 = np.array([ 122.0, -70.0, 100.0, -120.0, 90.0, 0.0])*np.pi/180.0
-    print(f"q={q.T}\nq={q2.T}")
+    # q2 = home.copy()
+    # q2[1] = -np.pi * 0.5
+    # q2[2] = np.pi * 0.5
+    # q3 = np.array([ 40.0, -80.0, 100.0, -120.0, 90.0, 0.0])*np.pi/180.0
+    # q4 = np.array([ 122.0, -70.0, 100.0, -120.0, 90.0, 0.0])*np.pi/180.0
+    # print(f"q={q.T}\nq={q2.T}")
 
-    cfg.Dq_max = cfg.Dq_max*0.2
+    # ---------------------------TEST WAYPOINTS ------------------------------
+    q10 = np.array([ 31.0, -78.0, 115.0, -127.0, 86.0, -32.0])*np.pi/180.0
+    q20 =  np.array([ 31.0, -83.0, 98.0, -110.0, 86.0, -32.0])*np.pi/180.0
+    q22 =  np.array([ 40.0, -126.0, 141.0, -100.0, 86.0, 45.0])*np.pi/180.0
+    q25 =  np.array([ 130.0, -100.0, 125.0, -115.0, 94.0, -20.0])*np.pi/180.0
+    q30 =  np.array([ 136.0, -60.0, 90.0, -122.0, 90.0, 45.0])*np.pi/180.0
+    q40 =  np.array([ 134.0, -65.0, 70.0, -90.0, 90.0, 45.0])*np.pi/180.0
+    cfg.Dq_max = cfg.Dq_max*0.25
     cfg.DDq_max = cfg.DDq_max*0.2
     planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.1, DDq_max=cfg.DDq_max*0.1)
 
     # 2 · add way‑points -------------------------------------------
     for _ in range(3):
         planner.addWayPoint(q)
-        planner.addWayPoint(q4)
-        planner.addWayPoint(home)        
-        planner.addWayPoint(q3)
+        planner.addWayPoint(q10)
+        planner.addWayPoint(q20)
+        planner.addWayPoint(q10)
+        planner.addWayPoint(q22)
+        planner.addWayPoint(q25)
+        planner.addWayPoint(q30)
+        planner.addWayPoint(q40)
+        planner.addWayPoint(q30)
         planner.addWayPoint(q)
-
     T_total = planner.computeTime()
 
     renderer.publishPath(planner.publishPath())
