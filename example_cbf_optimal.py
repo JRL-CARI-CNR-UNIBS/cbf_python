@@ -112,15 +112,16 @@ def main():
     else:
         from fake_command_bridge import FakeCommandBridge
         # Build camera pose from your INITI snippet
-        quat = pin.Quaternion(0.814, 0.178, 0.535, 0.137)
+        quat = pin.Quaternion(0.83, 0.185, 0.513, 0.12)
         quat.normalize()
+
         R = quat.toRotationMatrix()
 
-        T_wc = pin.SE3(R, np.array([0.108, -0.883, 2.351]))
+        T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
 
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
-            csv_path="/home/galileo/Desktop/skeleton_vectors.csv",
+            csv_path="/home/galileo/Desktop/skeleton_vectors_5.csv",
             Tworld_to_cam=T_wc,
             # slowdown_factor=0.1,
             slowdown_factor=1.0,
