@@ -61,7 +61,7 @@ def _on_sigint_with_bridge(bridge, signum, frame):
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
-    USE_BRIDGE = True
+    USE_BRIDGE = False
     # rclpy.init()
 
 
@@ -205,7 +205,7 @@ def main():
         planner.addWayPoint(q30)
         planner.addWayPoint(q)
     T_total = planner.computeTime()
-
+    print(f"Total time: {T_total}")
     renderer.publishPath(planner.publishPath())
 
     ct, ct_qp, ct_ssm, ct_planner, ct_pin, h_log, trj_error_log, scaling_log = [], [], [], [], [], [], [], []
