@@ -21,15 +21,16 @@ from interpolator import SegmentedSE3Trap
 from visualization_daemon import VisualizationDaemon
 
 import signal
-
+import os
+from datetime import datetime
+import test_publish_utils as pub_utils
 from PID_cbf_task_controller import UR10CBFController
-from cbf_numba_lib import (
-    compute_h,
-    range_state_derivative,
-    jacobian_psi,
-    jacobian_h,
-    damped_pinv_svd,
-)
+import csv_publishers
+
+USE_BRIDGE = False
+LOG_DATA = True
+log_path = "resullts/simulation/PID"
+
 
 def compute_ee_pose(q, model, data, ee_frame_id):
     """
@@ -94,7 +95,6 @@ def main():
     viz.initViewer(open=True)
     viz.loadViewerModel()
     # ------- BRIDGE SETUP -----------
-    USE_BRIDGE = False
     target_name = "ur10e_wrist_3_joint"
     idx = UR10E_JOINTS.index(target_name)
 
@@ -182,7 +182,7 @@ def main():
 
     # Gains (same as original)
     wn = 100.0
-    xi = 0.1
+    xi = 0.5
     Kp_tra = np.array([1.0, 1.0, 1.0]) * wn ** 2
     Kd_tra = np.array([1.0, 1.0, 1.0]) * 2.0 * xi * wn
     Kp_rot = np.array([1.0, 1.0, 1.0]) * wn ** 2
@@ -209,8 +209,8 @@ def main():
 
 
     # 3) Split into linear and angular parts
-    v_lin_max = 26.6586*0.1*0.09  # linear velocity [m/s]
-    w_max = (44.1351 *0.1*0.09) # angular velocity [rad/s]
+    v_lin_max = 26.6586*0.1*0.055  # linear velocity [m/s]
+    w_max = (44.1351 *0.1*0.055) # angular velocity [rad/s]
 
     a_lin_max = 650*0.1*0.1  # linear acceleration [m/s^2]
     alpha_max = 750 *0.1*0.1 # angular acceleration [rad/s^2]
@@ -247,6 +247,55 @@ def main():
 
     renderer.publishPath(planner.publishPath())
     print(f"Total time = {T_total:.3f} s")
+
+    # ------------------------ PUBLISHER TARGETS  SETUP-----------------------------------
+    if LOG_DATA:
+        if USE_BRIDGE:
+            joint_target_publisher = pub_utils.JointTargetPublisher(
+                topic='joint_target',
+                joint_names=UR10E_JOINTS,
+                frame_id='world'
+            )
+
+            test_start_publisher = pub_utils.TestStartPublisher(
+                topic='test_start'
+            )
+            cbf_out_publisher = pub_utils.DoubleArrayPublisher(
+                topic='cbf_output',
+                node_name='cbf_output_publisher', )
+            # dim = 10)
+            human_pos_publisher = pub_utils.DoubleArrayPublisher(
+                topic='human_pos_keypoints',
+                node_name='human_pos_publisher', )
+        else:
+            now = datetime.now().strftime("%Y%m%d_%H%M%S")
+            test_path = log_path + "/" + str(now)
+            now = datetime.now().strftime("_%Y_%m_%d_%H_%M_%S")
+            print(test_path)
+            os.makedirs(test_path, exist_ok=True)
+            joint_target_publisher = csv_publishers.DoubleArrayCsvPublisher(
+                csv_path=test_path + "/reference_trajectory" + now + ".csv",
+                column_names="time,target_x,target_y,target_z",
+            )
+            # JOINT STATE PUBLISHER ONLY FOR CSV LOGGING
+            joint_state_publisher = csv_publishers.JointTargetCsvPublisher(
+                csv_path=test_path + "/joint_states" + now + ".csv",
+                column_names="time,joint_0_pos,joint_0_vel,joint_0_acceleration,joint_1_pos,joint_1_vel,joint_1_acceleration,joint_2_pos,joint_2_vel,joint_2_acceleration,joint_3_pos,joint_3_vel,joint_3_acceleration,joint_4_pos,joint_4_vel,joint_4_acceleration,joint_5_pos,joint_5_vel,joint_5_acceleration",
+                joint_names=UR10E_JOINTS,
+            )
+
+            test_start_publisher = csv_publishers.TestStartCsvPublisher(
+                csv_path=test_path + "/TEST_START" + now + ".csv",
+                column_names="time,val"
+            )
+            cbf_out_publisher = csv_publishers.DoubleArrayCsvPublisher(
+                csv_path=test_path + "/cbf_results" + now + ".csv",
+                column_names="time,h_min,d_min,trajectory_error,pos_ee_x,pos_ee_y,pos_ee_z,vel_ee_x,vel_ee_y,vel_ee_z,v_rel_min")
+            # dim = 10)
+            human_pos_publisher = csv_publishers.DoubleArrayCsvPublisher(
+                csv_path=test_path + "/human_positions" + now + ".csv",
+                column_names="time,human_keypoint_0_x,human_keypoint_0_y,human_keypoint_0_z,human_keypoint_1_x,human_keypoint_1_y,human_keypoint_1_z,human_keypoint_2_x,human_keypoint_2_y,human_keypoint_2_z,human_keypoint_3_x,human_keypoint_3_y,human_keypoint_3_z,human_keypoint_4_x,human_keypoint_4_y,human_keypoint_4_z,human_keypoint_5_x,human_keypoint_5_y,human_keypoint_5_z,human_keypoint_6_x,human_keypoint_6_y,human_keypoint_6_z,human_keypoint_7_x,human_keypoint_7_y,human_keypoint_7_z,human_keypoint_8_x,human_keypoint_8_y,human_keypoint_8_z,human_keypoint_9_x,human_keypoint_9_y,human_keypoint_9_z,human_keypoint_10_x,human_keypoint_10_y,human_keypoint_10_z,human_keypoint_11_x,human_keypoint_11_y,human_keypoint_11_z,human_keypoint_12_x,human_keypoint_12_y,human_keypoint_12_z,human_keypoint_13_x,human_keypoint_13_y,human_keypoint_13_z,human_keypoint_14_x,human_keypoint_14_y,human_keypoint_14_z,human_keypoint_15_x,human_keypoint_15_y,human_keypoint_15_z,human_keypoint_16_x,human_keypoint_16_y,human_keypoint_16_z,human_keypoint_17_x,human_keypoint_17_y,human_keypoint_17_z"
+            )
 
     # ------------------------------ MAIN LOOP ---------------------------- #
     try:
@@ -285,6 +334,8 @@ def main():
             )
 
             q = out["q"]
+            dq = out["dq"]
+            ddq = out["ddq"]
             h_min = out["h_min"]
 
             # --------------------------- TIMING & VISUALS ------------------- #
@@ -292,10 +343,41 @@ def main():
             trajectory_time += Dtrajectory_time * Tc + 0.5 * DDtrajectory_time * Tc ** 2.0
             Dtrajectory_time += DDtrajectory_time * Tc
 
+            if USE_BRIDGE:
+                bridge.sendCommand(q)
+
+            # if not stop_event.is_set():
+            nom_x, nom_y, nom_z = goal_pose.translation.tolist()
+            joint_target_publisher.publish_once([nom_x, nom_y, nom_z])
+            hmin = out["h_min"]
+            dmin = out["d_min"]
+            trj_error = out["trajectory_error"]
+            end_eff_pos = out["end_effector_pos"]
+            end_eff_vel = out["end_effector_vel"]
+            vrel_min = out["vrel_min"]
+            cbf_out_publisher.publish_once(
+                [
+                    hmin,
+                    dmin,
+                    trj_error,
+                    end_eff_pos[0],
+                    end_eff_pos[1],
+                    end_eff_pos[2],
+                    end_eff_vel[0],
+                    end_eff_vel[1],
+                    end_eff_vel[2],
+                    vrel_min,
+                ]
+            )  # pyright: ignore[reportPossiblyUnboundVariable]
+            human_pos_publisher.publish_once(obstacle_positions)
+            if not USE_BRIDGE and LOG_DATA:
+                joint_state_publisher.publish_once(q, dq, ddq)
+
+
             elapsed = time.perf_counter() - loop_start
             rest = Tc - elapsed
 
-            vizualization_string = f"h = {h_min:.2f} m"
+            vizualization_string = f"h = {h_min:.2f} m, err={out['trajectory_error']:.2f}"
             if rest > 0:
                 renderer.push_state(
                     q,
@@ -307,6 +389,7 @@ def main():
                 elapsed = time.perf_counter() - loop_start
                 rest = max(0.0, Tc - elapsed)
                 time.sleep(rest)
+        print ("FINE CICLO")
 
     except KeyboardInterrupt:
         print("Simulation interrupted by user.")

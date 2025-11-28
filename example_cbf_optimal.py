@@ -17,7 +17,7 @@
 #   integration, shared‑state publication, and fixed‑period sleep.
 # • Added graceful keyboard‑interrupt handling: Ctrl‑C shuts down cleanly.
 # -----------------------------------------------------------------------------
-
+import os
 import time
 
 import meshcat.geometry as mgeom
@@ -37,16 +37,13 @@ import functools
 from optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
 
 import math
-
-
-from scipy.linalg import block_diag
-
+from datetime import datetime
 import test_publish_utils as pub_utils
 import rclpy
 
 import signal
 import threading
-
+import csv_publishers
 
 stop_event = threading.Event()
 
@@ -62,6 +59,8 @@ def _on_sigint_with_bridge(bridge, signum, frame):
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
     USE_BRIDGE = False
+    LOG_DATA = True
+    log_path = "resullts/simulation/scaling"
     # rclpy.init()
 
 
@@ -130,22 +129,55 @@ def main():
         rclpy.init()
         first_joint_position = home
     # ------------------------ PUBLISHER TARGETS  SETUP-----------------------------------
-    joint_target_publisher = pub_utils.JointTargetPublisher(
-        topic='joint_target',
-        joint_names=UR10E_JOINTS,
-        frame_id='world'
-    )
+    if LOG_DATA:
+        if USE_BRIDGE:
+            joint_target_publisher = pub_utils.JointTargetPublisher(
+                topic='joint_target',
+                joint_names=UR10E_JOINTS,
+                frame_id='world'
+            )
 
-    test_start_publisher = pub_utils.TestStartPublisher(
-        topic='test_start'
-    )
-    cbf_out_publisher = pub_utils.DoubleArrayPublisher(
-        topic='cbf_output',
-        node_name='cbf_output_publisher',)
-        # dim = 10)
-    human_pos_publisher = pub_utils.DoubleArrayPublisher(
-        topic='human_pos_keypoints',
-        node_name='human_pos_publisher',)
+            test_start_publisher = pub_utils.TestStartPublisher(
+                topic='test_start'
+            )
+            cbf_out_publisher = pub_utils.DoubleArrayPublisher(
+                topic='cbf_output',
+                node_name='cbf_output_publisher',)
+                # dim = 10)
+            human_pos_publisher = pub_utils.DoubleArrayPublisher(
+                topic='human_pos_keypoints',
+                node_name='human_pos_publisher',)
+        else:
+            now = datetime.now().strftime("%Y%m%d_%H%M%S")
+            test_path = log_path+"/"+str(now)
+            now = datetime.now().strftime("_%Y_%m_%d_%H_%M_%S")
+            print(test_path)
+            os.makedirs(test_path, exist_ok = True)
+            joint_target_publisher = csv_publishers.JointTargetCsvPublisher(
+                csv_path=test_path + "/reference_trajectory" + now + ".csv",
+                column_names="time,target_joint_0_pos,target_joint_0_vel,target_joint_0_acceleration,target_joint_1_pos,target_joint_1_vel,target_joint_1_acceleration,target_joint_2_pos,target_joint_2_vel,target_joint_2_acceleration,target_joint_3_pos,target_joint_3_vel,target_joint_3_acceleration,target_joint_4_pos,target_joint_4_vel,target_joint_4_acceleration,target_joint_5_pos,target_joint_5_vel,target_joint_5_acceleration",
+                joint_names=UR10E_JOINTS,
+            )
+            # JOINT STATE PUBLISHER ONLY FOR CSV LOGGING
+            joint_state_publisher = csv_publishers.JointTargetCsvPublisher(
+                csv_path =  test_path+"/joint_states"+now+".csv",
+                column_names = "time,joint_0_pos,joint_0_vel,joint_0_acceleration,joint_1_pos,joint_1_vel,joint_1_acceleration,joint_2_pos,joint_2_vel,joint_2_acceleration,joint_3_pos,joint_3_vel,joint_3_acceleration,joint_4_pos,joint_4_vel,joint_4_acceleration,joint_5_pos,joint_5_vel,joint_5_acceleration",
+                joint_names = UR10E_JOINTS,
+            )
+
+            test_start_publisher = csv_publishers.TestStartCsvPublisher(
+                csv_path=test_path + "/TEST_START"+now+".csv",
+                column_names="time,val"
+            )
+            cbf_out_publisher = csv_publishers.DoubleArrayCsvPublisher(
+                csv_path=test_path + "/cbf_results"+now+".csv",
+                column_names="time,h_min,d_min,trajectory_error,pos_ee_x,pos_ee_y,pos_ee_z,vel_ee_x,vel_ee_y,vel_ee_z,v_rel_min,scaling")
+            # dim = 10)
+            human_pos_publisher = csv_publishers.DoubleArrayCsvPublisher(
+                csv_path=test_path + "/human_positions"+now+".csv",
+                column_names="time,human_keypoint_0_x,human_keypoint_0_y,human_keypoint_0_z,human_keypoint_1_x,human_keypoint_1_y,human_keypoint_1_z,human_keypoint_2_x,human_keypoint_2_y,human_keypoint_2_z,human_keypoint_3_x,human_keypoint_3_y,human_keypoint_3_z,human_keypoint_4_x,human_keypoint_4_y,human_keypoint_4_z,human_keypoint_5_x,human_keypoint_5_y,human_keypoint_5_z,human_keypoint_6_x,human_keypoint_6_y,human_keypoint_6_z,human_keypoint_7_x,human_keypoint_7_y,human_keypoint_7_z,human_keypoint_8_x,human_keypoint_8_y,human_keypoint_8_z,human_keypoint_9_x,human_keypoint_9_y,human_keypoint_9_z,human_keypoint_10_x,human_keypoint_10_y,human_keypoint_10_z,human_keypoint_11_x,human_keypoint_11_y,human_keypoint_11_z,human_keypoint_12_x,human_keypoint_12_y,human_keypoint_12_z,human_keypoint_13_x,human_keypoint_13_y,human_keypoint_13_z,human_keypoint_14_x,human_keypoint_14_y,human_keypoint_14_z,human_keypoint_15_x,human_keypoint_15_y,human_keypoint_15_z,human_keypoint_16_x,human_keypoint_16_y,human_keypoint_16_z,human_keypoint_17_x,human_keypoint_17_y,human_keypoint_17_z"
+            )
+
 
     model = model_wrapper.model
     viz = MeshcatVisualizer(model, model_wrapper.collision_model, model_wrapper.visual_model)
@@ -256,11 +288,29 @@ def main():
                 nominal_Dq=nominal_Dq, 
                 nominal_DDq=nominal_DDq
             )
+
+            q = out["q"]
+
+            if cycles<5:
+                print(f"q pln={nominal_q.T}\nq act={q.T}")
+            dq = out["dq"]
+            ddq = out["ddq"]
+            trajectory_time = out["trajectory_time"]
+            Dtrajectory_time = out["Dtrajectory_time"]
+
+            elapsed = time.perf_counter() - loop_start
+            ct_qp.append(elapsed)
+
+            # --------------------------- INTEGRATION ----------------------------
+            t += Tc
+
+            if USE_BRIDGE and not stop_event.is_set():
+                bridge.sendCommand(q)
             if not stop_event.is_set():
                 joint_target_publisher.publish_once(nominal_q, nominal_Dq, nominal_DDq) # pyright: ignore[reportPossiblyUnboundVariable]
                 hmin = out["h_min"]
                 dmin = out["d_min"]
-                trj_error = out["trajectory_error"] 
+                trj_error = out["trajectory_error"]
                 end_eff_pos = out["end_effector_pos"]
                 end_eff_vel = out["end_effector_vel"]
                 vrel_min = out["vrel_min"]
@@ -281,24 +331,8 @@ def main():
                     ]
                 ) # pyright: ignore[reportPossiblyUnboundVariable]
                 human_pos_publisher.publish_once(obstacle_positions)
-            q = out["q"]
-
-            if cycles<5:
-                print(f"q pln={nominal_q.T}\nq act={q.T}")
-
-            ddq = out["ddq"]
-            trajectory_time = out["trajectory_time"]
-            Dtrajectory_time = out["Dtrajectory_time"]
-
-            elapsed = time.perf_counter() - loop_start
-            ct_qp.append(elapsed)
-
-            # --------------------------- INTEGRATION ----------------------------
-            t += Tc
-
-            if USE_BRIDGE and not stop_event.is_set():
-                bridge.sendCommand(q)
-
+            if not USE_BRIDGE and LOG_DATA:
+                joint_state_publisher.publish_once(q, dq, ddq)
             # ----------------------------- TIMING -------------------------------
             elapsed = time.perf_counter() - loop_start
             if cycles>1:

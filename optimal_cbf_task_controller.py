@@ -234,6 +234,11 @@ class BCFOptimalController:
         self.Dtrajectory_time += self.DDtrajectory_time * Tc
         self.t += Tc
 
+        pin.framesForwardKinematics(self.model, self.data, self.q)
+        Tbt_new = self.data.oMf[self.tool_frame_id]
+        frames_p[-1, :] = Tbt_new.translation
+        twist = pin.getFrameVelocity(self.model, self.data, self.tool_frame_id, pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)
+        frames_v[-1, :] = twist.linear
         return {
             "h_min": float(h_min),
             "d_min": float(d_min),

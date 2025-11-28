@@ -82,6 +82,7 @@ def fill_vel_rows(A, c, row, nq, FreeVel, ForcedVel, x0, Dq_max):
             A[row + i, j] = +ForcedVel[i, j]
         c[row + i] = -Dq_max[i] - Fx[i]
     row += nq
+    #print("ROW AFTER VELOCITY bounds: {row}".format(row=row))
     return row
 
 
@@ -100,6 +101,7 @@ def fill_acc_rows(A, c, row, nq, DDq_max):
             A[row + i, j] = +1.0 if i == j else 0.0
         c[row + i] = -DDq_max[i]
     row += nq
+    #print(f"ROW AFTER ACCELERATION bounds: {row}")
     return row
 
 
@@ -133,6 +135,7 @@ def append_cbf_rows_loop(
     nF = frames_p.shape[0]
     nO = obs_p.shape[0]
     nq = dq.size
+    #print(f"nF: {nF}, nO: {nO}")
 
     for f in range(nF):
         p_bt = frames_p[f]
@@ -150,6 +153,7 @@ def append_cbf_rows_loop(
                 dmin = d
             if vrel < vrel_min:
                 vrel_min = vrel
+            #print(f"ADDING TO ROW: {row}")
             for j in range(nq):
                 A[row, j] = row_vec[j]
             c[row] = bound

@@ -2,12 +2,7 @@ import pinocchio as pin
 import numpy as np
 
 from cbf_numba_lib import (
-    compute_h,
-    range_state_derivative,
-    jacobian_psi,
-    jacobian_h,
-    damped_pinv_svd,
-    assemble_qp_PID_problem,
+    assemble_qp_PID_problem, compute_q_ref_from_goal
 )
 import quadprog
 
@@ -70,6 +65,7 @@ class UR10CBFController:
         # constraints (upper bound)
         nq = self.model.nq
         self.n_constraints = 2 * 2 * nq + 18 * len(self.frames_ids)
+        print(f"n_constraints: {self.n_constraints}")
         self.A = np.zeros((self.n_constraints, nq), dtype=np.float64)
         self.c = np.zeros(self.n_constraints, dtype=np.float64)
 
@@ -110,72 +106,72 @@ class UR10CBFController:
         b = (J.T @ (dtwist_tool - dJ @ dq)).flatten()
         return P, b
 
-    def cbf_ensemble(
-        self,
-        translation_bt: np.ndarray,
-        vel_lineare: np.ndarray,
-        Jlin: np.ndarray,
-        dJlin: np.ndarray,
-        obstacle_positions: np.ndarray,
-        t: float,
-    ):
-        """
-        Assemble CBF-based inequality constraints:
-
-            A ddq <= c
-
-        where each row encodes one CBF constraint for one obstacle.
-
-        This also updates obstacle_positions in-place according to the
-        time-varying motion pattern, and returns h_min (minimum h).
-        """
-        nq = self.model.nq
-        A = np.empty((0, nq))
-        c = np.empty((0, 1))
-
-        h_min = np.inf
-
-        for i, obs_pos in enumerate(obstacle_positions):
-            # Simple circular-ish motion for the obstacle as in the original code
-            w1 = 2 * np.pi / 2.0
-            w2 = 2 * np.pi / 2.1
-            obs_pos[0] = 0.8 - 0.25 * np.sin(w1 * t)
-            obs_pos[1] = 0.4 + 0.1 * np.sin(w2 * t)
-
-            v_obs = np.array([0.0, 0.0, 0.0])
-            v_obs[0] = -0.25 * np.cos(w1 * t) * w1
-            v_obs[1] = 0.1 * np.cos(w2 * t) * w2
-
-            r = translation_bt - obs_pos
-            distance = np.linalg.norm(r)
-            u_hr = r / distance
-
-            v_h_scalar = float(u_hr @ v_obs)
-            v_rel = float(u_hr @ vel_lineare)
-
-            # CBF scalar
-            h = compute_h(d=distance, v=v_rel, v_h=v_h_scalar)
-            if h < h_min:
-                h_min = h
-
-            # Range dynamics and Jacobians
-            f, g = range_state_derivative(vel_lineare, v_obs)
-            dh_dd, dh_dv, dh_dvh = jacobian_h(distance, v_rel, v_h_scalar)
-            Jh_psi = np.array([dh_dd, dh_dv, dh_dvh]).reshape(1, -1)
-
-            Jpsi_chi = jacobian_psi(translation_bt, obs_pos, vel_lineare, v_obs)
-
-            Lie_f_h = Jh_psi @ Jpsi_chi @ f          # shape (1,)
-            Lie_g_h = Jh_psi @ Jpsi_chi @ g          # shape (1, 3)
-
-            # Map to joint space via Jlin
-            A_i = (Lie_g_h @ Jlin).reshape(1, -1)
-            c_i = (-Lie_g_h @ dJlin @ self.dq - Lie_f_h - self.gamma * h).reshape(1, -1)
-
-            A = np.append(A, A_i, axis=0)
-            c = np.append(c, c_i, axis=0)
-
-        return A, c.flatten(), float(h_min), obstacle_positions
+    # def cbf_ensemble(
+    #     self,
+    #     translation_bt: np.ndarray,
+    #     vel_lineare: np.ndarray,
+    #     Jlin: np.ndarray,
+    #     dJlin: np.ndarray,
+    #     obstacle_positions: np.ndarray,
+    #     t: float,
+    # ):
+    #     """
+    #     Assemble CBF-based inequality constraints:
+    #
+    #         A ddq <= c
+    #
+    #     where each row encodes one CBF constraint for one obstacle.
+    #
+    #     This also updates obstacle_positions in-place according to the
+    #     time-varying motion pattern, and returns h_min (minimum h).
+    #     """
+    #     nq = self.model.nq
+    #     A = np.empty((0, nq))
+    #     c = np.empty((0, 1))
+    #
+    #     h_min = np.inf
+    #
+    #     for i, obs_pos in enumerate(obstacle_positions):
+    #         # Simple circular-ish motion for the obstacle as in the original code
+    #         w1 = 2 * np.pi / 2.0
+    #         w2 = 2 * np.pi / 2.1
+    #         obs_pos[0] = 0.8 - 0.25 * np.sin(w1 * t)
+    #         obs_pos[1] = 0.4 + 0.1 * np.sin(w2 * t)
+    #
+    #         v_obs = np.array([0.0, 0.0, 0.0])
+    #         v_obs[0] = -0.25 * np.cos(w1 * t) * w1
+    #         v_obs[1] = 0.1 * np.cos(w2 * t) * w2
+    #
+    #         r = translation_bt - obs_pos
+    #         distance = np.linalg.norm(r)
+    #         u_hr = r / distance
+    #
+    #         v_h_scalar = float(u_hr @ v_obs)
+    #         v_rel = float(u_hr @ vel_lineare)
+    #
+    #         # CBF scalar
+    #         h = compute_h(d=distance, v=v_rel, v_h=v_h_scalar)
+    #         if h < h_min:
+    #             h_min = h
+    #
+    #         # Range dynamics and Jacobians
+    #         f, g = range_state_derivative(vel_lineare, v_obs)
+    #         dh_dd, dh_dv, dh_dvh = jacobian_h(distance, v_rel, v_h_scalar)
+    #         Jh_psi = np.array([dh_dd, dh_dv, dh_dvh]).reshape(1, -1)
+    #
+    #         Jpsi_chi = jacobian_psi(translation_bt, obs_pos, vel_lineare, v_obs)
+    #
+    #         Lie_f_h = Jh_psi @ Jpsi_chi @ f          # shape (1,)
+    #         Lie_g_h = Jh_psi @ Jpsi_chi @ g          # shape (1, 3)
+    #
+    #         # Map to joint space via Jlin
+    #         A_i = (Lie_g_h @ Jlin).reshape(1, -1)
+    #         c_i = (-Lie_g_h @ dJlin @ self.dq - Lie_f_h - self.gamma * h).reshape(1, -1)
+    #
+    #         A = np.append(A, A_i, axis=0)
+    #         c = np.append(c, c_i, axis=0)
+    #
+    #     return A, c.flatten(), float(h_min), obstacle_positions
 
     # ---------------------------------------------------------------------- #
     #                             Control step                               #
@@ -326,6 +322,12 @@ class UR10CBFController:
         # Recompute pose for visualization
         pin.framesForwardKinematics(model, data, self.q)
         Tbt_new = data.oMf[self.tool_frame_id]
+        frames_p[-1, :] = Tbt_new.translation
+        twist = pin.getFrameVelocity(self.model, self.data, self.tool_frame_id, pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)
+        frames_v[-1, :] = twist.linear
+        # -------------------- Joint-space trajectory error ------------------- #
+
+        traj_err = float(np.linalg.norm(goal_pose.translation.tolist() - frames_p[-1, :]))  # NEW: ||q - q_ref||
 
         return {
             "q": self.q.copy(),
@@ -334,6 +336,9 @@ class UR10CBFController:
             "Tbt": Tbt_new,
             "h_min": float(h_min),
             "d_min": float(d_min),
-            "v_rel": float(vrel_min),
+            "vrel_min": float(vrel_min),
             "obs_pos": obstacle_positions,
+            "trajectory_error": traj_err,
+            "end_effector_pos": frames_p[-1, :].copy(),
+            "end_effector_vel": frames_v[-1, :].copy(),
         }
