@@ -151,7 +151,7 @@ def append_cbf_rows_loop(
                 hmin = h
             if d < dmin:
                 dmin = d
-            if o == 7 and f == range(nF)[-1]: # last frame, left hand keypoint
+            if o == 7 and f == frames_p.shape[0]-1: # last frame, left hand keypoint
                 vrel_min = vrel
             #print(f"ADDING TO ROW: {row}")
             for j in range(nq):
