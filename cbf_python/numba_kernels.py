@@ -128,7 +128,8 @@ def append_cbf_rows_loop(
 ):
     hmin = 1e9
     dmin = 1e9
-    vrel_min = 0.0  # unused placeholder
+    vr_min = 0.0  # unused placeholder
+    vh_min = 0.0
     if not HAS_CBF:
         return row, hmin
 
@@ -144,21 +145,23 @@ def append_cbf_rows_loop(
         dJlin = dJlins[f]
         for o in range(nO):
             op = obs_p[o]; ov = obs_v[o]; oa = obs_a[o]
-            h, row_vec, bound, d, vrel = compute_h_and_constraints_numba(
+            h, row_vec, bound, d, vr, vh = compute_h_and_constraints_numba(
                 p_bt, op, vlin, ov, Tr, a_s, C, oa, atol, Jlin, dJlin, dq, gamma
             )
-            if h < hmin:
-                hmin = h
-            if d < dmin:
-                dmin = d
+            # if h < hmin:
+            # if d < dmin:
+
             if o == 7 and f == frames_p.shape[0]-1: # last frame, left hand keypoint
-                vrel_min = vrel
+                vr_min = vr
+                vh_min = vh
+                dmin = d
+                hmin = h
             #print(f"ADDING TO ROW: {row}")
             for j in range(nq):
                 A[row, j] = row_vec[j]
             c[row] = bound
             row += 1
-    return row, hmin, dmin, vrel_min
+    return row, hmin, dmin, vr_min, vh_min
 
 
 # ------------------------------------------------------------
@@ -248,14 +251,15 @@ def assemble_qp_inplace(
 
     # CBF rows (if any)
     if frames_p.size != 0 and obs_p.size != 0 and HAS_CBF:
-        row, hmin, dmin, vrel_min = append_cbf_rows_loop(
+        row, hmin, dmin, vr_min, vh_min = append_cbf_rows_loop(
             A, c, row, frames_p, frames_vlin, obs_p, obs_v, obs_a, Jlins, dJlins, dq, Tr, a_s, C, gamma, atol
         )
     else:
         hmin = 1e9
         dmin = 1e9
-        vrel_min = 1e9  # unused placeholder
+        vr_min = 1e9  # unused placeholder
+        vh_min = 1e9
     # objective parts
     assemble_objective_parts_inplace(P2, b1, b2, b3, q, dq, nominal_q, nominal_Dq, Dtraj, Tc)
 
-    return row, hmin, dmin, vrel_min
+    return row, hmin, dmin, vr_min, vh_min

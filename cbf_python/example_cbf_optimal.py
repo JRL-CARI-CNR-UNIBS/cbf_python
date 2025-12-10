@@ -58,7 +58,7 @@ def _on_sigint_with_bridge(bridge, signum, frame):
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
-    USE_BRIDGE = True
+    USE_BRIDGE = False
     LOG_DATA = True
     log_path = "resullts/simulation/scaling"
     # rclpy.init()
@@ -171,7 +171,7 @@ def main():
             )
             cbf_out_publisher = csv_publishers.DoubleArrayCsvPublisher(
                 csv_path=test_path + "/cbf_results"+now+".csv",
-                column_names="time,h_min,d_min,trajectory_error,pos_ee_x,pos_ee_y,pos_ee_z,vel_ee_x,vel_ee_y,vel_ee_z,v_rel_min,scaling")
+                column_names="time,h_min,d_min,trajectory_error,pos_ee_x,pos_ee_y,pos_ee_z,vel_ee_x,vel_ee_y,vel_ee_z,v_r_min,v_h_min,scaling")
             # dim = 10)
             human_pos_publisher = csv_publishers.DoubleArrayCsvPublisher(
                 csv_path=test_path + "/human_positions"+now+".csv",
@@ -313,7 +313,8 @@ def main():
                 trj_error = out["trajectory_error"]
                 end_eff_pos = out["end_effector_pos"]
                 end_eff_vel = out["end_effector_vel"]
-                vrel_min = out["vrel_min"]
+                vr_min = out["vr_min"]
+                vh_min = out["vh_min"]
                 scaling = out["Dtrajectory_time"]
                 cbf_out_publisher.publish_once(
                     [
@@ -326,7 +327,8 @@ def main():
                         end_eff_vel[0],
                         end_eff_vel[1],
                         end_eff_vel[2],
-                        vrel_min,
+                        vr_min,
+                        vh_min,
                         scaling,
                     ]
                 ) # pyright: ignore[reportPossiblyUnboundVariable]
