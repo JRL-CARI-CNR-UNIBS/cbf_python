@@ -10,7 +10,7 @@ from numba_kernels import build_free_forced_one_step, assemble_qp_inplace
 @dataclass
 class ControllerConfig:
     Tc: float = 2e-3
-    C: float = 0.45
+    C: float = 0.85
     Tr: float = 0.5
     a_s: float = 4.5
     gamma: float = 5.0
