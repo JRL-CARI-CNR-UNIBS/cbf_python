@@ -58,7 +58,7 @@ def _on_sigint_with_bridge(bridge, signum, frame):
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
-    USE_BRIDGE = False
+    USE_BRIDGE = True
     LOG_DATA = True
     log_path = "resullts/simulation/scaling"
     # rclpy.init()
@@ -222,7 +222,7 @@ def main():
     q40 =  np.array([ 134.0, -65.0, 70.0, -90.0, 90.0, 45.0])*np.pi/180.0
     cfg.Dq_max = cfg.Dq_max*0.25
     cfg.DDq_max = cfg.DDq_max*0.2
-    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.1, DDq_max=cfg.DDq_max*0.1)
+    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.25, DDq_max=cfg.DDq_max*0.25)
 
     # 2 · add way‑points -------------------------------------------
     for _ in range(3):
