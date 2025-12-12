@@ -239,14 +239,16 @@ def assemble_qp_inplace(
     row = 0
     row = fill_scaling_rows(A, c, row, nq, Tc, Dtraj, DDtraj_max=DDtraj_max)  # placeholder overwritten below
     # overwrite last line's rhs to -DDtraj_max using c[row_idx] once caller fixes it if needed
-
+    # print(f"row after scaling: {row}")
     x0 = np.empty(nq * 2)
     for i in range(nq):
         x0[i] = q[i]
         x0[nq + i] = dq[i]
 
     row = fill_tube_rows(A, c, row, nq, FreePos, ForcedPos, x0, nominal_q, delta_q_max)
+    # print(f"row after tube: {row}")
     row = fill_vel_rows(A, c, row, nq, FreeVel, ForcedVel, x0, Dq_max)
+    # print(f"row after vel: {row}")
     row = fill_acc_rows(A, c, row, nq, DDq_max)
 
     # CBF rows (if any)

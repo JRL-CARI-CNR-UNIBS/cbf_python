@@ -10,7 +10,7 @@ from numba_kernels import build_free_forced_one_step, assemble_qp_inplace
 @dataclass
 class ControllerConfig:
     Tc: float = 2e-3
-    C: float = 0.85
+    C: float = 0.25
     Tr: float = 0.5
     a_s: float = 4.5
     gamma: float = 5.0
@@ -87,6 +87,10 @@ class BCFOptimalController:
 
         # state
         self.reset_state(np.zeros(nq))
+
+        # delta_q_max
+        self.delta_q_max = cfg.delta_q_max
+        self.unfeasible_cnt = 0
         
         
 
@@ -112,6 +116,8 @@ class BCFOptimalController:
             nominal_q, nominal_Dq, nominal_DDq: vectors for current nominal trajectory
         Returns a dict with diagnostics plus the updated state variables.
         """
+        test_unfeasible = 0
+
         cfg, Tc, nq = self.cfg, self.cfg.Tc, self.model.nq
 
         nominal_q = np.asarray(nominal_q, dtype=np.float64)
@@ -150,7 +156,7 @@ class BCFOptimalController:
             self.q, self.dq,
             nominal_q, nominal_Dq,
             self.Dtrajectory_time, Tc,
-            cfg.Dq_max, cfg.DDq_max, cfg.delta_q_max,
+            cfg.Dq_max, cfg.DDq_max, self.delta_q_max,
             frames_p, frames_v, Jlins, dJlins, obs_pos, obs_vel, obs_acc,
             cfg.Tr, cfg.a_s, cfg.C, cfg.gamma,cfg.DDtrajectory_time_max, 1e-12
         )
@@ -186,14 +192,16 @@ class BCFOptimalController:
                 self.bunfeasible[-1]  = -Tc * self.Dtrajectory_time
                 u, *_ = quadprog.solve_qp(
                     self.Punfeasible, self.bunfeasible,
-                    A[:(3 + nq * 4), :].T,
-                    c[:(3 + nq * 4)]
+                    A[(3 + nq * 4):(3 + nq*6), :].T,
+                    c[(3 + nq * 4):(3 + nq * 6)]
                 )
                 # u, *_ = quadprog.solve_qp(
                 #     self.Punfeasible, self.bunfeasible,
-                #     A_unfeasible.T,
-                #     c_unfeasible
+                #     A[:(3 + nq * 4), :].T,
+                #     c[:(3 + nq * 4)]
                 # )
+                test_unfeasible = 1
+                self.unfeasible_cnt += 1
             else:
                 raise
 
@@ -212,6 +220,18 @@ class BCFOptimalController:
         frames_p[-1, :] = Tbt_new.translation
         twist = pin.getFrameVelocity(self.model, self.data, self.tool_frame_id, pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)
         frames_v[-1, :] = twist.linear
+        expected_trj_err = abs(self.q - nominal_q)
+
+        if test_unfeasible == 1:
+            for i in range(cfg.delta_q_max.shape[0]):
+                if expected_trj_err[i] > self.delta_q_max[i]:
+                    self.delta_q_max[i] = expected_trj_err[i]
+                print(f"PROBLEM IS UNFEASIBLE, trajectory error: {expected_trj_err}")
+        else:
+            for i in range(cfg.delta_q_max.shape[0]):
+                if expected_trj_err[i] <= cfg.delta_q_max[i]:
+                    self.delta_q_max[i] = cfg.delta_q_max[i]
+
         return {
             "h_min": float(h_min),
             "d_min": float(d_min),
@@ -229,4 +249,5 @@ class BCFOptimalController:
             "trajectory_time": float(self.trajectory_time),
             "Dtrajectory_time": float(self.Dtrajectory_time),
             "DDtrajectory_time": float(self.DDtrajectory_time),
+            "unfeasible_cnt": self.unfeasible_cnt,
         }
