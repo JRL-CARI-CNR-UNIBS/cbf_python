@@ -120,7 +120,7 @@ def main():
 
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
-            csv_path="/home/galileo/Desktop/skeleton_vectors_5.csv",
+            csv_path="/home/galileo/Desktop/skeleton_vectors_19.csv",
             Tworld_to_cam=T_wc,
             # slowdown_factor=0.1,
             slowdown_factor=1.0,
@@ -245,7 +245,7 @@ def main():
     # ------------------------------ MAIN LOOP -------------------- ----------------
 
     test_start_publisher.publish_once(True) # pyright: ignore[reportPossiblyUnboundVariable]
-
+    unfeasible_cnt = 0
     try:
 
         t = 0.0
@@ -288,7 +288,7 @@ def main():
                 nominal_Dq=nominal_Dq, 
                 nominal_DDq=nominal_DDq
             )
-
+            unfeasible_cnt = out["unfeasible_cnt"]
             q = out["q"]
 
             if cycles<5:
@@ -390,6 +390,8 @@ def main():
     }
 
     print(f"timeout cycles = {timeout_cycles} over {cycles}, percentage = {100.0*timeout_cycles/cycles}, average = {np.mean(computation_times)}")
+    print(f"unfeasible cycles = {unfeasible_cnt} over {cycles}, percentage = {100.0*unfeasible_cnt/cycles}")
+
     print_stats_table(stats)
     _ = make_summary_figure(
         computation_times,
