@@ -50,16 +50,17 @@ def assemble_qp_PID_problem(
 
     # CBF rows (if any)
     if frames_p.size != 0 and obs_p.size != 0:
-        row, hmin, dmin, vrel_min = append_cbf_rows_loop(
+        row, hmin, dmin, vr_min, vh_min = append_cbf_rows_loop(
             A, c, row, frames_p, frames_vlin, obs_p, obs_v, obs_a, Jlins, dJlins, dq, Tr, a_s, C, gamma, atol
         )
     else:
         hmin = 1e9
         dmin = 1e9
-        vrel_min = 1e9  # unused placeholder
+        vr_min = 1e9
+        vh_min = 1e9# unused placeholder
     # objective parts
 
-    return row, hmin, dmin, vrel_min
+    return row, hmin, dmin, vr_min, vh_min
 # @njit(cache=True, fastmath=True)
 def compute_q_ref_from_goal(goal_pose: pin.SE3, model, data, q, tool_frame_id) -> np.ndarray:
     """

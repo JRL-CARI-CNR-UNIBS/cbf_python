@@ -27,10 +27,10 @@ class ControllerConfig:
         default_factory=lambda: np.pi * np.array([1,1,1,1,1,1], dtype=np.float64) * np.pi*5.0
     )
 
-    lambda1: float = 1.0e-2
-    lambda2: float = 1.0e-2
-    lambda3: float = 1.0e3
-    lambda4: float = 0.0
+    lambda_pos: float = 1.0e-2
+    lambda_vel: float = 1.0e-2
+    lambda_scaling: float = 1.0e3
+    lambda_acc: float = 0.0
     DDtrajectory_time_max: float = 1.0
 
     delta_unfeasible: np.ndarray = field(
@@ -62,22 +62,22 @@ class BCFOptimalController:
         # QP static blocks (float64)
         nq = self.model.nq
         I = np.eye(nq, dtype=np.float64)
-        self.P1 = np.zeros((nq + 1, nq + 1), dtype=np.float64)
-        self.P1[:nq, :nq] = 0.25 * (self.cfg.Tc ** 4) * I
+        self.P_pos = np.zeros((nq + 1, nq + 1), dtype=np.float64)
+        self.P_pos[:nq, :nq] = 0.25 * (self.cfg.Tc ** 4) * I
 
-        self.P2 = np.zeros((nq + 1, nq + 1), dtype=np.float64)
-        self.P2[:nq, :nq] =(self.cfg.Tc ** 2) * I
-        self.P3 = np.zeros((nq + 1, nq + 1), dtype=np.float64); self.P3[-1, -1] = (self.cfg.Tc ** 2)
-        self.P4 = np.zeros((nq + 1, nq + 1), dtype=np.float64); self.P4[:nq, :nq] = I
+        self.P_vel = np.zeros((nq + 1, nq + 1), dtype=np.float64)
+        self.P_vel[:nq, :nq] =(self.cfg.Tc ** 2) * I
+        self.P_scaling = np.zeros((nq + 1, nq + 1), dtype=np.float64); self.P_scaling[-1, -1] = (self.cfg.Tc ** 2)
+        self.P_acc = np.zeros((nq + 1, nq + 1), dtype=np.float64); self.P_acc[:nq, :nq] = I
         self.Punfeasible = np.zeros((nq + 1, nq + 1), dtype=np.float64)
         self.Punfeasible[:nq, :nq] = (self.cfg.Tc ** 2) * I
         self.Punfeasible[-1, -1]   = (self.cfg.Tc ** 2)
 
         # linear parts
-        self.b1 = np.zeros(nq + 1, dtype=np.float64)
-        self.b2 = np.zeros(nq + 1, dtype=np.float64)
-        self.b3 = np.zeros(nq + 1, dtype=np.float64)
-        self.b4 = np.zeros(nq + 1, dtype=np.float64)
+        self.b_pos = np.zeros(nq + 1, dtype=np.float64)
+        self.b_vel = np.zeros(nq + 1, dtype=np.float64)
+        self.b_scaling = np.zeros(nq + 1, dtype=np.float64)
+        self.b_acc = np.zeros(nq + 1, dtype=np.float64)
         self.bunfeasible = np.zeros(nq + 1, dtype=np.float64)
 
         # constraints (upper bound)
@@ -89,10 +89,21 @@ class BCFOptimalController:
         self.reset_state(np.zeros(nq))
 
         # delta_q_max
-        self.delta_q_max = cfg.delta_q_max
+        self.delta_q_max = np.copy(cfg.delta_q_max)
         self.unfeasible_cnt = 0
-        
-        
+        self.ref_scaling = 1.0
+        self.qp_scaling = self.ref_scaling
+        print(f"DELTA_Q_MAX: {self.delta_q_max}")
+        self.check_delta = False
+
+    def set_ref_scaling(self, scaling):
+        if scaling >= 1.0 :
+            self.ref_scaling = 1.0
+        elif scaling <= 0.0:
+            self.ref_scaling = 0.0
+        else:
+            self.ref_scaling = scaling
+
 
     # ---------------------- state ----------------------
     def reset_state(self, q0, dq0=None):
@@ -150,7 +161,7 @@ class BCFOptimalController:
 
         # NUMBA: assemble constraints + objective partials
         row, h_min, d_min, vr_min, vh_min = assemble_qp_inplace(
-            self.P2, self.b1, self.b2, self.b3,
+            self.P_vel, self.b_pos, self.b_vel, self.b_scaling,
             self.A, self.c,
             self.FreePos, self.ForcedPos, self.FreeVel, self.ForcedVel,
             self.q, self.dq,
@@ -158,7 +169,7 @@ class BCFOptimalController:
             self.Dtrajectory_time, Tc,
             cfg.Dq_max, cfg.DDq_max, self.delta_q_max,
             frames_p, frames_v, Jlins, dJlins, obs_pos, obs_vel, obs_acc,
-            cfg.Tr, cfg.a_s, cfg.C, cfg.gamma,cfg.DDtrajectory_time_max, 1e-12
+            cfg.Tr, cfg.a_s, cfg.C, cfg.gamma,cfg.DDtrajectory_time_max, 1e-12, self.qp_scaling
         )
 
         # Fix DDtrajectory_time bound
@@ -169,14 +180,14 @@ class BCFOptimalController:
             self.c[row:].fill(-1.0)
 
         # Dense QP matrices/vectors
-        P = (cfg.lambda1 * self.P1 +
-             cfg.lambda2 * self.P2 +
-             cfg.lambda3 * self.P3 +
-             cfg.lambda4 * self.P4)
-        b = (cfg.lambda1 * self.b1 +
-             cfg.lambda2 * self.b2 +
-             cfg.lambda3 * self.b3 +
-             cfg.lambda4 * self.b4)
+        P = (cfg.lambda_pos * self.P_pos +
+             cfg.lambda_vel * self.P_vel +
+             cfg.lambda_scaling * self.P_scaling +
+             cfg.lambda_acc * self.P_acc)
+        b = (cfg.lambda_pos * self.b_pos +
+             cfg.lambda_vel * self.b_vel +
+             cfg.lambda_scaling * self.b_scaling +
+             cfg.lambda_acc * self.b_acc)
 
         P = np.ascontiguousarray(P, dtype=np.float64)
         b = np.ascontiguousarray(b, dtype=np.float64)
@@ -202,6 +213,8 @@ class BCFOptimalController:
                 # )
                 test_unfeasible = 1
                 self.unfeasible_cnt += 1
+                self.qp_scaling = 0.0
+                self.check_delta = True
             else:
                 raise
 
@@ -226,12 +239,23 @@ class BCFOptimalController:
             for i in range(cfg.delta_q_max.shape[0]):
                 if expected_trj_err[i] > self.delta_q_max[i]:
                     self.delta_q_max[i] = expected_trj_err[i]
-                print(f"PROBLEM IS UNFEASIBLE, trajectory error: {expected_trj_err}")
-        else:
-            for i in range(cfg.delta_q_max.shape[0]):
+            print(f"PROBLEM IS UNFEASIBLE, trajectory error: {expected_trj_err}")
+            print(f"NEW DELTA: {self.delta_q_max}")
+            print(f"INITIAL Q MAX: {cfg.delta_q_max}")
+        elif self.check_delta:
+            count_dev = 0
+            for i in range(nq):
                 if expected_trj_err[i] <= cfg.delta_q_max[i]:
-                    self.delta_q_max[i] = cfg.delta_q_max[i]
-
+                    #print("QUIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII")
+                    self.delta_q_max[i] = np.copy(cfg.delta_q_max[i])
+                    count_dev += 1
+                    print(f"COUNT_DEV: {count_dev}, i: {i}")
+            if count_dev == nq:
+                self.check_delta = False
+                self.qp_scaling = self.ref_scaling
+                print("RESUMING MAIN PROBLEM")
+            else:
+                print("NOT RESUMING MAIN PROBLEM")
         return {
             "h_min": float(h_min),
             "d_min": float(d_min),

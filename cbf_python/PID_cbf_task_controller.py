@@ -282,7 +282,7 @@ class UR10CBFController:
 
 
         if cbf_enabled and len(obstacle_positions) > 0:
-            row, h_min, d_min, vrel_min = assemble_qp_PID_problem(
+            row, h_min, d_min, vr_min, vh_min = assemble_qp_PID_problem(
                 # outputs (in-place)
                 self.A, self.c,
                 # inputs
@@ -336,7 +336,8 @@ class UR10CBFController:
             "Tbt": Tbt_new,
             "h_min": float(h_min),
             "d_min": float(d_min),
-            "vrel_min": float(vrel_min),
+            "vr_min": float(vr_min),
+            "vh_min": float(vh_min),
             "obs_pos": obstacle_positions,
             "trajectory_error": traj_err,
             "end_effector_pos": frames_p[-1, :].copy(),

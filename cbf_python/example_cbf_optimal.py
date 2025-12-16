@@ -58,8 +58,8 @@ def _on_sigint_with_bridge(bridge, signum, frame):
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
-    USE_BRIDGE = True
-    LOG_DATA = True
+    USE_BRIDGE = False
+    LOG_DATA = False
     log_path = "resullts/simulation/scaling"
     # rclpy.init()
 
@@ -83,10 +83,10 @@ def main():
     # ------------------------ CONTROLLER SETUP -----------------------------------
     Tc =2e-3
     cfg = ControllerConfig(Tc=Tc)
-    cfg.lambda1 = 500.0
-    cfg.lambda2 = 2.55
-    cfg.lambda3 = 130#1.0e3
-    cfg.lambda4 = 4.0e-05 
+    cfg.lambda_pos = 5000.0
+    cfg.lambda_vel = 2.55
+    cfg.lambda_scaling = 130#1.0e3
+    cfg.lambda_acc = 4.0e-05
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * 1.5)*3
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * 3)*3
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * 6)*3
@@ -120,7 +120,7 @@ def main():
 
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
-            csv_path="/home/galileo/Desktop/skeleton_vectors_19.csv",
+            csv_path="/home/galileo/Desktop/skeleton_vectors_22.csv",
             Tworld_to_cam=T_wc,
             # slowdown_factor=0.1,
             slowdown_factor=1.0,
@@ -244,7 +244,8 @@ def main():
 
     # ------------------------------ MAIN LOOP -------------------- ----------------
 
-    test_start_publisher.publish_once(True) # pyright: ignore[reportPossiblyUnboundVariable]
+    if LOG_DATA:
+        test_start_publisher.publish_once(True) # pyright: ignore[reportPossiblyUnboundVariable]
     unfeasible_cnt = 0
     try:
 
@@ -306,7 +307,7 @@ def main():
 
             if USE_BRIDGE and not stop_event.is_set():
                 bridge.sendCommand(q)
-            if not stop_event.is_set():
+            if not stop_event.is_set() and LOG_DATA:
                 joint_target_publisher.publish_once(nominal_q, nominal_Dq, nominal_DDq) # pyright: ignore[reportPossiblyUnboundVariable]
                 hmin = out["h_min"]
                 dmin = out["d_min"]
@@ -353,7 +354,7 @@ def main():
                 time.sleep(rest)
             else:
                 timeout_cycles+=1
-        if not stop_event.is_set():
+        if not stop_event.is_set() and LOG_DATA:
             test_start_publisher.publish_once(False) # pyright: ignore[reportPossiblyUnboundVariable]
 
     except KeyboardInterrupt:
@@ -375,7 +376,6 @@ def main():
             pub_utils.publish_test_start_once(False)
         except Exception as e:
             print(f"[shutdown] one-shot publish failed: {e}")
-        print(304)
     # Call with your
     computation_times = np.array(ct)
     scaling_log = np.array(scaling_log)

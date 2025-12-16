@@ -165,22 +165,22 @@ def append_cbf_rows_loop(
 
 
 # ------------------------------------------------------------
-# Objective assembly (only the P2, b1, b2, b3 parts)
+# Objective assembly (only the P2, b_pos, b_vel, b_scaling parts)
 # ------------------------------------------------------------
 @njit(cache=True, fastmath=True)
-def assemble_objective_parts_inplace(P2, b1, b2, b3,
+def assemble_objective_parts_inplace(P2, b_pos, b_vel, b_scaling,
                                      q, dq,
                                      nominal_q, nominal_Dq,
-                                     Dtraj, Tc):
+                                     Dtraj, Tc, ref_scaling):
     nq = q.size
 
     # zero
     for i in range(nq + 1):
         for j in range(nq + 1):
             P2[i, j] = 0.0
-        b1[i] = 0.0
-        b2[i] = 0.0
-        b3[i] = 0.0
+        b_pos[i] = 0.0
+        b_vel[i] = 0.0
+        b_scaling[i] = 0.0
 
     # P2
     ndq_dot = 0.0
@@ -192,22 +192,22 @@ def assemble_objective_parts_inplace(P2, b1, b2, b3,
         ndq_dot += nominal_Dq[i] * nominal_Dq[i]
     P2[nq, nq] = (Tc * Tc) * ndq_dot
 
-    # b1 (tracking position)
+    # b_pos (tracking position)
     half_T2 = 0.5 * Tc * Tc
     for i in range(nq):
-        b1[i] = (nominal_q[i] - q[i] - dq[i] * Tc) * half_T2
-    # b1[-1] remains 0
+        b_pos[i] = (nominal_q[i] - q[i] - dq[i] * Tc) * half_T2
+    # b_pos[-1] remains 0
 
-    # b2 (tracking velocity scaled by Dtraj)
+    # b_vel (tracking velocity scaled by Dtraj)
     tmp_dot = 0.0
     for i in range(nq):
         val = (nominal_Dq[i] * Dtraj - dq[i]) * Tc
-        b2[i] = val
+        b_vel[i] = val
         tmp_dot += (nominal_Dq[i] * Dtraj - dq[i]) * (nominal_Dq[i] * Tc)
-    b2[nq] = -tmp_dot
+    b_vel[nq] = -tmp_dot
 
-    # b3 (penalize deviation of Dtraj from 1)
-    b3[nq] = -Tc * (Dtraj - 1.0)
+    # b_scaling (penalize deviation of Dtraj from 1)
+    b_scaling[nq] = -Tc * (Dtraj - ref_scaling)
 
 
 # ------------------------------------------------------------
@@ -216,7 +216,7 @@ def assemble_objective_parts_inplace(P2, b1, b2, b3,
 @njit(cache=True, fastmath=True)
 def assemble_qp_inplace(
     # outputs (in-place)
-    P2, b1, b2, b3,
+    P2, b_pos, b_vel, b_scaling,
     A, c,
     # inputs
     FreePos, ForcedPos, FreeVel, ForcedVel,
@@ -226,7 +226,7 @@ def assemble_qp_inplace(
     Dq_max, DDq_max, delta_q_max,
     # CBF inputs (optional; pass empty arrays if unused)
     frames_p, frames_vlin, Jlins, dJlins, obs_p, obs_v, obs_a,
-    Tr, a_s, C, gamma, DDtraj_max, atol
+    Tr, a_s, C, gamma, DDtraj_max, atol, ref_scaling,
 ):
     nq = q.size
     # zero A, c
@@ -262,6 +262,6 @@ def assemble_qp_inplace(
         vr_min = 1e9  # unused placeholder
         vh_min = 1e9
     # objective parts
-    assemble_objective_parts_inplace(P2, b1, b2, b3, q, dq, nominal_q, nominal_Dq, Dtraj, Tc)
+    assemble_objective_parts_inplace(P2, b_pos, b_vel, b_scaling, q, dq, nominal_q, nominal_Dq, Dtraj, Tc, ref_scaling)
 
     return row, hmin, dmin, vr_min, vh_min
