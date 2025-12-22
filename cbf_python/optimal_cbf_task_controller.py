@@ -160,7 +160,7 @@ class BCFOptimalController:
             dJlins[i, :, :] = dJ[:3, :]
 
         # NUMBA: assemble constraints + objective partials
-        row, h_min, d_min, vr_min, vh_min = assemble_qp_inplace(
+        row, h_min, d_min, vr_min, vh_min, htest, dtest, i_h, i_d = assemble_qp_inplace(
             self.P_vel, self.b_pos, self.b_vel, self.b_scaling,
             self.A, self.c,
             self.FreePos, self.ForcedPos, self.FreeVel, self.ForcedVel,
@@ -171,6 +171,9 @@ class BCFOptimalController:
             frames_p, frames_v, Jlins, dJlins, obs_pos, obs_vel, obs_acc,
             cfg.Tr, cfg.a_s, cfg.C, cfg.gamma,cfg.DDtrajectory_time_max, 1e-12, self.qp_scaling
         )
+
+        # print(f"h_min: {htest}, on keypoint no: {i_h}")
+        # print(f"d_min: {dtest}, on keypoint no: {i_d}")
 
         # Fix DDtrajectory_time bound
         #self.c[2] = -cfg.DDtrajectory_time_max

@@ -59,7 +59,7 @@ def _on_sigint_with_bridge(bridge, signum, frame):
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
     USE_BRIDGE = False
-    LOG_DATA = False
+    LOG_DATA = True
     log_path = "resullts/simulation/scaling"
     # rclpy.init()
 
@@ -117,10 +117,12 @@ def main():
         R = quat.toRotationMatrix()
 
         T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
-
+        csv_in_path = "/home/galileo/Desktop/skeleton_vectors_22 (Copy).csv"
+        csv_out_path = "/home/galileo/Desktop/skeleton_vectors_22.csv"
+        #csv_publishers.swap_csv(csv_in_path, csv_out_path, 7, 17)
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
-            csv_path="/home/galileo/Desktop/skeleton_vectors_22.csv",
+            csv_path=csv_out_path,
             Tworld_to_cam=T_wc,
             # slowdown_factor=0.1,
             slowdown_factor=1.0,
@@ -191,9 +193,14 @@ def main():
     obstacle_accelerations = obstacle_velocities.copy()
 
     for i, pos in enumerate(obstacle_positions):
-        viz.viewer[f"obstacle_{i}"].set_object(
-            mgeom.Sphere(0.1), mgeom.MeshLambertMaterial(color=0xFF0000)
-        )
+        if i == 7:
+            viz.viewer[f"obstacle_{i}"].set_object(
+                mgeom.Sphere(0.1), mgeom.MeshLambertMaterial(color=0x000000)
+            )
+        else:
+            viz.viewer[f"obstacle_{i}"].set_object(
+                mgeom.Sphere(0.1), mgeom.MeshLambertMaterial(color=0xFF0000)
+            )
 
     # Goal box (green)
     side = 0.2

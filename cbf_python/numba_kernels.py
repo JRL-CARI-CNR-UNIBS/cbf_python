@@ -1,7 +1,10 @@
 # numba_kernels.py
 # Pattern A: NUMBA for assembly-only (no solver calls here)
+from doctest import DocTest
+from unittest import defaultTestLoader
 
 import numpy as np
+from IPython.testing.tools import help_output_test
 from numba import njit
 
 # ------------------------------------------------------------
@@ -127,7 +130,12 @@ def append_cbf_rows_loop(
     Tr, a_s, C, gamma, atol
 ):
     hmin = 1e9
+    htest = 1e09
     dmin = 1e9
+    dtest = 1e09
+    i_h = 190
+    i_d = 190
+
     vr_min = 0.0  # unused placeholder
     vh_min = 0.0
     if not HAS_CBF:
@@ -148,8 +156,15 @@ def append_cbf_rows_loop(
             h, row_vec, bound, d, vr, vh = compute_h_and_constraints_numba(
                 p_bt, op, vlin, ov, Tr, a_s, C, oa, atol, Jlin, dJlin, dq, gamma
             )
-            # if h < hmin:
-            # if d < dmin:
+            if h < htest:
+                htest = h
+                i_h = o
+            if d < dtest:
+                dtest = h
+                i_d = o
+
+
+
 
             if o == 7 and f == frames_p.shape[0]-1: # last frame, left hand keypoint
                 vr_min = vr
@@ -161,7 +176,9 @@ def append_cbf_rows_loop(
                 A[row, j] = row_vec[j]
             c[row] = bound
             row += 1
-    return row, hmin, dmin, vr_min, vh_min
+    # print(f"h_min: {htest}, on keypoint no: {i_h}")
+    # print(f"d_min: {dtest}, on keypoint no: {i_d}")
+    return row, hmin, dmin, vr_min, vh_min, htest, dtest, i_h, i_d
 
 
 # ------------------------------------------------------------
@@ -253,7 +270,7 @@ def assemble_qp_inplace(
 
     # CBF rows (if any)
     if frames_p.size != 0 and obs_p.size != 0 and HAS_CBF:
-        row, hmin, dmin, vr_min, vh_min = append_cbf_rows_loop(
+        row, hmin, dmin, vr_min, vh_min, htest, dtest, i_h, i_d = append_cbf_rows_loop(
             A, c, row, frames_p, frames_vlin, obs_p, obs_v, obs_a, Jlins, dJlins, dq, Tr, a_s, C, gamma, atol
         )
     else:
@@ -264,4 +281,4 @@ def assemble_qp_inplace(
     # objective parts
     assemble_objective_parts_inplace(P2, b_pos, b_vel, b_scaling, q, dq, nominal_q, nominal_Dq, Dtraj, Tc, ref_scaling)
 
-    return row, hmin, dmin, vr_min, vh_min
+    return row, hmin, dmin, vr_min, vh_min, htest, dtest, i_h, i_d

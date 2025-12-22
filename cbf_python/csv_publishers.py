@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Sequence, Optional, Any
 from time import time
 import numpy as np
+import pandas as pd
 
 
 # -------------------------------------------------------------------
@@ -261,7 +262,11 @@ class JointTargetCsvPublisher:
                 f"data length ({n})."
             )
 
-        row = q_list + dq_list + ddq_list
+        row =[]
+        for i in range(len(q_list)):
+            row.append(q_list[0])
+            row.append(dq_list[0])
+            row.append(ddq_list[0])
         self._writer.append_row(row)
 
     def publish_once(
@@ -409,53 +414,64 @@ def append_test_start_once(
     writer.append_row([bool(value)])
 
 
+
+def swap_csv(path_in, path_out, index_0, index_1):
+    df = pd.read_csv(path_in, header=0, index_col=False)
+    suff_to_swap = ["x", "y", "z", "x_vel", "y_vel", "z_vel", "x_acc", "y_acc", "z_acc"]
+    for suff in suff_to_swap:
+        col_name0 = f"keypoint{index_0}_{suff}"
+        col_name1 = f"keypoint{index_1}_{suff}"
+        df[col_name0], df[col_name1] = df[col_name1].copy(), df[col_name0].copy()
+    df.to_csv(path_out, header=True, index=False)
+
+
 # -------------------------------------------------------------------
 # Example usage
 # -------------------------------------------------------------------
 
-if __name__ == "__main__":
-    import time
-
-    # Example for JointTargetCsvPublisher
-    joint_logger = JointTargetCsvPublisher(
-        csv_path="joint_target.csv",
-        column_names=[
-            "q1", "q2", "q3",
-            "dq1", "dq2", "dq3",
-            "ddq1", "ddq2", "ddq3",
-        ],
-        joint_names=["joint1", "joint2", "joint3"],
-    )
-
-    # Example for DoubleArrayCsvPublisher
-    human_logger = DoubleArrayCsvPublisher(
-        csv_path="human_state.csv",
-        column_names=["t", "x", "y", "z"],
-    )
-
-    # Example for TestStartCsvPublisher
-    test_logger = TestStartCsvPublisher(
-        csv_path="test_start.csv",
-        column_names=["test_started"],
-    )
-
-    # Simulate some loop where you log stuff asynchronously
-    for i in range(10):
-        q = [0.0 + i * 0.01, 0.5, -0.3]
-        dq = [0.0, 0.0, 0.0]
-        ddq = [0.0, -0.1, 0.1]
-        joint_logger.publish_once(q, dq, ddq)
-
-        t_now = i * 0.1
-        human_state = [t_now, 1.0 + i, 2.0, 3.0]
-        human_logger.publish_once(human_state)
-
-        if i == 0:
-            test_logger.publish_once(True)
-
-        # Your main loop can keep running without being blocked by disk I/O
-        time.sleep(0.01)
-
-    # Optional: clean shutdown of the global bus
-    bus = _get_global_bus()
-    bus.shutdown(wait=True)
+# if __name__ == "__main__":
+#     import time
+#
+#     # Example for JointTargetCsvPublisher
+#     joint_logger = JointTargetCsvPublisher(
+#         csv_path="joint_target.csv",
+#         column_names=[
+#             "q1", "q2", "q3",
+#             "dq1", "dq2", "dq3",
+#             "ddq1", "ddq2", "ddq3",
+#         ],
+#         joint_names=["joint1", "joint2", "joint3"],
+#     )
+#
+#     # Example for DoubleArrayCsvPublisher
+#     human_logger = DoubleArrayCsvPublisher(
+#         csv_path="human_state.csv",
+#         column_names=["t", "x", "y", "z"],
+#     )
+#
+#     # Example for TestStartCsvPublisher
+#     test_logger = TestStartCsvPublisher(
+#         csv_path="test_start.csv",
+#         column_names=["test_started"],
+#     )
+#
+#     # Simulate some loop where you log stuff asynchronously
+#     for i in range(10):
+#         q = [0.0 + i * 0.01, 0.5, -0.3]
+#         dq = [0.0, 0.0, 0.0]
+#         ddq = [0.0, -0.1, 0.1]
+#         joint_logger.publish_once(q, dq, ddq)
+#
+#         t_now = i * 0.1
+#         human_state = [t_now, 1.0 + i, 2.0, 3.0]
+#         human_logger.publish_once(human_state)
+#
+#         if i == 0:
+#             test_logger.publish_once(True)
+#
+#         # Your main loop can keep running without being blocked by disk I/O
+#         time.sleep(0.01)
+#
+#     # Optional: clean shutdown of the global bus
+#     bus = _get_global_bus()
+#     bus.shutdown(wait=True)
