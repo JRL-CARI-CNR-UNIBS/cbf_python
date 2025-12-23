@@ -263,7 +263,10 @@ class UR10CBFController:
 
 
         h_min = np.inf
+        d_min = np.inf
         nq = model.nq
+        vr_min = np.inf
+        vh_min = np.inf
         nF = len(self.frames_ids)
         frames_p = np.zeros((nF, 3), dtype=np.float64)
         frames_v = np.zeros((nF, 3), dtype=np.float64)

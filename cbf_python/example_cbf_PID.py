@@ -14,6 +14,7 @@ import numpy as np
 import pinocchio as pin
 from pinocchio.visualize import MeshcatVisualizer
 import math
+import rclpy
 from sharework import loadSharework
 
 from example_cbf_optimal import _on_sigint_with_bridge
@@ -26,10 +27,18 @@ from datetime import datetime
 import test_publish_utils as pub_utils
 from PID_cbf_task_controller import UR10CBFController
 import csv_publishers
-
-USE_BRIDGE = False
-LOG_DATA = True
+import threading
+USE_BRIDGE = True
+LOG_DATA = False
 log_path = "resullts/simulation/PID"
+stop_event = threading.Event()
+
+def _on_sigint_with_bridge(bridge, signum, frame):
+    stop_event.set()
+    try:
+        bridge.shutdown()
+    except Exception:
+        pass
 
 
 def compute_ee_pose(q, model, data, ee_frame_id):
@@ -53,9 +62,9 @@ Tr = 0.15  # [s]  controller-reaction time
 a_s = 2.5  # [m/s²] robot decel/accel capability
 Tc = 2e-3  # [s]   2 kHz control period
 gamma_default = 5.0  # CBF gain
-Dq_max: np.ndarray = np.pi * np.array([1, 1, 1, 1, 1, 1], dtype=np.float64) * np.pi
+Dq_max: np.ndarray = np.pi * np.array([1, 1, 1, 1, 1, 1], dtype=np.float64) * np.pi*0.25
 
-DDq_max: np.ndarray = np.pi * np.array([1, 1, 1, 1, 1, 1], dtype=np.float64) * np.pi * 5.0
+DDq_max: np.ndarray = np.pi * np.array([1, 1, 1, 1, 1, 1], dtype=np.float64) * np.pi * 5.0*0.2
 
 def main():
     # --------------------------- MODEL & VISUALS -------------------------- #
@@ -130,7 +139,7 @@ def main():
             slowdown_factor=1.0,
 
         )
-        #rclpy.init()
+        rclpy.init()
         first_joint_position = home
 
 
@@ -181,8 +190,8 @@ def main():
     tool_frame_name = target_name
 
     # Gains (same as original)
-    wn = 100.0
-    xi = 0.5
+    wn = 50.0
+    xi = 0.3
     Kp_tra = np.array([1.0, 1.0, 1.0]) * wn ** 2
     Kd_tra = np.array([1.0, 1.0, 1.0]) * 2.0 * xi * wn
     Kp_rot = np.array([1.0, 1.0, 1.0]) * wn ** 2
@@ -200,7 +209,6 @@ def main():
         Kd_rot=Kd_rot,
         gamma=gamma_default,
     )
-    ctrl.reset_state(q)
     dq = np.zeros(model.nq)
     # We need initial frame pose for the planner
     pin.framesForwardKinematics(model, data, q)
@@ -223,30 +231,78 @@ def main():
     planner = SegmentedSE3Trap(vlin_max=v_lin_max, vang_max=w_max,
                                alin_max=a_lin_max, aang_max=alpha_max)
 
-    # def pose_eul(z, y, x, xyz):
-    #     R = pin.utils.rotate('z', z) @ pin.utils.rotate('y', y) @ pin.utils.rotate('x', x)
-    #     return SE3(R, np.array(xyz))
-    #
-    # planner.addWayPoint(goal_pose_0 * SE3.Identity())
-    # planner.addWayPoint(goal_pose_0 * pose_eul(0.0, 0.0, 0.0, [0.30, 0.00, 0.0]))
-    # planner.addWayPoint(goal_pose_0 * pose_eul(math.pi / 4, 0.0, 0.0, [0.30, -0.1, 0.020]))
-    # planner.addWayPoint(goal_pose_0 * pose_eul(math.pi / 4, 0.0, -math.pi / 4, [0.3, -0.1, 0.2]))
-    # planner.addWayPoint(goal_pose_0 * pose_eul(-math.pi / 4, 0.0, 0.0, [0.30, 0.0, 0.0]))
-    # planner.addWayPoint(goal_pose_0 * SE3.Identity())
-
-    for name in ordered_configs:
-        p, R, T_ee = compute_ee_pose(configs[name], model, data, tool_frame_id)
+    # for name in ordered_configs:
+    #     p, R, T_ee = compute_ee_pose(configs[name], model, data, tool_frame_id)
+    #     planner.addWayPoint(T_ee)
+    
+    for i in range(len(ordered_configs)):
+        p, R, T_ee = compute_ee_pose(home, model, data, tool_frame_id)
         planner.addWayPoint(T_ee)
-        # print(f"Configuration {name}:")
-        # print("  position [m] = ", p)
-        # print("  rotation matrix =\n", R)
-        # print("  SE3 object = ", T_ee)
-        # print()
+
+
 
     T_total = planner.computeTime()
 
+
     renderer.publishPath(planner.publishPath())
     print(f"Total time = {T_total:.3f} s")
+
+
+    # BRING THE ROBOT AT HOME BEFORE STARTING THE TEST
+    if USE_BRIDGE:
+        start_planner = SegmentedSE3Trap(vlin_max=v_lin_max, vang_max=w_max,
+                               alin_max=a_lin_max, aang_max=alpha_max)
+
+        print(f"Bringing robot to home position from {q.T} to {home.T}")
+        p, R, T_ee = compute_ee_pose(q, model, data, tool_frame_id)
+        start_planner.addWayPoint(T_ee)
+        p, R, T_ee = compute_ee_pose(home, model, data, tool_frame_id)
+        start_planner.addWayPoint(T_ee)
+        t_initial = 0.0
+
+        start_time = start_planner.computeTime()
+        print(f"Bringing robot to home position, total time: {start_time}")
+        time.sleep(1.0)
+        ctrl.reset_state(q)
+        # test_start = True
+        while np.linalg.norm(home-bridge.getPositions()) > 0.01:
+            loop_start = time.perf_counter()
+            obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
+
+            goal_pose, nominal_twist_goal, nominal_goal_dtwist = start_planner.getMotionLaw(t_initial)
+             # Scale if you ever implement time-scaling; currently D=1, DD=0
+            Dtrajectory_time = 1.0
+            DDtrajectory_time = 0.0
+            twist_goal = nominal_twist_goal * Dtrajectory_time
+            goal_dtwist = (
+                nominal_goal_dtwist * Dtrajectory_time ** 2.0
+                + nominal_twist_goal * DDtrajectory_time
+            )
+            out = ctrl.step(
+                t=t_initial,
+                goal_pose=goal_pose,
+                twist_goal=twist_goal,
+                goal_dtwist=goal_dtwist,
+                obstacle_positions=obstacle_positions,
+                obstacle_velocities=obstacle_velocities,
+                obstacle_accelerations=obstacle_accelerations,
+                cbf_enabled=True,
+            )
+
+            q = out["q"]
+            bridge.sendCommand(q)
+
+            # --------------------------- INTEGRATION ----------------------------
+            t_initial += Tc
+
+            elapsed = time.perf_counter() - loop_start
+            
+            rest = Tc - elapsed
+            if rest > 0:
+                rest = max(0.0,Tc - elapsed)
+                time.sleep(rest)
+        q = home.copy()
+    ctrl.reset_state(q)
 
     # ------------------------ PUBLISHER TARGETS  SETUP-----------------------------------
     if LOG_DATA:
@@ -298,18 +354,24 @@ def main():
             )
 
     # ------------------------------ MAIN LOOP ---------------------------- #
+    if LOG_DATA and USE_BRIDGE:
+        test_start_publisher.publish_once(True) # pyright: ignore[reportPossiblyUnboundVariable]
     try:
         t = 0.0
         trajectory_time = 0.0
         Dtrajectory_time = 1.0
         DDtrajectory_time = 0.0
-
-        while t < 150.0:
+        while t < 150.0 and not stop_event.is_set():
             loop_start = time.perf_counter()
 
-            goal_pose, nominal_twist_goal, nominal_goal_dtwist = planner.getMotionLaw(
-                trajectory_time % T_total
-            )
+            if T_total >0.0:
+                goal_pose, nominal_twist_goal, nominal_goal_dtwist = planner.getMotionLaw(
+                    trajectory_time % T_total
+                )
+            else:
+                goal_pose, nominal_twist_goal, nominal_goal_dtwist = planner.getMotionLaw(
+                trajectory_time
+                )
             obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
             # Scale if you ever implement time-scaling; currently D=1, DD=0
             twist_goal = nominal_twist_goal * Dtrajectory_time
@@ -346,32 +408,32 @@ def main():
             if USE_BRIDGE:
                 bridge.sendCommand(q)
 
-            # if not stop_event.is_set():
-            nom_x, nom_y, nom_z = goal_pose.translation.tolist()
-            joint_target_publisher.publish_once([nom_x, nom_y, nom_z])
-            hmin = out["h_min"]
-            dmin = out["d_min"]
-            trj_error = out["trajectory_error"]
-            end_eff_pos = out["end_effector_pos"]
-            end_eff_vel = out["end_effector_vel"]
-            vr_min = out["vr_min"]
-            vh_min = out["vh_min"]
-            cbf_out_publisher.publish_once(
-                [
-                    hmin,
-                    dmin,
-                    trj_error,
-                    end_eff_pos[0],
-                    end_eff_pos[1],
-                    end_eff_pos[2],
-                    end_eff_vel[0],
-                    end_eff_vel[1],
-                    end_eff_vel[2],
-                    vr_min,
-                    vh_min,
-                ]
-            )  # pyright: ignore[reportPossiblyUnboundVariable]
-            human_pos_publisher.publish_once(obstacle_positions)
+            if not stop_event.is_set() and LOG_DATA:
+                nom_x, nom_y, nom_z = goal_pose.translation.tolist()
+                joint_target_publisher.publish_once([nom_x, nom_y, nom_z])
+                hmin = out["h_min"]
+                dmin = out["d_min"]
+                trj_error = out["trajectory_error"]
+                end_eff_pos = out["end_effector_pos"]
+                end_eff_vel = out["end_effector_vel"]
+                vr_min = out["vr_min"]
+                vh_min = out["vh_min"]
+                cbf_out_publisher.publish_once(
+                    [
+                        hmin,
+                        dmin,
+                        trj_error,
+                        end_eff_pos[0],
+                        end_eff_pos[1],
+                        end_eff_pos[2],
+                        end_eff_vel[0],
+                        end_eff_vel[1],
+                        end_eff_vel[2],
+                        vr_min,
+                        vh_min,
+                    ]
+                )  # pyright: ignore[reportPossiblyUnboundVariable]
+                human_pos_publisher.publish_once(obstacle_positions)
             if not USE_BRIDGE and LOG_DATA:
                 joint_state_publisher.publish_once(q, dq, ddq)
 
@@ -392,10 +454,20 @@ def main():
                 rest = max(0.0, Tc - elapsed)
                 time.sleep(rest)
         print ("FINE CICLO")
+        if not stop_event.is_set() and LOG_DATA:
+            test_start_publisher.publish_once(False) # pyright: ignore[reportPossiblyUnboundVariable]
 
     except KeyboardInterrupt:
         print("Simulation interrupted by user.")
+        stop_event.set()
 
+
+    finally:
+       
+        try:
+            pub_utils.publish_test_start_once(False)
+        except Exception as e:
+            print(f"[shutdown] one-shot publish failed: {e}")
 
 if __name__ == "__main__":
     main()

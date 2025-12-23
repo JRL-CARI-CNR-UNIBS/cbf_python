@@ -4,7 +4,7 @@ from doctest import DocTest
 from unittest import defaultTestLoader
 
 import numpy as np
-from IPython.testing.tools import help_output_test
+#from IPython.testing.tools import help_output_test
 from numba import njit
 
 # ------------------------------------------------------------
@@ -165,7 +165,7 @@ def append_cbf_rows_loop(
 
 
 
-
+            # FOR DEBUGGING ONLY, REMOVE htest AND dtest ABOVE LATER
             if o == 7 and f == frames_p.shape[0]-1: # last frame, left hand keypoint
                 vr_min = vr
                 vh_min = vh
@@ -178,6 +178,7 @@ def append_cbf_rows_loop(
             row += 1
     # print(f"h_min: {htest}, on keypoint no: {i_h}")
     # print(f"d_min: {dtest}, on keypoint no: {i_d}")
+    
     return row, hmin, dmin, vr_min, vh_min, htest, dtest, i_h, i_d
 
 
