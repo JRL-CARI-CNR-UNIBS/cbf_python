@@ -29,7 +29,7 @@ from PID_cbf_task_controller import UR10CBFController
 import csv_publishers
 import threading
 USE_BRIDGE = True
-LOG_DATA = False
+LOG_DATA = True
 log_path = "resullts/simulation/PID"
 stop_event = threading.Event()
 
@@ -168,30 +168,12 @@ def main():
     data = model.createData()
 
     q = first_joint_position.copy()
-    q10 = np.array([31.0, -78.0, 115.0, -127.0, 86.0, -32.0]) * np.pi / 180.0
-    q20 = np.array([31.0, -83.0, 98.0, -110.0, 86.0, -32.0]) * np.pi / 180.0
-    q22 = np.array([40.0, -126.0, 141.0, -100.0, 86.0, 45.0]) * np.pi / 180.0
-    q25 = np.array([130.0, -100.0, 125.0, -115.0, 94.0, -20.0]) * np.pi / 180.0
-    q30 = np.array([136.0, -60.0, 90.0, -122.0, 90.0, 45.0]) * np.pi / 180.0
-    q40 = np.array([134.0, -65.0, 70.0, -90.0, 90.0, 45.0]) * np.pi / 180.0
-
-    configs = {
-        "q": q,
-        "q10": q10,
-        "q20": q20,
-        "q22": q22,
-        "q25": q25,
-        "q30": q30,
-        "q40": q40,
-    }
-    ordered_configs = []
-    for i in range(3):
-        ordered_configs.extend(["q", "q10", "q20", "q10", "q22", "q25", "q30", "q40", "q30", "q"])
+    
     tool_frame_name = target_name
 
     # Gains (same as original)
-    wn = 50.0
-    xi = 0.3
+    wn = 10.0
+    xi = 1.0
     Kp_tra = np.array([1.0, 1.0, 1.0]) * wn ** 2
     Kd_tra = np.array([1.0, 1.0, 1.0]) * 2.0 * xi * wn
     Kp_rot = np.array([1.0, 1.0, 1.0]) * wn ** 2
@@ -227,29 +209,22 @@ def main():
     print(f"w_max: {w_max}")
     print(f"a_lin_max: {a_lin_max}")
     print(f"alpha_max: {alpha_max}")
-    # -------------------------- Trajectory planner ------------------------ #
-    planner = SegmentedSE3Trap(vlin_max=v_lin_max, vang_max=w_max,
-                               alin_max=a_lin_max, aang_max=alpha_max)
-
-    # for name in ordered_configs:
-    #     p, R, T_ee = compute_ee_pose(configs[name], model, data, tool_frame_id)
-    #     planner.addWayPoint(T_ee)
-    
-    for i in range(len(ordered_configs)):
-        p, R, T_ee = compute_ee_pose(home, model, data, tool_frame_id)
-        planner.addWayPoint(T_ee)
-
-
-
-    T_total = planner.computeTime()
-
-
-    renderer.publishPath(planner.publishPath())
-    print(f"Total time = {T_total:.3f} s")
+   
 
 
     # BRING THE ROBOT AT HOME BEFORE STARTING THE TEST
     if USE_BRIDGE:
+        start_ctrl = UR10CBFController(
+        model=model.copy(),
+        tool_frame_name=tool_frame_name,
+        frames_ids=frame_ids,
+        Tc=Tc,
+        Kp_tra=Kp_tra,
+        Kd_tra=Kd_tra,
+        Kp_rot=Kp_rot,
+        Kd_rot=Kd_rot,
+        gamma=gamma_default,
+    )
         start_planner = SegmentedSE3Trap(vlin_max=v_lin_max, vang_max=w_max,
                                alin_max=a_lin_max, aang_max=alpha_max)
 
@@ -263,9 +238,9 @@ def main():
         start_time = start_planner.computeTime()
         print(f"Bringing robot to home position, total time: {start_time}")
         time.sleep(1.0)
-        ctrl.reset_state(q)
+        start_ctrl.reset_state(q)
         # test_start = True
-        while np.linalg.norm(home-bridge.getPositions()) > 0.01:
+        while np.linalg.norm(home-bridge.getPositions()) > 0.001:
             loop_start = time.perf_counter()
             obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
 
@@ -278,7 +253,7 @@ def main():
                 nominal_goal_dtwist * Dtrajectory_time ** 2.0
                 + nominal_twist_goal * DDtrajectory_time
             )
-            out = ctrl.step(
+            out = start_ctrl.step(
                 t=t_initial,
                 goal_pose=goal_pose,
                 twist_goal=twist_goal,
@@ -291,7 +266,7 @@ def main():
 
             q = out["q"]
             bridge.sendCommand(q)
-
+            
             # --------------------------- INTEGRATION ----------------------------
             t_initial += Tc
 
@@ -302,14 +277,60 @@ def main():
                 rest = max(0.0,Tc - elapsed)
                 time.sleep(rest)
         q = home.copy()
-    ctrl.reset_state(q)
 
+    print(f"Starting main loop from q: {q.T}")
+    q10 = np.array([31.0, -78.0, 115.0, -127.0, 86.0, -32.0]) * np.pi / 180.0
+    q20 = np.array([31.0, -83.0, 98.0, -110.0, 86.0, -32.0]) * np.pi / 180.0
+    q22 = np.array([40.0, -126.0, 141.0, -100.0, 86.0, 45.0]) * np.pi / 180.0
+    q25 = np.array([130.0, -100.0, 125.0, -115.0, 94.0, -20.0]) * np.pi / 180.0
+    q30 = np.array([136.0, -60.0, 90.0, -122.0, 90.0, 45.0]) * np.pi / 180.0
+    q40 = np.array([134.0, -65.0, 70.0, -90.0, 90.0, 45.0]) * np.pi / 180.0
+
+    configs = {
+        "q": q,
+        "q10": q10,
+        "q20": q20,
+        "q22": q22,
+        "q25": q25,
+        "q30": q30,
+        "q40": q40,
+    }
+    ordered_configs = []
+    for i in range(3):
+        ordered_configs.extend(["q", "q10", "q20", "q10", "q22", "q25", "q30", "q40", "q30", "q"])
+
+
+     # -------------------------- Trajectory planner ------------------------ #
+    planner = SegmentedSE3Trap(vlin_max=v_lin_max, vang_max=w_max,
+                               alin_max=a_lin_max*0.5, aang_max=alpha_max)
+
+    for name in ordered_configs:
+        p, R, T_ee = compute_ee_pose(configs[name], model, data, tool_frame_id)
+        planner.addWayPoint(T_ee)
+    # for i in range(len(ordered_configs)):
+    #     p, R, T_ee = compute_ee_pose(home, model, data, tool_frame_id)
+    #     planner.addWayPoint(T_ee)
+    # print("Building trajectory...")
+    # print("Q: ", q)
+    # p, R, T_ee = compute_ee_pose(q, model, data, tool_frame_id)
+    # planner.addWayPoint(T_ee)
+    # p, R, T_ee = compute_ee_pose(home, model, data, tool_frame_id)
+    # planner.addWayPoint(T_ee)
+    # p, R, T_ee = compute_ee_pose(q, model, data, tool_frame_id)
+    # planner.addWayPoint(T_ee)
+
+
+    T_total = planner.computeTime()
+
+
+    renderer.publishPath(planner.publishPath())
+    print(f"Total time = {T_total:.3f} s")
     # ------------------------ PUBLISHER TARGETS  SETUP-----------------------------------
     if LOG_DATA:
         if USE_BRIDGE:
             joint_target_publisher = pub_utils.JointTargetPublisher(
                 topic='joint_target',
-                joint_names=UR10E_JOINTS,
+                joint_names=["target_x","target_y","target_z"],
                 frame_id='world'
             )
 
@@ -354,6 +375,8 @@ def main():
             )
 
     # ------------------------------ MAIN LOOP ---------------------------- #
+    ctrl.reset_state(q)
+
     if LOG_DATA and USE_BRIDGE:
         test_start_publisher.publish_once(True) # pyright: ignore[reportPossiblyUnboundVariable]
     try:
@@ -361,7 +384,7 @@ def main():
         trajectory_time = 0.0
         Dtrajectory_time = 1.0
         DDtrajectory_time = 0.0
-        while t < 150.0 and not stop_event.is_set():
+        while t < 30.0 and not stop_event.is_set():
             loop_start = time.perf_counter()
 
             if T_total >0.0:
@@ -399,6 +422,8 @@ def main():
             dq = out["dq"]
             ddq = out["ddq"]
             h_min = out["h_min"]
+            # Print q and dq for debugging
+            # print(f"q: {q} \n dq: {dq}")
 
             # --------------------------- TIMING & VISUALS ------------------- #
             t += Tc
@@ -406,11 +431,12 @@ def main():
             Dtrajectory_time += DDtrajectory_time * Tc
 
             if USE_BRIDGE:
+                # print(f"Sending command: {q}")
                 bridge.sendCommand(q)
 
             if not stop_event.is_set() and LOG_DATA:
                 nom_x, nom_y, nom_z = goal_pose.translation.tolist()
-                joint_target_publisher.publish_once([nom_x, nom_y, nom_z])
+                joint_target_publisher.publish_once([nom_x, nom_y, nom_z], twist_goal[0:3], goal_dtwist[0:3])
                 hmin = out["h_min"]
                 dmin = out["d_min"]
                 trj_error = out["trajectory_error"]

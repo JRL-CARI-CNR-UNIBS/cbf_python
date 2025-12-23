@@ -14,7 +14,6 @@ C = 0.25
 gamma = 5.0
 Tc = 2e-3
 Dq_max: np.ndarray = np.pi * np.array([1, 1, 1, 1, 1, 1], dtype=np.float64) * np.pi
-
 DDq_max: np.ndarray = np.pi * np.array([1, 1, 1, 1, 1, 1], dtype=np.float64) * np.pi * 5.0
 
 

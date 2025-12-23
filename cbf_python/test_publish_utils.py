@@ -159,6 +159,7 @@ class JointTargetPublisher(Node):
         ddq = _to_list(ddq)
 
         n = len(q)
+        # print(f"Publishing JointTarget of length: {n}")
         if len(dq) != n or len(ddq) != n:
             raise ValueError(
                 f'Length mismatch: position={len(q)}, velocity={len(dq)}, effort={len(ddq)}'
