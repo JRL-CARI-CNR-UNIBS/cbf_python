@@ -16,7 +16,7 @@ model_wrapper = loadSharework(UR10E_JOINTS)
 model = model_wrapper.model
 data = model.createData()
 # Load joint states CSV
-joint_state_df = pd.read_csv("resullts/simulation/scaling/20251219_155319/reference_trajectory_2025_12_19_15_53_19.csv", header=0, index_col=False)
+joint_state_df = pd.read_csv("resullts/simulation/no_cbf/20251226_191619/reference_trajectory_2025_12_26_19_16_19.csv", header=0, index_col=False)
 
 
 # Function to compute the Cartesian state for the wrist joint
@@ -54,6 +54,6 @@ print (cartesian_data[0])
 cartesian_df = pd.DataFrame(cartesian_data, columns=['time', 'x', 'y', 'z', 'qx', 'qy', 'qz', 'qw'])
 
 # Save the Cartesian state to a new CSV
-cartesian_df.to_csv("resullts/simulation/scaling/20251219_155319/ur10e_wrist_3_cartesian_state.csv", index=False)
+cartesian_df.to_csv("resullts/simulation/no_cbf/20251226_191619/ur10e_wrist_3_cartesian_state.csv", index=False)
 
 print("Cartesian data for wrist 3 joint saved to 'ur10e_wrist_3_cartesian_state.csv'")

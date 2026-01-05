@@ -5,7 +5,7 @@ import quadprog
 import pinocchio as pin
 
 from numba_kernels import build_free_forced_one_step, assemble_qp_inplace
-
+import compute_velocity_scaling_for_human_proximity as ext_scaling
 
 @dataclass
 class ControllerConfig:
@@ -44,12 +44,13 @@ class BCFOptimalController:
     Minimal controller: only robot model, state, and QP assembly/solve.
     External code must provide obstacle states and nominal trajectory at each step.
     """
-    def __init__(self, model_wrapper, cfg: ControllerConfig):
+    def __init__(self, model_wrapper, cfg: ControllerConfig, useCbf):
         self.cfg = cfg
         self.model_wrapper = model_wrapper
         self.model = self.model_wrapper.model
         self.data = self.model.createData()
 
+        self.useCbf = useCbf
         # frames (IDs)
         self.tool_frame_id = self.model.getFrameId(cfg.prefix + cfg.tool_frame)
         self.elbow_frame_id = self.model.getFrameId(cfg.prefix + cfg.elbow_frame)
@@ -81,7 +82,10 @@ class BCFOptimalController:
         self.bunfeasible = np.zeros(nq + 1, dtype=np.float64)
 
         # constraints (upper bound)
-        self.n_constraints = 3 + 2 * 3 * nq + cfg.max_obstacles * len(self.frames_ids)
+        if useCbf:
+            self.n_constraints = 3 + 2 * 3 * nq + cfg.max_obstacles * len(self.frames_ids)
+        else:
+            self.n_constraints = 3 + 2 * 3 * nq
         self.A = np.zeros((self.n_constraints, nq + 1), dtype=np.float64)
         self.c = np.zeros(self.n_constraints, dtype=np.float64)
 
@@ -159,6 +163,24 @@ class BCFOptimalController:
             Jlins[i, :, :]  = J[:3, :]
             dJlins[i, :, :] = dJ[:3, :]
 
+        # reference scaling computing. If check delta flag is True, it means the controller is in recovery phase after
+        # an unfeaible state, so qp_scaling shoud be null. If not, qp_scaling should track the reference scaling attribute.
+        if not self.check_delta:
+            if not self.useCbf:
+                ref_scaling = ext_scaling.compute_velocity_scaling_for_human_proximity(
+                    model=self.model.copy(), data=self.data.copy(),
+                    q=self.q,
+                    dq=self.dq,
+                    ddq=self.ddq,
+                    tool_frame_ids= self.frames_ids,
+                    human_positions_world = obs_pos,
+                )
+                print("Reference scaling: ", ref_scaling)
+                self.set_ref_scaling(ref_scaling)
+                print("reference scaling attribute: ", self.ref_scaling)
+            self.qp_scaling = self.ref_scaling
+        else:
+            self.qp_scaling = 0.0
         # NUMBA: assemble constraints + objective partials
         row, h_min, d_min, vr_min, vh_min, htest, dtest, i_h, i_d = assemble_qp_inplace(
             self.P_vel, self.b_pos, self.b_vel, self.b_scaling,
@@ -169,7 +191,7 @@ class BCFOptimalController:
             self.Dtrajectory_time, Tc,
             cfg.Dq_max, cfg.DDq_max, self.delta_q_max,
             frames_p, frames_v, Jlins, dJlins, obs_pos, obs_vel, obs_acc,
-            cfg.Tr, cfg.a_s, cfg.C, cfg.gamma,cfg.DDtrajectory_time_max, 1e-12, self.qp_scaling
+            cfg.Tr, cfg.a_s, cfg.C, cfg.gamma,cfg.DDtrajectory_time_max, 1e-12, self.qp_scaling, self.useCbf
         )
 
         # print(f"h_min: {htest}, on keypoint no: {i_h}")
@@ -255,7 +277,7 @@ class BCFOptimalController:
                     print(f"COUNT_DEV: {count_dev}, i: {i}")
             if count_dev == nq:
                 self.check_delta = False
-                self.qp_scaling = self.ref_scaling
+               # self.qp_scaling = self.ref_scaling
                 print("RESUMING MAIN PROBLEM")
             else:
                 print("NOT RESUMING MAIN PROBLEM")

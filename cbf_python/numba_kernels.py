@@ -115,11 +115,13 @@ def fill_acc_rows(A, c, row, nq, DDq_max):
 # @njit
 # def compute_h_and_constraints_numba(p_bt, op, v_lin, ov, Tr, a_s, C, oa, atol, Jlin, dJlin, dq, gamma):
 #     return h, row_vec(=shape (nq,)), bound
-try:
-    from ssm_cbf_acc import compute_h_and_constraints_numba  # ensure this is @njit
-    HAS_CBF = True
-except Exception:
-    HAS_CBF = False
+# try:
+from ssm_cbf_acc import compute_h_and_constraints_numba  # ensure this is @njit
+#     #HAS_CBF = True
+#     print("IMPORTED")
+# except Exception:
+#     #HAS_CBF = False
+#     pass
 
 @njit(cache=True, fastmath=True)
 def append_cbf_rows_loop(
@@ -127,7 +129,7 @@ def append_cbf_rows_loop(
     frames_p, frames_vlin,  # (nF,3), (nF,3)
     obs_p, obs_v, obs_a,    # (nO,3)
     Jlins, dJlins, dq,      # (nF,3,nq)
-    Tr, a_s, C, gamma, atol
+    Tr, a_s, C, gamma, atol, HAS_CBF
 ):
     hmin = 1e9
     htest = 1e09
@@ -138,8 +140,8 @@ def append_cbf_rows_loop(
 
     vr_min = 0.0  # unused placeholder
     vh_min = 0.0
-    if not HAS_CBF:
-        return row, hmin
+    # if not HAS_CBF:
+    #     return row, hmin
 
     nF = frames_p.shape[0]
     nO = obs_p.shape[0]
@@ -154,7 +156,7 @@ def append_cbf_rows_loop(
         for o in range(nO):
             op = obs_p[o]; ov = obs_v[o]; oa = obs_a[o]
             h, row_vec, bound, d, vr, vh = compute_h_and_constraints_numba(
-                p_bt, op, vlin, ov, Tr, a_s, C, oa, atol, Jlin, dJlin, dq, gamma
+                p_bt, op, vlin, ov, Tr, a_s, C, oa, atol, Jlin, dJlin, dq, gamma, HAS_CBF
             )
             if h < htest:
                 htest = h
@@ -162,20 +164,17 @@ def append_cbf_rows_loop(
             if d < dtest:
                 dtest = h
                 i_d = o
-
-
-
-
             if o == 7 and f == frames_p.shape[0]-1: # last frame, left hand keypoint
                 vr_min = vr
                 vh_min = vh
                 dmin = d
                 hmin = h
             #print(f"ADDING TO ROW: {row}")
-            for j in range(nq):
-                A[row, j] = row_vec[j]
-            c[row] = bound
-            row += 1
+            if HAS_CBF:
+                for j in range(nq):
+                    A[row, j] = row_vec[j]
+                c[row] = bound
+                row += 1
     # print(f"h_min: {htest}, on keypoint no: {i_h}")
     # print(f"d_min: {dtest}, on keypoint no: {i_d}")
     return row, hmin, dmin, vr_min, vh_min, htest, dtest, i_h, i_d
@@ -243,7 +242,7 @@ def assemble_qp_inplace(
     Dq_max, DDq_max, delta_q_max,
     # CBF inputs (optional; pass empty arrays if unused)
     frames_p, frames_vlin, Jlins, dJlins, obs_p, obs_v, obs_a,
-    Tr, a_s, C, gamma, DDtraj_max, atol, ref_scaling,
+    Tr, a_s, C, gamma, DDtraj_max, atol, ref_scaling, HAS_CBF
 ):
     nq = q.size
     # zero A, c
@@ -269,9 +268,9 @@ def assemble_qp_inplace(
     row = fill_acc_rows(A, c, row, nq, DDq_max)
 
     # CBF rows (if any)
-    if frames_p.size != 0 and obs_p.size != 0 and HAS_CBF:
+    if frames_p.size != 0 and obs_p.size != 0:
         row, hmin, dmin, vr_min, vh_min, htest, dtest, i_h, i_d = append_cbf_rows_loop(
-            A, c, row, frames_p, frames_vlin, obs_p, obs_v, obs_a, Jlins, dJlins, dq, Tr, a_s, C, gamma, atol
+            A, c, row, frames_p, frames_vlin, obs_p, obs_v, obs_a, Jlins, dJlins, dq, Tr, a_s, C, gamma, atol, HAS_CBF
         )
     else:
         hmin = 1e9
