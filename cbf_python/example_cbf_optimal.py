@@ -58,7 +58,7 @@ def _on_sigint_with_bridge(bridge, signum, frame):
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
-    USE_BRIDGE = False
+    USE_BRIDGE = True
     LOG_DATA = True
     log_path = "resullts/simulation/scaling"
     # rclpy.init()
@@ -213,12 +213,6 @@ def main():
 
     # --------------------------- CONTROL INITIALISATION --------------------------
     q = first_joint_position.copy()
-    # q2 = home.copy()
-    # q2[1] = -np.pi * 0.5
-    # q2[2] = np.pi * 0.5
-    # q3 = np.array([ 40.0, -80.0, 100.0, -120.0, 90.0, 0.0])*np.pi/180.0
-    # q4 = np.array([ 122.0, -70.0, 100.0, -120.0, 90.0, 0.0])*np.pi/180.0
-    # print(f"q={q.T}\nq={q2.T}")
 
     # ---------------------------TEST WAYPOINTS ------------------------------
     q10 = np.array([ 31.0, -78.0, 115.0, -127.0, 86.0, -32.0])*np.pi/180.0
@@ -230,7 +224,50 @@ def main():
     cfg.Dq_max = cfg.Dq_max*0.25
     cfg.DDq_max = cfg.DDq_max*0.2
     planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.25, DDq_max=cfg.DDq_max*0.25)
+    print("Computing trajectory...")
+    # BRING THE ROBOT AT HOME BEFORE STARTING THE TEST
+    if USE_BRIDGE:
+        start_planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.25, DDq_max=cfg.DDq_max*0.25)
+        print(f"Bringing robot to home position from {q.T} to {home.T}")
+        start_planner.addWayPoint(q)
+        start_planner.addWayPoint(home)
+        t_initial = 0.0
 
+        trajectory_time_initial = 0.0
+        start_time = start_planner.computeTime()
+        print(f"Bringing robot to home position, total time: {start_time}")
+        time.sleep(1.0)
+        ctrl.reset_state(q)
+        # test_start = True
+        while np.linalg.norm(home-bridge.getPositions()) > 0.01:
+            loop_start = time.perf_counter()
+            obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
+
+            nominal_q, nominal_Dq, nominal_DDq = start_planner.getMotionLaw(trajectory_time_initial)
+            
+            out = ctrl.step(
+                obs_pos=obstacle_positions,
+                obs_vel=obstacle_velocities,
+                obs_acc=obstacle_accelerations,
+                nominal_q=nominal_q,
+                nominal_Dq=nominal_Dq, 
+                nominal_DDq=nominal_DDq
+            )
+            q = out["q"]
+            bridge.sendCommand(q)
+
+            # --------------------------- INTEGRATION ----------------------------
+            t_initial += Tc
+            trajectory_time_initial = out["trajectory_time"]
+
+            elapsed = time.perf_counter() - loop_start
+            
+            rest = Tc - elapsed
+            if rest > 0:
+                rest = max(0.0,Tc - elapsed)
+                time.sleep(rest)
+
+        q = home.copy()
     # 2 · add way‑points -------------------------------------------
     for _ in range(3):
         planner.addWayPoint(q)

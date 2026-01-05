@@ -14,7 +14,6 @@ C = 0.25
 gamma = 5.0
 Tc = 2e-3
 Dq_max: np.ndarray = np.pi * np.array([1, 1, 1, 1, 1, 1], dtype=np.float64) * np.pi
-
 DDq_max: np.ndarray = np.pi * np.array([1, 1, 1, 1, 1, 1], dtype=np.float64) * np.pi * 5.0
 
 
@@ -263,7 +262,10 @@ class UR10CBFController:
 
 
         h_min = np.inf
+        d_min = np.inf
         nq = model.nq
+        vr_min = np.inf
+        vh_min = np.inf
         nF = len(self.frames_ids)
         frames_p = np.zeros((nF, 3), dtype=np.float64)
         frames_v = np.zeros((nF, 3), dtype=np.float64)
