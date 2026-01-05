@@ -94,7 +94,7 @@ class BCFOptimalController:
 
         # delta_q_max
         self.delta_q_max = np.copy(cfg.delta_q_max)
-        self.unfeasible_cnt = 0
+        self.unfeasible_cnt = "FEASIBLE"
         self.ref_scaling = 1.0
         self.qp_scaling = self.ref_scaling
         print(f"DELTA_Q_MAX: {self.delta_q_max}")
@@ -237,7 +237,7 @@ class BCFOptimalController:
                 #     c[:(3 + nq * 4)]
                 # )
                 test_unfeasible = 1
-                self.unfeasible_cnt += 1
+                self.unfeasible_cnt = "UNFEASIBLE"
                 self.qp_scaling = 0.0
                 self.check_delta = True
             else:
@@ -279,7 +279,9 @@ class BCFOptimalController:
                 self.check_delta = False
                # self.qp_scaling = self.ref_scaling
                 print("RESUMING MAIN PROBLEM")
+                self.unfeasible_cnt = "FEASIBLE"
             else:
+                self.unfeasible_cnt = "RECOVERING"
                 print("NOT RESUMING MAIN PROBLEM")
         return {
             "h_min": float(h_min),

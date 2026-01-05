@@ -58,7 +58,7 @@ def _on_sigint_with_bridge(bridge, signum, frame):
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
-    USE_BRIDGE = True
+    USE_BRIDGE = False
     LOG_DATA = True
     log_path = "resullts/simulation/scaling"
     # rclpy.init()
@@ -117,8 +117,7 @@ def main():
         R = quat.toRotationMatrix()
 
         T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
-        csv_in_path = "/home/galileo/Desktop/skeleton_vectors_22 (Copy).csv"
-        csv_out_path = "/home/galileo/Desktop/skeleton_vectors_22.csv"
+        csv_out_path = "skeleton_vectors/skeleton_vectors_OPTIMAL_RW.csv"
         #csv_publishers.swap_csv(csv_in_path, csv_out_path, 7, 17)
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
@@ -333,7 +332,7 @@ def main():
                 nominal_Dq=nominal_Dq, 
                 nominal_DDq=nominal_DDq
             )
-            unfeasible_cnt = out["unfeasible_cnt"]
+            unfeasible_string = out["unfeasible_cnt"]
             q = out["q"]
 
             if cycles<5:
@@ -390,7 +389,7 @@ def main():
 
             rest = Tc - elapsed
             if rest > 0:
-                vizualization_string =f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f}"
+                vizualization_string =f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f} ctrl_state:{unfeasible_string}"
 
                 renderer.push_state(out["q"], out["Tbt_nominal"], out["obs_pos"], vizualization_string)
                 elapsed = time.perf_counter() - loop_start
@@ -398,6 +397,8 @@ def main():
                 time.sleep(rest)
             else:
                 timeout_cycles+=1
+            if unfeasible_string != "FEASIBLE":
+                unfeasible_cnt += 1
         if not stop_event.is_set() and LOG_DATA:
             test_start_publisher.publish_once(False) # pyright: ignore[reportPossiblyUnboundVariable]
 
