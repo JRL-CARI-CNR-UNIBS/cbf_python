@@ -103,6 +103,17 @@ class JointStateCommandBridge(Node, BaseCommandBridgeABC):
             except Exception:
                 self._kin_last_recv_[topic] = rclpy.time.Time()
 
+        # Preallocated kinematics buffers per topic TO BE TESTED
+        self._kin_buffers: Dict[str, Dict[str, np.ndarray]] = {}
+
+        for topic in kinematics_topics:
+            topic = str(topic)
+            self._kin_buffers[topic] = {
+                "pos": np.empty((0, 3), dtype=float),
+                "vel": np.empty((0, 3), dtype=float),
+                "acc": np.empty((0, 3), dtype=float),
+            }
+
         # Optional executor
         self._executor: Optional[SingleThreadedExecutor] = None
         self._spin_thread: Optional[threading.Thread] = None
@@ -144,11 +155,93 @@ class JointStateCommandBridge(Node, BaseCommandBridgeABC):
             self.obstacles_[topic_name] = [np.asarray(v, dtype=float) for v in pts_world]
             self._obstacles_last_recv_[topic_name] = recv_time
 
-    def _on_objects_kinematics(self, msg: ObjectsKinematicsStamped, *, topic_name: str) -> None:
-        """Build (pos, vel, acc) from ObjectsKinematics and transform to 'world':contentReference[oaicite:1]{index=1}."""
-        frame_id = (msg.header.frame_id or "").strip() or "world"
+    # def _on_objects_kinematics(self, msg: ObjectsKinematicsStamped, *, topic_name: str) -> None:
+    #     """Build (pos, vel, acc) from ObjectsKinematics and transform to 'world':contentReference[oaicite:1]{index=1}."""
+    #     frame_id = (msg.header.frame_id or "").strip() or "world"
+    #
+    #     pos_list, vel_list, acc_list = [], [], [] TOBETESTED
+    #
+    #     for objkin in msg.objects:
+    #         obj = getattr(objkin, "object", None)
+    #         sk = getattr(obj, "skeleton_3d", None) if obj is not None else None
+    #         if sk is None or not hasattr(sk, "keypoints"):
+    #             continue
+    #
+    #         kps = sk.keypoints
+    #         vels = getattr(objkin, "keypoint_velocities", []) or []
+    #         accs = getattr(objkin, "keypoint_accelerations", []) or []
+    #         n = min(len(kps), len(vels), len(accs))
+    #         if n == 0:
+    #             continue
+    #
+    #         for i in range(n):
+    #             try:
+    #                 px, py, pz = float(kps[i].kp[0]), float(kps[i].kp[1]), float(kps[i].kp[2])
+    #             except Exception:
+    #                 px = float(getattr(kps[i], "x", 0.0))
+    #                 py = float(getattr(kps[i], "y", 0.0))
+    #                 pz = float(getattr(kps[i], "z", 0.0))
+    #             if abs(px) < 1e-12 and abs(py) < 1e-12 and abs(pz) < 1e-12:
+    #                 continue
+    #
+    #             try:
+    #                 vx, vy, vz = float(vels[i].kp[0]), float(vels[i].kp[1]), float(vels[i].kp[2])
+    #             except Exception:
+    #                 vx = float(getattr(vels[i], "x", 0.0))
+    #                 vy = float(getattr(vels[i], "y", 0.0))
+    #                 vz = float(getattr(vels[i], "z", 0.0))
+    #
+    #             try:
+    #                 ax, ay, az = float(accs[i].kp[0]), float(accs[i].kp[1]), float(accs[i].kp[2])
+    #             except Exception:
+    #                 ax = float(getattr(accs[i], "x", 0.0))
+    #                 ay = float(getattr(accs[i], "y", 0.0))
+    #                 az = float(getattr(accs[i], "z", 0.0))
+    #
+    #             pos_list.append([px, py, pz])
+    #             vel_list.append([vx, vy, vz])
+    #             acc_list.append([ax, ay, az])
+    #
+    #     recv_time = self.get_clock().now()
+    #     if not pos_list:
+    #         with self._poses_lock:
+    #             self._kin_last_recv_[topic_name] = recv_time
+    #         return
+    #
+    #     pos_arr = np.asarray(pos_list, dtype=float)
+    #     vel_arr = np.asarray(vel_list, dtype=float)
+    #     acc_arr = np.asarray(acc_list, dtype=float)
+    #
+    #     if frame_id != "world":
+    #         T = self._get_transform_matrix_to_world(frame_id, msg.header.stamp)
+    #         if T is None:
+    #             return
+    #         R = T[:3, :3]
+    #         t = T[:3, 3]
+    #         pos_arr = (R @ pos_arr.T).T + t.reshape(1, 3)
+    #         vel_arr = (R @ vel_arr.T).T
+    #         acc_arr = (R @ acc_arr.T).T
+    #
+    #     with self._poses_lock:
+    #         self.kinematics_[topic_name] = (pos_arr, vel_arr, acc_arr)
+    #         self._kin_last_recv_[topic_name] = recv_time
 
-        pos_list, vel_list, acc_list = [], [], []
+    def _on_objects_kinematics(
+            self,
+            msg: ObjectsKinematicsStamped,
+            *,
+            topic_name: str
+    ) -> None:
+        """Efficient kinematics callback: vectorized, allocation-minimal."""
+
+        frame_id = (msg.header.frame_id or "").strip() or "world"
+        recv_time = self.get_clock().now()
+
+        # -------- collect raw arrays (vectorized) -----------------------------
+        pos_chunks = []
+        vel_chunks = []
+        acc_chunks = []
+
         for objkin in msg.objects:
             obj = getattr(objkin, "object", None)
             sk = getattr(obj, "skeleton_3d", None) if obj is not None else None
@@ -156,62 +249,78 @@ class JointStateCommandBridge(Node, BaseCommandBridgeABC):
                 continue
 
             kps = sk.keypoints
-            vels = getattr(objkin, "keypoint_velocities", []) or []
-            accs = getattr(objkin, "keypoint_accelerations", []) or []
+            vels = getattr(objkin, "keypoint_velocities", None)
+            accs = getattr(objkin, "keypoint_accelerations", None)
+            if not kps or not vels or not accs:
+                continue
+
             n = min(len(kps), len(vels), len(accs))
             if n == 0:
                 continue
 
-            for i in range(n):
-                try:
-                    px, py, pz = float(kps[i].kp[0]), float(kps[i].kp[1]), float(kps[i].kp[2])
-                except Exception:
-                    px = float(getattr(kps[i], "x", 0.0))
-                    py = float(getattr(kps[i], "y", 0.0))
-                    pz = float(getattr(kps[i], "z", 0.0))
-                if abs(px) < 1e-12 and abs(py) < 1e-12 and abs(pz) < 1e-12:
-                    continue
+            try:
+                pos = np.asarray([kp.kp for kp in kps[:n]], dtype=float)
+                vel = np.asarray([v.kp for v in vels[:n]], dtype=float)
+                acc = np.asarray([a.kp for a in accs[:n]], dtype=float)
+            except Exception:
+                # Fallback for alternative field layouts
+                pos = np.asarray([[kp.x, kp.y, kp.z] for kp in kps[:n]], dtype=float)
+                vel = np.asarray([[v.x, v.y, v.z] for v in vels[:n]], dtype=float)
+                acc = np.asarray([[a.x, a.y, a.z] for a in accs[:n]], dtype=float)
 
-                try:
-                    vx, vy, vz = float(vels[i].kp[0]), float(vels[i].kp[1]), float(vels[i].kp[2])
-                except Exception:
-                    vx = float(getattr(vels[i], "x", 0.0))
-                    vy = float(getattr(vels[i], "y", 0.0))
-                    vz = float(getattr(vels[i], "z", 0.0))
+            # Filter invalid (zero) keypoints in one shot
+            mask = np.linalg.norm(pos, axis=1) > 1e-12
+            if not np.any(mask):
+                continue
 
-                try:
-                    ax, ay, az = float(accs[i].kp[0]), float(accs[i].kp[1]), float(accs[i].kp[2])
-                except Exception:
-                    ax = float(getattr(accs[i], "x", 0.0))
-                    ay = float(getattr(accs[i], "y", 0.0))
-                    az = float(getattr(accs[i], "z", 0.0))
+            pos_chunks.append(pos[mask])
+            vel_chunks.append(vel[mask])
+            acc_chunks.append(acc[mask])
 
-                pos_list.append([px, py, pz])
-                vel_list.append([vx, vy, vz])
-                acc_list.append([ax, ay, az])
-
-        recv_time = self.get_clock().now()
-        if not pos_list:
+        # -------- no data case -------------------------------------------------
+        if not pos_chunks:
             with self._poses_lock:
                 self._kin_last_recv_[topic_name] = recv_time
             return
 
-        pos_arr = np.asarray(pos_list, dtype=float)
-        vel_arr = np.asarray(vel_list, dtype=float)
-        acc_arr = np.asarray(acc_list, dtype=float)
+        # -------- concatenate once --------------------------------------------
+        pos_all = np.concatenate(pos_chunks, axis=0)
+        vel_all = np.concatenate(vel_chunks, axis=0)
+        acc_all = np.concatenate(acc_chunks, axis=0)
 
+        # -------- transform to world (vectorized) ------------------------------
         if frame_id != "world":
             T = self._get_transform_matrix_to_world(frame_id, msg.header.stamp)
             if T is None:
                 return
+
             R = T[:3, :3]
             t = T[:3, 3]
-            pos_arr = (R @ pos_arr.T).T + t.reshape(1, 3)
-            vel_arr = (R @ vel_arr.T).T
-            acc_arr = (R @ acc_arr.T).T
 
+            pos_all = pos_all @ R.T + t
+            vel_all = vel_all @ R.T
+            acc_all = acc_all @ R.T
+
+        # -------- reuse preallocated buffers ----------------------------------
+        buf = self._kin_buffers[topic_name]
+        n = pos_all.shape[0]
+
+        if buf["pos"].shape[0] < n:
+            buf["pos"] = np.empty((n, 3), dtype=float)
+            buf["vel"] = np.empty((n, 3), dtype=float)
+            buf["acc"] = np.empty((n, 3), dtype=float)
+
+        buf["pos"][:n] = pos_all
+        buf["vel"][:n] = vel_all
+        buf["acc"][:n] = acc_all
+
+        # -------- publish atomically ------------------------------------------
         with self._poses_lock:
-            self.kinematics_[topic_name] = (pos_arr, vel_arr, acc_arr)
+            self.kinematics_[topic_name] = (
+                buf["pos"][:n],
+                buf["vel"][:n],
+                buf["acc"][:n],
+            )
             self._kin_last_recv_[topic_name] = recv_time
 
     # ---------------------------- ABC overrides ----------------------------
