@@ -28,7 +28,7 @@ import test_publish_utils as pub_utils
 from PID_cbf_task_controller import UR10CBFController
 import csv_publishers
 import threading
-USE_BRIDGE = True
+USE_BRIDGE = False
 LOG_DATA = True
 log_path = "resullts/simulation/PID"
 stop_event = threading.Event()
@@ -133,7 +133,7 @@ def main():
 
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
-            csv_path="/home/galileo/Desktop/skeleton_vectors_19.csv",
+            csv_path="skeleton_vectors/skeleton_vectors_13_PID_RW.csv",
             Tworld_to_cam=T_wc,
             # slowdown_factor=0.1,
             slowdown_factor=1.0,
@@ -350,9 +350,10 @@ def main():
             now = datetime.now().strftime("_%Y_%m_%d_%H_%M_%S")
             print(test_path)
             os.makedirs(test_path, exist_ok=True)
-            joint_target_publisher = csv_publishers.DoubleArrayCsvPublisher(
+            joint_target_publisher = csv_publishers.JointTargetCsvPublisher(
                 csv_path=test_path + "/reference_trajectory" + now + ".csv",
-                column_names="time,target_x,target_y,target_z",
+                column_names="time,target_x,target_vel_x,target_acc_x,target_y,target_vel_y,target_acc_y,target_z,target_vel_z,target_acc_z",
+                joint_names=["x","y","z"],
             )
             # JOINT STATE PUBLISHER ONLY FOR CSV LOGGING
             joint_state_publisher = csv_publishers.JointTargetCsvPublisher(
@@ -395,7 +396,11 @@ def main():
                 goal_pose, nominal_twist_goal, nominal_goal_dtwist = planner.getMotionLaw(
                 trajectory_time
                 )
+
             obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
+            elapsed = time.perf_counter() - loop_start
+            print("elapsed time: ", elapsed)
+
             # Scale if you ever implement time-scaling; currently D=1, DD=0
             twist_goal = nominal_twist_goal * Dtrajectory_time
             goal_dtwist = (
@@ -415,8 +420,9 @@ def main():
                 obstacle_positions=obstacle_positions,
                 obstacle_velocities=obstacle_velocities,
                 obstacle_accelerations=obstacle_accelerations,
-                cbf_enabled=True,
             )
+            elapsed = time.perf_counter() - loop_start
+            print("elapsed time: ", elapsed)
 
             q = out["q"]
             dq = out["dq"]
@@ -479,6 +485,8 @@ def main():
                 elapsed = time.perf_counter() - loop_start
                 rest = max(0.0, Tc - elapsed)
                 time.sleep(rest)
+            else:
+                print(f"TIMEOUT, elapsed:{elapsed:.4f}")
         print ("FINE CICLO")
         if not stop_event.is_set() and LOG_DATA:
             test_start_publisher.publish_once(False) # pyright: ignore[reportPossiblyUnboundVariable]

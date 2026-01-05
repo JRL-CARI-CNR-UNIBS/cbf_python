@@ -179,82 +179,191 @@ class PoseReader:
             Tworld_to_cam if Tworld_to_cam is not None else pin.SE3.Identity()
         )
 
+        # -------- pre-transform WORLD -> CAMERA (ONE-TIME COST) -------------
+        T = self._Tworld_to_cam
+        R = T.rotation  # (3,3)
+        t = T.translation  # (3,)
+
+        # Positions: (N,K,3)
+        self._pos_cam = self._pos_world @ R.T + t
+
+        # Velocities (rotation only)
+        if self._vel_world is not None:
+            self._vel_cam = self._vel_world @ R.T
+        else:
+            self._vel_cam = None
+
+        # Accelerations (rotation only)
+        if self._acc_world is not None:
+            self._acc_cam = self._acc_world @ R.T
+        else:
+            self._acc_cam = None
+
     # -------------------------------------------------------------------------
     def getTotalTime(self) -> float:
         """Total recording duration in the same units as the CSV."""
         return self._total_time
 
     # -------------------------------------------------------------------------
-    def getHumanPose(self, t: float, slowdown_factor: float) -> Dict[str, List[np.ndarray]]:
-        """
-        Linearly interpolate the pose at time *t* and convert it to the camera frame.
+    # def getHumanPose(self, t: float, slowdown_factor: float) :
+    #     """
+    #     Linearly interpolate the pose at time *t* and convert it to the camera frame.
+    #
+    #     Returns a dict with keys:
+    #         - 'pos': List[np.ndarray(3,)]  positions in camera frame
+    #         - 'vel': List[np.ndarray(3,)]  velocities in camera frame (if available; else NaNs)
+    #         - 'acc': List[np.ndarray(3,)]  accelerations in camera frame (if available; else NaNs)
+    #
+    #     Notes on transforms:
+    #         - Positions: p_cam = T.act(p_world)
+    #         - Velocities & Accelerations: rotate only (R @ v_world / a_world), translation-free.
+    #     """
+    #     times = self._times
+    #     pW    = self._pos_world
+    #     vW    = self._vel_world * slowdown_factor
+    #     aW    = self._acc_world * np.sign(slowdown_factor) *slowdown_factor**2
+    #
+    #     # Wrap into the recorded interval [t0, tN]
+    #     t0_global = times[0]
+    #     t1_global = times[-1]
+    #     duration  = t1_global - t0_global
+    #     if duration <= 0:
+    #         alpha = 0.0
+    #         idx_left = 0
+    #         idx_right = 0
+    #     else:
+    #         t_query = (t0_global + ( (t - t0_global) % duration ))
+    #         # Edge cases
+    #         if t_query <= times[0]:
+    #             idx_left = 0
+    #             idx_right = 0
+    #             alpha = 0.0
+    #         elif t_query >= times[-1]:
+    #             idx_left = len(times) - 1
+    #             idx_right = idx_left
+    #             alpha = 0.0
+    #         else:
+    #             idx_right = int(np.searchsorted(times, t_query, side="right"))
+    #             idx_left  = idx_right - 1
+    #             t0, t1 = times[idx_left], times[idx_right]
+    #             alpha  = float((t_query - t0) / (t1 - t0))
+    #
+    #     # Linear interpolation in WORLD frame
+    #     if idx_left == idx_right:
+    #         pos_world = pW[idx_left]                    # (K,3)
+    #         vel_world = vW[idx_left] if vW is not None else None
+    #         acc_world = aW[idx_left] if aW is not None else None
+    #     else:
+    #         pos_world = (1.0 - alpha) * pW[idx_left] + alpha * pW[idx_right]
+    #         vel_world = None
+    #         acc_world = None
+    #         if vW is not None:
+    #             vel_world = (1.0 - alpha) * vW[idx_left] + alpha * vW[idx_right]
+    #         if aW is not None:
+    #             acc_world = (1.0 - alpha) * aW[idx_left] + alpha * aW[idx_right]
+    #
+    #     # -------- transform to camera frame ----------------------------------
+    #     T = self._Tworld_to_cam
+    #     R = T.rotation
+    #
+    #     # # pos_cam_list: List[np.ndarray] = [T.act(p) for p in pos_world]
+    #     # pos_cam_list = pos_world @ R.T + T.translation
+    #     # if vel_world is not None:
+    #     #     # vel_cam_list: List[np.ndarray] = [R @ v for v in vel_world]
+    #     #     vel_cam_list = vel_world @ R.T
+    #     # else:
+    #     #     vel_cam_list = [np.full(3, np.nan)] * self.n_keypoints
+    #     #
+    #     # if acc_world is not None:
+    #     #     # acc_cam_list: List[np.ndarray] = [R @ a for a in acc_world]
+    #     #     acc_cam_list = acc_world @ R.T
+    #     #
+    #     # else:
+    #     #     acc_cam_list = [np.full(3, np.nan)] * self.n_keypoints
+    #     #
+    #     # return pos_cam_list, vel_cam_list, acc_cam_list
+    #     pos_cam = pos_world @ R.T + T.translation
+    #     vel_cam = vel_world @ R.T if vel_world is not None else np.nan
+    #     acc_cam = acc_world @ R.T if acc_world is not None else np.nan
+    #     return pos_cam, vel_cam, acc_cam
 
-        Returns a dict with keys:
-            - 'pos': List[np.ndarray(3,)]  positions in camera frame
-            - 'vel': List[np.ndarray(3,)]  velocities in camera frame (if available; else NaNs)
-            - 'acc': List[np.ndarray(3,)]  accelerations in camera frame (if available; else NaNs)
-
-        Notes on transforms:
-            - Positions: p_cam = T.act(p_world)
-            - Velocities & Accelerations: rotate only (R @ v_world / a_world), translation-free.
+    def getHumanPose(self, t: float, slowdown_factor: float):
         """
+        Fast, allocation-free pose lookup using pre-transformed camera-frame data.
+
+        Returns
+        -------
+        pos : np.ndarray, shape (K,3)
+        vel : np.ndarray or None, shape (K,3)
+        acc : np.ndarray or None, shape (K,3)
+        """
+
         times = self._times
-        pW    = self._pos_world
-        vW    = self._vel_world * slowdown_factor
-        aW    = self._acc_world * np.sign(slowdown_factor) *slowdown_factor**2
+        pC = self._pos_cam
+        vC = self._vel_cam
+        aC = self._acc_cam
 
-        # Wrap into the recorded interval [t0, tN]
-        t0_global = times[0]
-        t1_global = times[-1]
-        duration  = t1_global - t0_global
-        if duration <= 0:
+        # ---- wrap time into recorded interval ---------------------------------
+        t0 = times[0]
+        tN = times[-1]
+        duration = tN - t0
+
+        if duration <= 0.0:
+            idx_left = idx_right = 0
             alpha = 0.0
-            idx_left = 0
-            idx_right = 0
         else:
-            t_query = (t0_global + ( (t - t0_global) % duration ))
-            # Edge cases
+            t_query = t0 + ((t - t0) % duration)
+
             if t_query <= times[0]:
-                idx_left = 0
-                idx_right = 0
+                idx_left = idx_right = 0
                 alpha = 0.0
             elif t_query >= times[-1]:
-                idx_left = len(times) - 1
-                idx_right = idx_left
+                idx_left = idx_right = len(times) - 1
                 alpha = 0.0
             else:
                 idx_right = int(np.searchsorted(times, t_query, side="right"))
-                idx_left  = idx_right - 1
-                t0, t1 = times[idx_left], times[idx_right]
-                alpha  = float((t_query - t0) / (t1 - t0))
+                idx_left = idx_right - 1
 
-        # Linear interpolation in WORLD frame
+                tL = times[idx_left]
+                tR = times[idx_right]
+                alpha = (t_query - tL) / (tR - tL)
+
+        # ---- interpolate -------------------------------------------------------
         if idx_left == idx_right:
-            pos_world = pW[idx_left]                    # (K,3)
-            vel_world = vW[idx_left] if vW is not None else None
-            acc_world = aW[idx_left] if aW is not None else None
+            pos = pC[idx_left]
+
+            vel = None
+            if vC is not None:
+                vel = slowdown_factor * vC[idx_left]
+
+            acc = None
+            if aC is not None:
+                acc = (
+                        np.sign(slowdown_factor)
+                        * slowdown_factor ** 2
+                        * aC[idx_left]
+                )
+
         else:
-            pos_world = (1.0 - alpha) * pW[idx_left] + alpha * pW[idx_right]
-            vel_world = None
-            acc_world = None
-            if vW is not None:
-                vel_world = (1.0 - alpha) * vW[idx_left] + alpha * vW[idx_right]
-            if aW is not None:
-                acc_world = (1.0 - alpha) * aW[idx_left] + alpha * aW[idx_right]
+            wL = 1.0 - alpha
+            wR = alpha
 
-        # -------- transform to camera frame ----------------------------------
-        T = self._Tworld_to_cam
-        R = T.rotation
+            pos = wL * pC[idx_left] + wR * pC[idx_right]
 
-        pos_cam_list: List[np.ndarray] = [T.act(p) for p in pos_world]
-        if vel_world is not None:
-            vel_cam_list: List[np.ndarray] = [R @ v for v in vel_world]
-        else:
-            vel_cam_list = [np.full(3, np.nan)] * self.n_keypoints
+            vel = None
+            if vC is not None:
+                vel = slowdown_factor * (
+                        wL * vC[idx_left] + wR * vC[idx_right]
+                )
 
-        if acc_world is not None:
-            acc_cam_list: List[np.ndarray] = [R @ a for a in acc_world]
-        else:
-            acc_cam_list = [np.full(3, np.nan)] * self.n_keypoints
+            acc = None
+            if aC is not None:
+                acc = (
+                        np.sign(slowdown_factor)
+                        * slowdown_factor ** 2
+                        * (wL * aC[idx_left] + wR * aC[idx_right])
+                )
 
-        return pos_cam_list, vel_cam_list, acc_cam_list
+        return pos, vel, acc
+
+

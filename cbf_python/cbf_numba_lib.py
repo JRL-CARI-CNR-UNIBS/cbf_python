@@ -26,7 +26,7 @@ def assemble_qp_PID_problem(
     Dq_max, DDq_max,
     # CBF inputs (optional; pass empty arrays if unused)
     frames_p, frames_vlin, Jlins, dJlins, obs_p, obs_v, obs_a,
-    Tr, a_s, C, gamma, atol
+    Tr, a_s, C, gamma, atol, use_CBF
 ):
     nq = q.size
     # zero A, c
@@ -51,7 +51,7 @@ def assemble_qp_PID_problem(
     # CBF rows (if any)
     if frames_p.size != 0 and obs_p.size != 0:
         row, hmin, dmin, vr_min, vh_min, htest, dtest, i_h, i_d = append_cbf_rows_loop(
-            A, c, row, frames_p, frames_vlin, obs_p, obs_v, obs_a, Jlins, dJlins, dq, Tr, a_s, C, gamma, atol
+            A, c, row, frames_p, frames_vlin, obs_p, obs_v, obs_a, Jlins, dJlins, dq, Tr, a_s, C, gamma, atol, use_CBF
         )
     else:
         hmin = 1e9

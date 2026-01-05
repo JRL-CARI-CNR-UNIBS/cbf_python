@@ -264,9 +264,9 @@ class JointTargetCsvPublisher:
 
         row =[]
         for i in range(len(q_list)):
-            row.append(q_list[0])
-            row.append(dq_list[0])
-            row.append(ddq_list[0])
+            row.append(q_list[i])
+            row.append(dq_list[i])
+            row.append(ddq_list[i])
         self._writer.append_row(row)
 
     def publish_once(
