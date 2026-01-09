@@ -32,7 +32,7 @@ USE_BRIDGE = False
 LOG_DATA = True
 log_path = "resullts/simulation/PID"
 stop_event = threading.Event()
-
+duration  = 150.0
 def _on_sigint_with_bridge(bridge, signum, frame):
     stop_event.set()
     try:
@@ -133,7 +133,7 @@ def main():
 
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
-            csv_path="skeleton_vectors/skeleton_vectors_13_PID_RW.csv",
+            csv_path="skeleton_vectors/skeleton_vectors_14_NORMAL_TEST1.csv",
             Tworld_to_cam=T_wc,
             # slowdown_factor=0.1,
             slowdown_factor=1.0,
@@ -347,31 +347,31 @@ def main():
         else:
             now = datetime.now().strftime("%Y%m%d_%H%M%S")
             test_path = log_path + "/" + str(now)
-            now = datetime.now().strftime("_%Y_%m_%d_%H_%M_%S")
+            # now = datetime.now().strftime("_%Y_%m_%d_%H_%M_%S")
             print(test_path)
             os.makedirs(test_path, exist_ok=True)
             joint_target_publisher = csv_publishers.JointTargetCsvPublisher(
-                csv_path=test_path + "/reference_trajectory" + now + ".csv",
-                column_names="time,target_x,target_vel_x,target_acc_x,target_y,target_vel_y,target_acc_y,target_z,target_vel_z,target_acc_z",
+                csv_path=test_path + "/reference_trajectory.csv",
+                column_names="time,x,vel_x,acc_x,y,vel_y,acc_y,z,vel_z,acc_z",
                 joint_names=["x","y","z"],
             )
             # JOINT STATE PUBLISHER ONLY FOR CSV LOGGING
             joint_state_publisher = csv_publishers.JointTargetCsvPublisher(
-                csv_path=test_path + "/joint_states" + now + ".csv",
+                csv_path=test_path + "/joint_states.csv",
                 column_names="time,joint_0_pos,joint_0_vel,joint_0_acceleration,joint_1_pos,joint_1_vel,joint_1_acceleration,joint_2_pos,joint_2_vel,joint_2_acceleration,joint_3_pos,joint_3_vel,joint_3_acceleration,joint_4_pos,joint_4_vel,joint_4_acceleration,joint_5_pos,joint_5_vel,joint_5_acceleration",
                 joint_names=UR10E_JOINTS,
             )
 
             test_start_publisher = csv_publishers.TestStartCsvPublisher(
-                csv_path=test_path + "/TEST_START" + now + ".csv",
+                csv_path=test_path + "/TEST_START.csv",
                 column_names="time,val"
             )
             cbf_out_publisher = csv_publishers.DoubleArrayCsvPublisher(
-                csv_path=test_path + "/cbf_results" + now + ".csv",
+                csv_path=test_path + "/cbf_results.csv",
                 column_names="time,h_min,d_min,trajectory_error,pos_ee_x,pos_ee_y,pos_ee_z,vel_ee_x,vel_ee_y,vel_ee_z,v_r_min,v_h_min")
             # dim = 10)
             human_pos_publisher = csv_publishers.DoubleArrayCsvPublisher(
-                csv_path=test_path + "/human_positions" + now + ".csv",
+                csv_path=test_path + "/human_positions.csv",
                 column_names="time,human_keypoint_0_x,human_keypoint_0_y,human_keypoint_0_z,human_keypoint_1_x,human_keypoint_1_y,human_keypoint_1_z,human_keypoint_2_x,human_keypoint_2_y,human_keypoint_2_z,human_keypoint_3_x,human_keypoint_3_y,human_keypoint_3_z,human_keypoint_4_x,human_keypoint_4_y,human_keypoint_4_z,human_keypoint_5_x,human_keypoint_5_y,human_keypoint_5_z,human_keypoint_6_x,human_keypoint_6_y,human_keypoint_6_z,human_keypoint_7_x,human_keypoint_7_y,human_keypoint_7_z,human_keypoint_8_x,human_keypoint_8_y,human_keypoint_8_z,human_keypoint_9_x,human_keypoint_9_y,human_keypoint_9_z,human_keypoint_10_x,human_keypoint_10_y,human_keypoint_10_z,human_keypoint_11_x,human_keypoint_11_y,human_keypoint_11_z,human_keypoint_12_x,human_keypoint_12_y,human_keypoint_12_z,human_keypoint_13_x,human_keypoint_13_y,human_keypoint_13_z,human_keypoint_14_x,human_keypoint_14_y,human_keypoint_14_z,human_keypoint_15_x,human_keypoint_15_y,human_keypoint_15_z,human_keypoint_16_x,human_keypoint_16_y,human_keypoint_16_z,human_keypoint_17_x,human_keypoint_17_y,human_keypoint_17_z"
             )
 
@@ -385,7 +385,7 @@ def main():
         trajectory_time = 0.0
         Dtrajectory_time = 1.0
         DDtrajectory_time = 0.0
-        while t < 30.0 and not stop_event.is_set():
+        while t < duration and not stop_event.is_set():
             loop_start = time.perf_counter()
 
             if T_total >0.0:
