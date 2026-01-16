@@ -59,7 +59,7 @@ def _on_sigint_with_bridge(bridge, signum, frame):
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
     USE_BRIDGE = True
-    LOG_DATA = True
+    LOG_DATA = False
     log_path = "resullts/simulation/scaling"
     # rclpy.init()
 

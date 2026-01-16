@@ -23,27 +23,41 @@ quat = pin.Quaternion(0.814, 0.178, 0.535, 0.137)
 quat.normalize()
 R = quat.toRotationMatrix()
 # 
-T_wc = pin.SE3(R, np.array([0.108, -0.883, 2.351]))
+T_wc = pin.SE3(R, np.array([0.108, -0.883, 20000.351]))
 
 home = np.array([90, -140, 140, -90, 90, 0]) * np.pi / 180.0
+UR10E_JOINTS = [
+    "ur10e_shoulder_pan_joint",
+    "ur10e_shoulder_lift_joint",
+    "ur10e_elbow_joint",
+    "ur10e_wrist_1_joint",
+    "ur10e_wrist_2_joint",
+    "ur10e_wrist_3_joint",
+]
+
 Tc =2e-3
 gen_cfg = ControllerConfig(Tc=Tc)
 # # Basic planner reused across trials
-planner = SegmentedJointTrap(Dq_max=gen_cfg.Dq_max*.3, DDq_max=gen_cfg.DDq_max*.3)
-q = home.copy()
-q2 = home.copy()
-q2[1] = -np.pi * 0.5
-q2[2] = np.pi * 0.5
-q3 = np.array([ 40.0, -80.0, 100.0, -120.0, 90.0, 0.0])*np.pi/180.0
-q4 = np.array([ 122.0, -70.0, 100.0, -120.0, 90.0, 0.0])*np.pi/180.0
-
+q10 = np.array([ 31.0, -78.0, 115.0, -127.0, 86.0, -32.0])*np.pi/180.0
+q20 =  np.array([ 31.0, -83.0, 98.0, -110.0, 86.0, -32.0])*np.pi/180.0
+q22 =  np.array([ 40.0, -126.0, 141.0, -100.0, 86.0, 45.0])*np.pi/180.0
+q25 =  np.array([ 130.0, -100.0, 125.0, -115.0, 94.0, -20.0])*np.pi/180.0
+q30 =  np.array([ 136.0, -60.0, 90.0, -122.0, 90.0, 45.0])*np.pi/180.0
+q40 =  np.array([ 134.0, -65.0, 70.0, -90.0, 90.0, 45.0])*np.pi/180.0
+gen_cfg.Dq_max = gen_cfg.Dq_max*0.25
+gen_cfg.DDq_max = gen_cfg.DDq_max*0.2
+planner = SegmentedJointTrap(Dq_max=gen_cfg.Dq_max*0.25, DDq_max=gen_cfg.DDq_max*0.25)
 # CONFIG 1
 planner.addWayPoint(q)
-planner.addWayPoint(home)
-
-planner.addWayPoint(q2)
-planner.addWayPoint(home)
-
+planner.addWayPoint(q10)
+planner.addWayPoint(q20)
+planner.addWayPoint(q10)
+planner.addWayPoint(q22)
+planner.addWayPoint(q25)
+planner.addWayPoint(q30)
+planner.addWayPoint(q40)
+planner.addWayPoint(q30)
+planner.addWayPoint(q)
 # CONFIG 2
 # planner.addWayPoint(q)
 # planner.addWayPoint(q3)
@@ -68,14 +82,7 @@ def run_episode(lambda1, lambda2, lambda3, lambda4, gamma, delta, Tc=2e-3, durat
     cfg.lambda4 = lambda4
     cfg.delta_q_max = np.deg2rad(np.array([1,1,1,1,1,1], dtype=np.float64) * delta)
     cfg.gamma = gamma
-    UR10E_JOINTS = [
-        "ur10e_shoulder_pan_joint",
-        "ur10e_shoulder_lift_joint",
-        "ur10e_elbow_joint",
-        "ur10e_wrist_1_joint",
-        "ur10e_wrist_2_joint",
-        "ur10e_wrist_3_joint",
-    ]
+
     model_wrapper = loadSharework(UR10E_JOINTS)
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg)
    
