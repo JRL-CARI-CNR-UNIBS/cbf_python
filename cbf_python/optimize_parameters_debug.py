@@ -14,16 +14,30 @@ from queue import Empty
 # Database connection (for dashboard)
 POSTGRES_URL = "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
 # ----------------- STATIC INITIALIZATION (only once) -----------------
+def compute_ee_pose(q, model, data, ee_frame_id):
+    """
+    Compute forward kinematics of the end-effector for joint config q.
+    Returns (position, rotation_matrix, SE3).
+    """
+    # Forward kinematics for all joints
+    pin.forwardKinematics(model, data, q)
+    # Update frame placements
+    pin.updateFramePlacements(model, data)
+
+    T_ee = data.oMf[ee_frame_id]  # SE3 from world (o) to frame (f=tool0)
+    p = T_ee.translation          # 3D position
+    R = T_ee.rotation             # 3x3 rotation matrix
+    return p, R, T_ee
 
 
 # Camera and bridge
 R = pin.utils.rotate('z', 1.9) @ pin.utils.rotate('x', 1.57)
 # Build camera pose from your INITI snippet
-quat = pin.Quaternion(0.814, 0.178, 0.535, 0.137)
+quat = pin.Quaternion(0.83, 0.185, 0.513, 0.12)
 quat.normalize()
 R = quat.toRotationMatrix()
 # 
-T_wc = pin.SE3(R, np.array([0.108, -0.883, 20000.351]))
+T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
 
 home = np.array([90, -140, 140, -90, 90, 0]) * np.pi / 180.0
 UR10E_JOINTS = [
@@ -38,6 +52,7 @@ UR10E_JOINTS = [
 Tc =2e-3
 gen_cfg = ControllerConfig(Tc=Tc)
 # # Basic planner reused across trials
+q = home.copy()
 q10 = np.array([ 31.0, -78.0, 115.0, -127.0, 86.0, -32.0])*np.pi/180.0
 q20 =  np.array([ 31.0, -83.0, 98.0, -110.0, 86.0, -32.0])*np.pi/180.0
 q22 =  np.array([ 40.0, -126.0, 141.0, -100.0, 86.0, 45.0])*np.pi/180.0
@@ -58,33 +73,57 @@ planner.addWayPoint(q30)
 planner.addWayPoint(q40)
 planner.addWayPoint(q30)
 planner.addWayPoint(q)
-# CONFIG 2
-# planner.addWayPoint(q)
-# planner.addWayPoint(q3)
-# planner.addWayPoint(home)        
-# planner.addWayPoint(q4)
-# planner.addWayPoint(q)
 
-# planner.addWayPoint(home)
-# planner.addWayPoint(home + np.deg2rad([0, 20, -20, 0, 0, 0]))
-# planner.addWayPoint(home)
+
 T_total = planner.computeTime()
+model_wrapper = loadSharework(UR10E_JOINTS)
+model = model_wrapper.model
+data = model.createData()
+n_wp = 9
+configs = {
+    "q": q,
+    "q10": q10,
+    "q20": q20,
+    "q22": q22,
+    "q25": q25,
+    "q30": q30,
+    "q40": q40,
+}
+cartesian_configs = {
+    "q": 0.0,
+    "q10": 0.0,
+    "q20": 0.0,
+    "q22": 0.0,
+    "q25": 0.0,
+    "q30": 0.0,
+    "q40": 0.0,
+}
+tool_frame_name = "ur10e_wrist_3_joint"
+tool_frame_id = model.getFrameId(tool_frame_name)
+data = model.createData()
+for name in cartesian_configs:
+    p, R, T_ee = compute_ee_pose(configs[name], model, data, tool_frame_id)
+    cartesian_configs[name] = p.tolist()
+
 
 # -------------------- EVALUATION FUNCTION --------------------
-def run_episode(lambda1, lambda2, lambda3, lambda4, gamma, delta, Tc=2e-3, duration=40.0):
+def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=150.0):
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
     cfg = ControllerConfig(Tc=Tc)
-    cfg.lambda1 = lambda1
-    cfg.lambda2 = lambda2
-    cfg.lambda3 = lambda3
-    cfg.lambda4 = lambda4
-    cfg.delta_q_max = np.deg2rad(np.array([1,1,1,1,1,1], dtype=np.float64) * delta)
+    cfg.lambda_pos = lambda_pos
+    cfg.lambda_vel = lambda_vel
+    cfg.lambda_scaling = lambda_scaling
+    cfg.lambda_acc = lambda_acc
+    cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)
+    cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*2
+    cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*4
+    cfg.Dq_max = cfg.Dq_max*0.25
+    cfg.DDq_max = cfg.DDq_max*0.2
     cfg.gamma = gamma
 
-    model_wrapper = loadSharework(UR10E_JOINTS)
-    ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg)
+    ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
    
     # quat = pin.Quaternion(0.814, 0.178, 0.535, 0.137)
     # quat.normalize()
@@ -94,23 +133,10 @@ def run_episode(lambda1, lambda2, lambda3, lambda4, gamma, delta, Tc=2e-3, durat
 
     bridge = FakeCommandBridge(
         UR10E_JOINTS,
-        csv_path="/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/zed_skeleton_kinematics/skeleton_vectors.csv",
+        csv_path="/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv",
         Tworld_to_cam=T_wc,
         slowdown_factor=1.0,
     )
-    first_joint_position = home
-
-    # q = first_joint_position.copy()
-    # q2 = home.copy()
-    # q2[1] = -np.pi * 0.5
-    # q2[2] = np.pi * 0.5
-
-    # planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*.3, DDq_max=cfg.DDq_max*.3)
-    # planner.addWayPoint(q)
-    # planner.addWayPoint(home)
-    # planner.addWayPoint(q2)
-    # planner.addWayPoint(home)
-    # T_total = planner.computeTime()
 
     ctrl.reset_state(q)
     t = 0.0
@@ -118,17 +144,16 @@ def run_episode(lambda1, lambda2, lambda3, lambda4, gamma, delta, Tc=2e-3, durat
     violations, nsteps = 0, 0
     sum_scale = 0.0
     trajectory_error_sum = 0.0
-    # planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*.3, DDq_max=cfg.DDq_max*.3)
-    # planner.addWayPoint(q)
-    # planner.addWayPoint(home)
-    # planner.addWayPoint(q2)
-    # planner.addWayPoint(home)
-    # T_total = planner.computeTime()
-
+    lap_count = 0
+    on_target_count = 0
+    prec_target = -1
     while t < duration:
         obs_pos, obs_vel, obs_acc = bridge.getObstacles()
         nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
         try:
+            if (trajectory_time % T_total) < Tc:
+                lap_count += 1
+                prec_target = -1
             out = ctrl.step(
                 obs_pos=obs_pos,
                 obs_vel=obs_vel,
@@ -137,12 +162,20 @@ def run_episode(lambda1, lambda2, lambda3, lambda4, gamma, delta, Tc=2e-3, durat
                 nominal_Dq=nominal_Dq,
                 nominal_DDq=nominal_DDq,
             )
+            end_eff_pos = out["end_effector_pos"]
+
+            for i in range(len(cartesian_configs.values())):
+                q_wp = list(cartesian_configs.values())[i]
+                if  np.linalg.norm(q_wp - end_eff_pos) < 2e-03 and prec_target != i:
+                    on_target_count += 1
+                    prec_target = i
+                    break
         except Exception:
             # Penalize infeasible or divergent QP
             print("QP failed")
-            return 1.0, -1.0
+            return 1.0, -1.0, 1000.0
 
-        if out["h_min"] < 0 and np.linalg.norm(out["dq"])>1e-3:
+        if out["h_min"] < 0 and out["vr_min"] < -1e-3:
             violations += 1
         # print(f"violations = {violations}, nsteps = {nsteps}, h_min = {out['h_min']}, Dtrajectory_time = {out['Dtrajectory_time']}")
         sum_scale += out["Dtrajectory_time"]
@@ -150,14 +183,15 @@ def run_episode(lambda1, lambda2, lambda3, lambda4, gamma, delta, Tc=2e-3, durat
         t += Tc
         trajectory_time = out["trajectory_time"]
         trajectory_error_sum += out["trajectory_error"]
-        time.sleep(1e-3)
+        time.sleep(1e-4)  # To avoid locking issues in multiprocessing
 
 
-
+    on_target_rate = on_target_count/(n_wp * ((lap_count)+ ((trajectory_time % T_total)/T_total)))
+    lap_count = lap_count + ((trajectory_time % T_total)/T_total)
     viol_rate = violations / max(1, nsteps)
     mean_scale = sum_scale / max(1, nsteps)
     mean_trajectory_error = trajectory_error_sum / max(1, nsteps)
-    return viol_rate, mean_scale, mean_trajectory_error
+    return viol_rate, mean_scale, mean_trajectory_error, lap_count, on_target_rate
 
 
 def _run_episode_worker(args, kwargs, q):
@@ -197,19 +231,19 @@ def run_episode_with_timeout(*args, timeout=600, **kwargs):
 
 # -------------------- OPTUNA OPTIMIZATION --------------------
 def objective(trial):
-    l1 = trial.suggest_float("lambda1", 1, 1e5, log=True)
-    l2 = trial.suggest_float("lambda2", 1e-3, 1e3, log=True)
-    l3 = trial.suggest_float("lambda3", 1e-2, 1e3, log=True)
-    l4 = trial.suggest_float("lambda4", 1e-14, 1e-2, log=True)
-    gamma = trial.suggest_float("gamma", 2, 10, log=True)
-    delta = trial.suggest_float("delta_deg", 1, 10, log=True)
+    lambda_pos = trial.suggest_float("lambda_pos", low=5e2, high=5e4, log=True)
+    lambda_vel = trial.suggest_float("lambda_vel", low=1e-3, high=1e3, log=True)
+    lambda_scaling = trial.suggest_float("lambda_scaling", low=10, high=1e4, log=True)
+    lambda_acc = trial.suggest_float("lambda_acc", low=1e-14, high=1e-2, log=True)
+    gamma = trial.suggest_float("gamma", low=1, high=10, log=True)
+    delta = trial.suggest_float("delta_deg", low=0.1, high=5, log=True)
     try:
-        viol_rate, mean_scale, mean_trajectory_error = run_episode_with_timeout(l1, l2, l3, l4, gamma, delta)
+        viol_rate, mean_scale, mean_trajectory_error, lap_count, on_target_rate = run_episode_with_timeout(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta)
     except TimeoutError as e:
         print(f"Trial timed out: {e}")
-        return 1000.0, -1.0, 1000.0  # Penalize timeout
+        return 1000.0, -1.0, 1000.0, 0.0, 0.0  # Penalize timeout
 
-    return viol_rate, mean_scale, mean_trajectory_error  # minimize violations, maximize scaling
+    return viol_rate, mean_scale, mean_trajectory_error, lap_count, on_target_rate
 
 
 storage = optuna.storages.RDBStorage(
@@ -225,22 +259,10 @@ storage = optuna.storages.RDBStorage(
 )
 
 study = optuna.create_study(
-    directions=["minimize", "maximize","minimize"],
+    directions=["minimize", "maximize","minimize", "maximize", "maximize"],
     sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
     storage=storage,
     load_if_exists=True,
-    study_name=f"config_1_viol_rate_mean_scaling_traj_error_study_{time.strftime('%Y%m%d-%H%M%S')}",
+    study_name=f"dynamic_params_no_obs_viol_rate_mean_scaling_traj_error_study_{time.strftime('%Y%m%d-%H%M%S')}",
 )
 study.optimize(objective, n_trials=2500, show_progress_bar=True, n_jobs=30)
-# fig = optuna.visualization.plot_pareto_front(study, target_names=["Violation Rate", "Mean Time Scaling"])
-# show(fig)
-
-# print("Pareto-optimal trials:")
-# for t in study.best_trials:
-#     print(f"Trial {t.number} values={t.values} params={t.params}")
-
-# # Save study
-# import pandas as pd
-# df = study.trials_dataframe(attrs=("number", "value", "params", "state"))
-# timestamp = time.strftime("%Y%m%d-%H%M%S")
-# df.to_csv(f"results/optuna_config2_study_l123_pareto_{timestamp}.csv", index=False)

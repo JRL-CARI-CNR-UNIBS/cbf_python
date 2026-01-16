@@ -74,13 +74,13 @@ def _on_sigint_with_bridge(bridge, signum, frame):
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
-    USE_BRIDGE = True
+    USE_BRIDGE = False
     LOG_DATA = False
     log_path = "resullts/simulation/scaling"
     # rclpy.init()
 
 
-    duration = 15000.0
+    duration = 150.0
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
@@ -103,9 +103,10 @@ def main():
     cfg.lambda_vel = 2.55
     cfg.lambda_scaling = 130#1.0e3
     cfg.lambda_acc = 4.0e-05
-    cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * 1.5)*3
-    cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * 3)*3
-    cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * 6)*3
+    delta = 4.5
+    cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)
+    cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*2
+    cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*4
     cfg.gamma = 10.0
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
 
@@ -133,11 +134,11 @@ def main():
         R = quat.toRotationMatrix()
 
         T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
-        csv_out_path = "skeleton_vectors/skeleton_vectors_OPTIMAL_RW.csv"
+        csv_path="/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv"
         #csv_publishers.swap_csv(csv_in_path, csv_out_path, 7, 17)
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
-            csv_path=csv_out_path,
+            csv_path=csv_path,
             Tworld_to_cam=T_wc,
             # slowdown_factor=0.1,
             slowdown_factor=1.0,
@@ -295,7 +296,7 @@ def main():
     planner.addWayPoint(q40)
     planner.addWayPoint(q30)
     planner.addWayPoint(q)
-    n_wp = 10
+    n_wp = 9
     configs = {
         "q": q,
         "q10": q10,
@@ -487,7 +488,10 @@ def main():
     scaling_log = np.array(scaling_log)
     h_log = np.array(h_log)
     trj_error_log = np.array(trj_error_log)
+    print(f"LAP COUNT: {lap_count}")
 
+    on_target_rate = on_target_count/(n_wp * ((lap_count)+ ((trajectory_time % T_total)/T_total)))
+    lap_count = lap_count + ((trajectory_time % T_total)/T_total)
     print(f"average scaling = {np.mean(scaling_log)}")
 
     #computation_times_others=computation_times-(computation_times_planner+computation_times_pin+computation_times_qp+computation_times_ssm)
@@ -497,10 +501,10 @@ def main():
 
     print(f"timeout cycles = {timeout_cycles} over {cycles}, percentage = {100.0*timeout_cycles/cycles}, average = {np.mean(computation_times)}")
     print(f"unfeasible cycles = {unfeasible_cnt} over {cycles}, percentage = {100.0*unfeasible_cnt/cycles}")
-    print(f"LAP COUNT: {lap_count-1}")
+    print(f"LAP COUNT: {lap_count}")
     print("on target count: ", on_target_count)
     print(((trajectory_time % T_total)/T_total))
-    print(f"WAYPOINTS REACHING PERCENTAGE: {on_target_count/(n_wp * ((lap_count-1)+ ((trajectory_time % T_total)/T_total)))}")
+    print(f"WAYPOINTS REACHING PERCENTAGE: {on_target_rate*100.0} %")
     print(f"MINIMUM DISTANCE: {np.min(min_dist)}")
     print_stats_table(stats)
     _ = make_summary_figure(
