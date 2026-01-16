@@ -19,6 +19,7 @@
 # -----------------------------------------------------------------------------
 import os
 import time
+from reference_xyz_trajectory import generate_cartesian_trajectory
 
 import meshcat.geometry as mgeom
 
@@ -44,24 +45,8 @@ import rclpy
 import signal
 import threading
 import csv_publishers
-from reference_xyz_trajectory import generate_cartesian_trajectory
-
+import compute_velocity_scaling_for_human_proximity as ext_scaling
 stop_event = threading.Event()
-
-def compute_ee_pose(q, model, data, ee_frame_id):
-    """
-    Compute forward kinematics of the end-effector for joint config q.
-    Returns (position, rotation_matrix, SE3).
-    """
-    # Forward kinematics for all joints
-    pin.forwardKinematics(model, data, q)
-    # Update frame placements
-    pin.updateFramePlacements(model, data)
-
-    T_ee = data.oMf[ee_frame_id]  # SE3 from world (o) to frame (f=tool0)
-    p = T_ee.translation          # 3D position
-    R = T_ee.rotation             # 3x3 rotation matrix
-    return p, R, T_ee
 
 def _on_sigint_with_bridge(bridge, signum, frame):
     stop_event.set()
@@ -74,9 +59,9 @@ def _on_sigint_with_bridge(bridge, signum, frame):
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
-    USE_BRIDGE = True
-    LOG_DATA = False
-    log_path = "resullts/simulation/scaling"
+    USE_BRIDGE = False
+    LOG_DATA = True
+    log_path = "resullts/simulation/no_cbf"
     # rclpy.init()
 
 
@@ -107,7 +92,7 @@ def main():
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * 3)*3
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * 6)*3
     cfg.gamma = 10.0
-    ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
+    ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=False)
 
     target_name = "ur10e_wrist_3_joint"
     idx = UR10E_JOINTS.index(target_name)
@@ -133,7 +118,8 @@ def main():
         R = quat.toRotationMatrix()
 
         T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
-        csv_out_path = "skeleton_vectors/skeleton_vectors_OPTIMAL_RW.csv"
+        # csv_in_path = "/home/galileo/Desktop/skeleton_vectors_22 (Copy).csv"
+        csv_out_path = "skeleton_vectors/skeleton_vectors_14_NORMAL_TEST1.csv"
         #csv_publishers.swap_csv(csv_in_path, csv_out_path, 7, 17)
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
@@ -171,7 +157,7 @@ def main():
             print(test_path)
             os.makedirs(test_path, exist_ok = True)
             joint_target_publisher = csv_publishers.JointTargetCsvPublisher(
-                csv_path= test_path + "/reference_trajectory.csv",
+                csv_path=test_path + "/reference_trajectory.csv",
                 column_names="time,target_joint_0_pos,target_joint_0_vel,target_joint_0_acceleration,target_joint_1_pos,target_joint_1_vel,target_joint_1_acceleration,target_joint_2_pos,target_joint_2_vel,target_joint_2_acceleration,target_joint_3_pos,target_joint_3_vel,target_joint_3_acceleration,target_joint_4_pos,target_joint_4_vel,target_joint_4_acceleration,target_joint_5_pos,target_joint_5_vel,target_joint_5_acceleration",
                 joint_names=UR10E_JOINTS,
             )
@@ -228,6 +214,12 @@ def main():
 
     # --------------------------- CONTROL INITIALISATION --------------------------
     q = first_joint_position.copy()
+    # q2 = home.copy()
+    # q2[1] = -np.pi * 0.5
+    # q2[2] = np.pi * 0.5
+    # q3 = np.array([ 40.0, -80.0, 100.0, -120.0, 90.0, 0.0])*np.pi/180.0
+    # q4 = np.array([ 122.0, -70.0, 100.0, -120.0, 90.0, 0.0])*np.pi/180.0
+    # print(f"q={q.T}\nq={q2.T}")
 
     # ---------------------------TEST WAYPOINTS ------------------------------
     q10 = np.array([ 31.0, -78.0, 115.0, -127.0, 86.0, -32.0])*np.pi/180.0
@@ -239,99 +231,28 @@ def main():
     cfg.Dq_max = cfg.Dq_max*0.25
     cfg.DDq_max = cfg.DDq_max*0.2
     planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.25, DDq_max=cfg.DDq_max*0.25)
-    print("Computing trajectory...")
-    # BRING THE ROBOT AT HOME BEFORE STARTING THE TEST
-    if USE_BRIDGE:
-        start_planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.25, DDq_max=cfg.DDq_max*0.25)
-        print(f"Bringing robot to home position from {q.T} to {home.T}")
-        start_planner.addWayPoint(q)
-        start_planner.addWayPoint(home)
-        t_initial = 0.0
 
-        trajectory_time_initial = 0.0
-        start_time = start_planner.computeTime()
-        print(f"Bringing robot to home position, total time: {start_time}")
-        time.sleep(1.0)
-        ctrl.reset_state(q)
-        # test_start = True
-        while np.linalg.norm(home-bridge.getPositions()) > 0.01:
-            loop_start = time.perf_counter()
-            obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
-
-            nominal_q, nominal_Dq, nominal_DDq = start_planner.getMotionLaw(trajectory_time_initial)
-            
-            out = ctrl.step(
-                obs_pos=obstacle_positions,
-                obs_vel=obstacle_velocities,
-                obs_acc=obstacle_accelerations,
-                nominal_q=nominal_q,
-                nominal_Dq=nominal_Dq, 
-                nominal_DDq=nominal_DDq
-            )
-            q = out["q"]
-            bridge.sendCommand(q)
-
-            # --------------------------- INTEGRATION ----------------------------
-            t_initial += Tc
-            trajectory_time_initial = out["trajectory_time"]
-
-            elapsed = time.perf_counter() - loop_start
-            
-            rest = Tc - elapsed
-            if rest > 0:
-                rest = max(0.0,Tc - elapsed)
-                time.sleep(rest)
-
-        q = home.copy()
     # 2 · add way‑points -------------------------------------------
-
-    planner.addWayPoint(q)
-    planner.addWayPoint(q10)
-    planner.addWayPoint(q20)
-    planner.addWayPoint(q10)
-    planner.addWayPoint(q22)
-    planner.addWayPoint(q25)
-    planner.addWayPoint(q30)
-    planner.addWayPoint(q40)
-    planner.addWayPoint(q30)
-    planner.addWayPoint(q)
-    n_wp = 10
-    configs = {
-        "q": q,
-        "q10": q10,
-        "q20": q20,
-        "q22": q22,
-        "q25": q25,
-        "q30": q30,
-        "q40": q40,
-    }
-    cartesian_configs = {
-        "q": 0.0,
-        "q10": 0.0,
-        "q20": 0.0,
-        "q22": 0.0,
-        "q25": 0.0,
-        "q30": 0.0,
-        "q40": 0.0,
-    }
-    tool_frame_name = "ur10e_wrist_3_joint"
-    tool_frame_id = model.getFrameId(tool_frame_name)
-    data = model.createData()
-    for name in cartesian_configs:
-        p, R, T_ee = compute_ee_pose(configs[name], model, data, tool_frame_id)
-        cartesian_configs[name] = p.tolist()
-
+    for _ in range(3):
+        planner.addWayPoint(q)
+        planner.addWayPoint(q10)
+        planner.addWayPoint(q20)
+        planner.addWayPoint(q10)
+        planner.addWayPoint(q22)
+        planner.addWayPoint(q25)
+        planner.addWayPoint(q30)
+        planner.addWayPoint(q40)
+        planner.addWayPoint(q30)
+        planner.addWayPoint(q)
     T_total = planner.computeTime()
     print(f"Total time: {T_total}")
-    min_dist = []
     renderer.publishPath(planner.publishPath())
 
     ct, ct_qp, ct_ssm, ct_planner, ct_pin, h_log, trj_error_log, scaling_log = [], [], [], [], [], [], [], []
-
     lap_count = 0
-    on_target_count = 0
+
     # ------------------------------ MAIN LOOP -------------------- ----------------
-    prec_target = -1
+
     if LOG_DATA:
         test_start_publisher.publish_once(True) # pyright: ignore[reportPossiblyUnboundVariable]
     unfeasible_cnt = 0
@@ -343,7 +264,11 @@ def main():
 
 
         timeout_cycles = cycles =0
-
+        nq = model.nq
+        q = np.zeros(nq, dtype=float)
+        dq = np.zeros(nq, dtype=float)
+        ddq = np.zeros(nq, dtype=float)
+        q = first_joint_position
         ctrl.reset_state(q)
         # test_start = True
         while t < duration and not stop_event.is_set():
@@ -370,8 +295,8 @@ def main():
             nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
             if (trajectory_time % T_total) < Tc:
                 lap_count += 1
-                prec_target = -1
                 print("LAP ADDED")
+
             out = ctrl.step(
                 obs_pos=obstacle_positions,
                 obs_vel=obstacle_velocities,
@@ -395,7 +320,6 @@ def main():
 
             # --------------------------- INTEGRATION ----------------------------
             t += Tc
-            end_eff_pos = out["end_effector_pos"]
 
             if USE_BRIDGE and not stop_event.is_set():
                 bridge.sendCommand(q)
@@ -404,6 +328,7 @@ def main():
                 hmin = out["h_min"]
                 dmin = out["d_min"]
                 trj_error = out["trajectory_error"]
+                end_eff_pos = out["end_effector_pos"]
                 end_eff_vel = out["end_effector_vel"]
                 vr_min = out["vr_min"]
                 vh_min = out["vh_min"]
@@ -428,18 +353,6 @@ def main():
             if not USE_BRIDGE and LOG_DATA:
                 joint_state_publisher.publish_once(q, dq, ddq)
             # ----------------------------- TIMING -------------------------------
-            dist = []
-            for i in range(len(cartesian_configs.values())):
-                q_wp = list(cartesian_configs.values())[i]
-                dist.append(np.linalg.norm(q_wp - end_eff_pos))
-                if  np.linalg.norm(q_wp - end_eff_pos) < 2e-03 and prec_target != i:
-                    on_target_count += 1
-                    prec_target = i
-                    print ("TARGET REACHED")
-                    break
-            # print("Min dist: ", np.min(dist))
-            if np.min(dist) > 0.0:
-                min_dist.append(np.min(dist))
             elapsed = time.perf_counter() - loop_start
             if cycles>1:
                 ct.append(elapsed)
@@ -447,19 +360,18 @@ def main():
                 h_log.append(out["h_min"])
                 trj_error_log.append(out["trajectory_error"])
 
-            rest = Tc - elapsed
-            if rest > 0:
-                # vizualization_string =f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f} ctrl_state:{unfeasible_string}"
-                #
-                # renderer.push_state(out["q"], out["Tbt_nominal"], out["obs_pos"], vizualization_string)
-                # elapsed = time.perf_counter() - loop_start
-                # rest = max(0.0,Tc - elapsed)
-                # time.sleep(rest)
-                pass
-            else:
-                timeout_cycles+=1
+            # rest = Tc - elapsed
+            # if rest > 0:
+            #     vizualization_string =f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f}"
+            #
+            #     renderer.push_state(out["q"], out["Tbt_nominal"], out["obs_pos"], vizualization_string)
+            #     elapsed = time.perf_counter() - loop_start
+            #     rest = max(0.0,Tc - elapsed)
+            #     time.sleep(rest)
+            # else:
+            #     timeout_cycles+=1
             if unfeasible_string != "FEASIBLE":
-                unfeasible_cnt += 1
+                unfeasible_cnt+=1
         if not stop_event.is_set() and LOG_DATA:
             test_start_publisher.publish_once(False) # pyright: ignore[reportPossiblyUnboundVariable]
 
@@ -498,10 +410,7 @@ def main():
     print(f"timeout cycles = {timeout_cycles} over {cycles}, percentage = {100.0*timeout_cycles/cycles}, average = {np.mean(computation_times)}")
     print(f"unfeasible cycles = {unfeasible_cnt} over {cycles}, percentage = {100.0*unfeasible_cnt/cycles}")
     print(f"LAP COUNT: {lap_count-1}")
-    print("on target count: ", on_target_count)
-    print(((trajectory_time % T_total)/T_total))
-    print(f"WAYPOINTS REACHING PERCENTAGE: {on_target_count/(n_wp * ((lap_count-1)+ ((trajectory_time % T_total)/T_total)))}")
-    print(f"MINIMUM DISTANCE: {np.min(min_dist)}")
+
     print_stats_table(stats)
     _ = make_summary_figure(
         computation_times,
@@ -509,6 +418,7 @@ def main():
         trj_error_log,
         scaling_log,
     )
+
     folder_name = ""
     # CREATING CARTESIAN REFERENCE CSV FILE
     if LOG_DATA:
@@ -517,6 +427,7 @@ def main():
         else:
             folder_name = test_path
         generate_cartesian_trajectory(folder_name+"/")
+
 
 if __name__ == "__main__":
     main()

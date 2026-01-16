@@ -4,7 +4,7 @@
 # ------------------------------------------------------------
 import math
 import numpy as np
-from numba import njit, float64
+from numba import njit, float64, boolean
 
 # Safe no‑op decorator if not running under line_profiler
 try:
@@ -604,12 +604,13 @@ def compute_h_and_lie_numba(translation_bt, obs_pos, vel_lineare, v_obs, Tr, a_s
         float64[:, :], # dJlin (3 x n)
         float64[:],    # dq    (n,)
         float64,       # gamma
+        boolean
     ),
     cache=True
 )
 def compute_h_and_constraints_numba(
     translation_bt, obs_pos, vel_lineare, v_obs,
-    Tr, a_s, C, obs_acc, atol, Jlin, dJlin, dq, gamma
+    Tr, a_s, C, obs_acc, atol, Jlin, dJlin, dq, gamma, HAS_CBF
 ):
     """
     Returns:
@@ -624,24 +625,26 @@ def compute_h_and_constraints_numba(
 
     n = Jlin.shape[1]
     constraint_row = np.zeros(n, dtype=np.float64)
-    for j in range(n):
-        constraint_row[j] = (
-            Lie_g_h[0] * Jlin[0, j] +
-            Lie_g_h[1] * Jlin[1, j] +
-            Lie_g_h[2] * Jlin[2, j]
-        )
+    constraint_bound = 0.0
+    if HAS_CBF:
+        for j in range(n):
+            constraint_row[j] = (
+                Lie_g_h[0] * Jlin[0, j] +
+                Lie_g_h[1] * Jlin[1, j] +
+                Lie_g_h[2] * Jlin[2, j]
+            )
 
-    tmp = np.zeros(n, dtype=np.float64)
-    for j in range(n):
-        tmp[j] = (
-            Lie_g_h[0] * dJlin[0, j] +
-            Lie_g_h[1] * dJlin[1, j] +
-            Lie_g_h[2] * dJlin[2, j]
-        )
+        tmp = np.zeros(n, dtype=np.float64)
+        for j in range(n):
+            tmp[j] = (
+                Lie_g_h[0] * dJlin[0, j] +
+                Lie_g_h[1] * dJlin[1, j] +
+                Lie_g_h[2] * dJlin[2, j]
+            )
 
-    lg_dJ_dq = 0.0
-    for j in range(n):
-        lg_dJ_dq += tmp[j] * dq[j]
+        lg_dJ_dq = 0.0
+        for j in range(n):
+            lg_dJ_dq += tmp[j] * dq[j]
 
-    constraint_bound = -lg_dJ_dq - Lie_f_h - gamma * h
+        constraint_bound = -lg_dJ_dq - Lie_f_h - gamma * h
     return h, constraint_row, constraint_bound, d,vr, vh

@@ -28,11 +28,11 @@ import test_publish_utils as pub_utils
 from PID_cbf_task_controller import UR10CBFController
 import csv_publishers
 import threading
-USE_BRIDGE = True
+USE_BRIDGE = False
 LOG_DATA = True
 log_path = "resullts/simulation/PID"
 stop_event = threading.Event()
-
+duration  = 150.0
 def _on_sigint_with_bridge(bridge, signum, frame):
     stop_event.set()
     try:
@@ -68,7 +68,9 @@ DDq_max: np.ndarray = np.pi * np.array([1, 1, 1, 1, 1, 1], dtype=np.float64) * n
 
 def main():
     # --------------------------- MODEL & VISUALS -------------------------- #
-
+    lap_count = 0
+    on_target_count = 0
+    prec_target = -1
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
 
@@ -133,7 +135,7 @@ def main():
 
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
-            csv_path="/home/galileo/Desktop/skeleton_vectors_19.csv",
+            csv_path="skeleton_vectors/skeleton_vectors_14_NORMAL_TEST1.csv",
             Tworld_to_cam=T_wc,
             # slowdown_factor=0.1,
             slowdown_factor=1.0,
@@ -172,8 +174,8 @@ def main():
     tool_frame_name = target_name
 
     # Gains (same as original)
-    wn = 10.0
-    xi = 1.0
+    wn = 40.0
+    xi = 1.0/3.0
     Kp_tra = np.array([1.0, 1.0, 1.0]) * wn ** 2
     Kd_tra = np.array([1.0, 1.0, 1.0]) * 2.0 * xi * wn
     Kp_rot = np.array([1.0, 1.0, 1.0]) * wn ** 2
@@ -296,17 +298,29 @@ def main():
         "q40": q40,
     }
     ordered_configs = []
-    for i in range(3):
-        ordered_configs.extend(["q", "q10", "q20", "q10", "q22", "q25", "q30", "q40", "q30", "q"])
 
+    ordered_configs.extend(["q", "q10", "q20", "q10", "q22", "q25", "q30", "q40", "q30", "q"])
+    cartesian_configs = {
+        "q": 0.0,
+        "q10": 0.0,
+        "q20": 0.0,
+        "q22": 0.0,
+        "q25": 0.0,
+        "q30": 0.0,
+        "q40": 0.0,
+    }
 
      # -------------------------- Trajectory planner ------------------------ #
-    planner = SegmentedSE3Trap(vlin_max=v_lin_max, vang_max=w_max,
-                               alin_max=a_lin_max*0.5, aang_max=alpha_max)
+    planner = SegmentedSE3Trap(vlin_max=v_lin_max*2.4, vang_max=w_max*2.4,
+                               alin_max=a_lin_max*1.1, aang_max=alpha_max*1.1)
 
     for name in ordered_configs:
         p, R, T_ee = compute_ee_pose(configs[name], model, data, tool_frame_id)
         planner.addWayPoint(T_ee)
+
+    for name in cartesian_configs:
+        p, R, T_ee = compute_ee_pose(configs[name], model, data, tool_frame_id)
+        cartesian_configs[name] = p.tolist()
     # for i in range(len(ordered_configs)):
     #     p, R, T_ee = compute_ee_pose(home, model, data, tool_frame_id)
     #     planner.addWayPoint(T_ee)
@@ -347,30 +361,31 @@ def main():
         else:
             now = datetime.now().strftime("%Y%m%d_%H%M%S")
             test_path = log_path + "/" + str(now)
-            now = datetime.now().strftime("_%Y_%m_%d_%H_%M_%S")
+            # now = datetime.now().strftime("_%Y_%m_%d_%H_%M_%S")
             print(test_path)
             os.makedirs(test_path, exist_ok=True)
-            joint_target_publisher = csv_publishers.DoubleArrayCsvPublisher(
-                csv_path=test_path + "/reference_trajectory" + now + ".csv",
-                column_names="time,target_x,target_y,target_z",
+            joint_target_publisher = csv_publishers.JointTargetCsvPublisher(
+                csv_path=test_path + "/reference_trajectory.csv",
+                column_names="time,x,vel_x,acc_x,y,vel_y,acc_y,z,vel_z,acc_z",
+                joint_names=["x","y","z"],
             )
             # JOINT STATE PUBLISHER ONLY FOR CSV LOGGING
             joint_state_publisher = csv_publishers.JointTargetCsvPublisher(
-                csv_path=test_path + "/joint_states" + now + ".csv",
+                csv_path=test_path + "/joint_states.csv",
                 column_names="time,joint_0_pos,joint_0_vel,joint_0_acceleration,joint_1_pos,joint_1_vel,joint_1_acceleration,joint_2_pos,joint_2_vel,joint_2_acceleration,joint_3_pos,joint_3_vel,joint_3_acceleration,joint_4_pos,joint_4_vel,joint_4_acceleration,joint_5_pos,joint_5_vel,joint_5_acceleration",
                 joint_names=UR10E_JOINTS,
             )
 
             test_start_publisher = csv_publishers.TestStartCsvPublisher(
-                csv_path=test_path + "/TEST_START" + now + ".csv",
+                csv_path=test_path + "/TEST_START.csv",
                 column_names="time,val"
             )
             cbf_out_publisher = csv_publishers.DoubleArrayCsvPublisher(
-                csv_path=test_path + "/cbf_results" + now + ".csv",
+                csv_path=test_path + "/cbf_results.csv",
                 column_names="time,h_min,d_min,trajectory_error,pos_ee_x,pos_ee_y,pos_ee_z,vel_ee_x,vel_ee_y,vel_ee_z,v_r_min,v_h_min")
             # dim = 10)
             human_pos_publisher = csv_publishers.DoubleArrayCsvPublisher(
-                csv_path=test_path + "/human_positions" + now + ".csv",
+                csv_path=test_path + "/human_positions.csv",
                 column_names="time,human_keypoint_0_x,human_keypoint_0_y,human_keypoint_0_z,human_keypoint_1_x,human_keypoint_1_y,human_keypoint_1_z,human_keypoint_2_x,human_keypoint_2_y,human_keypoint_2_z,human_keypoint_3_x,human_keypoint_3_y,human_keypoint_3_z,human_keypoint_4_x,human_keypoint_4_y,human_keypoint_4_z,human_keypoint_5_x,human_keypoint_5_y,human_keypoint_5_z,human_keypoint_6_x,human_keypoint_6_y,human_keypoint_6_z,human_keypoint_7_x,human_keypoint_7_y,human_keypoint_7_z,human_keypoint_8_x,human_keypoint_8_y,human_keypoint_8_z,human_keypoint_9_x,human_keypoint_9_y,human_keypoint_9_z,human_keypoint_10_x,human_keypoint_10_y,human_keypoint_10_z,human_keypoint_11_x,human_keypoint_11_y,human_keypoint_11_z,human_keypoint_12_x,human_keypoint_12_y,human_keypoint_12_z,human_keypoint_13_x,human_keypoint_13_y,human_keypoint_13_z,human_keypoint_14_x,human_keypoint_14_y,human_keypoint_14_z,human_keypoint_15_x,human_keypoint_15_y,human_keypoint_15_z,human_keypoint_16_x,human_keypoint_16_y,human_keypoint_16_z,human_keypoint_17_x,human_keypoint_17_y,human_keypoint_17_z"
             )
 
@@ -384,7 +399,7 @@ def main():
         trajectory_time = 0.0
         Dtrajectory_time = 1.0
         DDtrajectory_time = 0.0
-        while t < 30.0 and not stop_event.is_set():
+        while t < duration and not stop_event.is_set():
             loop_start = time.perf_counter()
 
             if T_total >0.0:
@@ -395,7 +410,14 @@ def main():
                 goal_pose, nominal_twist_goal, nominal_goal_dtwist = planner.getMotionLaw(
                 trajectory_time
                 )
+            if 0 < (trajectory_time % T_total) < Tc:
+                lap_count += 1
+                print("LAP ADDED")
+
             obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
+            # elapsed = time.perf_counter() - loop_start
+            # print("elapsed time: ", elapsed)
+
             # Scale if you ever implement time-scaling; currently D=1, DD=0
             twist_goal = nominal_twist_goal * Dtrajectory_time
             goal_dtwist = (
@@ -415,8 +437,9 @@ def main():
                 obstacle_positions=obstacle_positions,
                 obstacle_velocities=obstacle_velocities,
                 obstacle_accelerations=obstacle_accelerations,
-                cbf_enabled=True,
             )
+            # elapsed = time.perf_counter() - loop_start
+            # print("elapsed time: ", elapsed)
 
             q = out["q"]
             dq = out["dq"]
@@ -433,6 +456,7 @@ def main():
             if USE_BRIDGE:
                 # print(f"Sending command: {q}")
                 bridge.sendCommand(q)
+            end_eff_pos = out["end_effector_pos"]
 
             if not stop_event.is_set() and LOG_DATA:
                 nom_x, nom_y, nom_z = goal_pose.translation.tolist()
@@ -440,7 +464,6 @@ def main():
                 hmin = out["h_min"]
                 dmin = out["d_min"]
                 trj_error = out["trajectory_error"]
-                end_eff_pos = out["end_effector_pos"]
                 end_eff_vel = out["end_effector_vel"]
                 vr_min = out["vr_min"]
                 vh_min = out["vh_min"]
@@ -463,12 +486,19 @@ def main():
             if not USE_BRIDGE and LOG_DATA:
                 joint_state_publisher.publish_once(q, dq, ddq)
 
-
+            for i in range(len(cartesian_configs.values())):
+                q_wp = list(cartesian_configs.values())[i]
+                if np.linalg.norm(q_wp - end_eff_pos) < 2e-03 and prec_target != i:
+                    on_target_count += 1
+                    prec_target = i
+                    print("TARGET REACHED")
+                    break
             elapsed = time.perf_counter() - loop_start
             rest = Tc - elapsed
 
             vizualization_string = f"h = {h_min:.2f} m, err={out['trajectory_error']:.2f}"
             if rest > 0:
+                # # time.sleep(0.0001)
                 renderer.push_state(
                     q,
                     goal_pose,
@@ -479,6 +509,9 @@ def main():
                 elapsed = time.perf_counter() - loop_start
                 rest = max(0.0, Tc - elapsed)
                 time.sleep(rest)
+                # pass
+            else:
+                print(f"TIMEOUT, elapsed:{elapsed:.4f}")
         print ("FINE CICLO")
         if not stop_event.is_set() and LOG_DATA:
             test_start_publisher.publish_once(False) # pyright: ignore[reportPossiblyUnboundVariable]
@@ -494,6 +527,11 @@ def main():
             pub_utils.publish_test_start_once(False)
         except Exception as e:
             print(f"[shutdown] one-shot publish failed: {e}")
+    n_wp = 9
+    print(f"LAP COUNT: {lap_count}")
+    print("on target count: ", on_target_count)
+    print(((trajectory_time % T_total) / T_total))
+    print(f"WAYPOINTS REACHING PERCENTAGE: {on_target_count / (n_wp * ((lap_count) + ((trajectory_time % T_total) / T_total)))}")
 
 if __name__ == "__main__":
     main()
