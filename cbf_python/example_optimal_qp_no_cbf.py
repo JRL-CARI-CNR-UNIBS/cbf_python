@@ -65,7 +65,7 @@ def main():
     # rclpy.init()
 
 
-    duration = 150.0
+    duration = 15000.0
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
@@ -249,6 +249,7 @@ def main():
     renderer.publishPath(planner.publishPath())
 
     ct, ct_qp, ct_ssm, ct_planner, ct_pin, h_log, trj_error_log, scaling_log = [], [], [], [], [], [], [], []
+    lap_count = 0
 
     # ------------------------------ MAIN LOOP -------------------- ----------------
 
@@ -292,6 +293,9 @@ def main():
             cycles += 1
 
             nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
+            if (trajectory_time % T_total) < Tc:
+                lap_count += 1
+                print("LAP ADDED")
 
             out = ctrl.step(
                 obs_pos=obstacle_positions,
@@ -356,16 +360,16 @@ def main():
                 h_log.append(out["h_min"])
                 trj_error_log.append(out["trajectory_error"])
 
-            rest = Tc - elapsed
-            if rest > 0:
-                vizualization_string =f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f}"
-
-                renderer.push_state(out["q"], out["Tbt_nominal"], out["obs_pos"], vizualization_string)
-                elapsed = time.perf_counter() - loop_start
-                rest = max(0.0,Tc - elapsed)
-                time.sleep(rest)
-            else:
-                timeout_cycles+=1
+            # rest = Tc - elapsed
+            # if rest > 0:
+            #     vizualization_string =f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f}"
+            #
+            #     renderer.push_state(out["q"], out["Tbt_nominal"], out["obs_pos"], vizualization_string)
+            #     elapsed = time.perf_counter() - loop_start
+            #     rest = max(0.0,Tc - elapsed)
+            #     time.sleep(rest)
+            # else:
+            #     timeout_cycles+=1
             if unfeasible_string != "FEASIBLE":
                 unfeasible_cnt+=1
         if not stop_event.is_set() and LOG_DATA:
@@ -405,6 +409,7 @@ def main():
 
     print(f"timeout cycles = {timeout_cycles} over {cycles}, percentage = {100.0*timeout_cycles/cycles}, average = {np.mean(computation_times)}")
     print(f"unfeasible cycles = {unfeasible_cnt} over {cycles}, percentage = {100.0*unfeasible_cnt/cycles}")
+    print(f"LAP COUNT: {lap_count-1}")
 
     print_stats_table(stats)
     _ = make_summary_figure(

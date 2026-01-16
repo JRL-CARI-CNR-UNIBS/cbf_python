@@ -48,6 +48,21 @@ from reference_xyz_trajectory import generate_cartesian_trajectory
 
 stop_event = threading.Event()
 
+def compute_ee_pose(q, model, data, ee_frame_id):
+    """
+    Compute forward kinematics of the end-effector for joint config q.
+    Returns (position, rotation_matrix, SE3).
+    """
+    # Forward kinematics for all joints
+    pin.forwardKinematics(model, data, q)
+    # Update frame placements
+    pin.updateFramePlacements(model, data)
+
+    T_ee = data.oMf[ee_frame_id]  # SE3 from world (o) to frame (f=tool0)
+    p = T_ee.translation          # 3D position
+    R = T_ee.rotation             # 3x3 rotation matrix
+    return p, R, T_ee
+
 def _on_sigint_with_bridge(bridge, signum, frame):
     stop_event.set()
     try:
@@ -65,7 +80,7 @@ def main():
     # rclpy.init()
 
 
-    duration = 150.0
+    duration = 15000.0
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
@@ -269,25 +284,54 @@ def main():
 
         q = home.copy()
     # 2 · add way‑points -------------------------------------------
-    for _ in range(3):
-        planner.addWayPoint(q)
-        planner.addWayPoint(q10)
-        planner.addWayPoint(q20)
-        planner.addWayPoint(q10)
-        planner.addWayPoint(q22)
-        planner.addWayPoint(q25)
-        planner.addWayPoint(q30)
-        planner.addWayPoint(q40)
-        planner.addWayPoint(q30)
-        planner.addWayPoint(q)
+
+    planner.addWayPoint(q)
+    planner.addWayPoint(q10)
+    planner.addWayPoint(q20)
+    planner.addWayPoint(q10)
+    planner.addWayPoint(q22)
+    planner.addWayPoint(q25)
+    planner.addWayPoint(q30)
+    planner.addWayPoint(q40)
+    planner.addWayPoint(q30)
+    planner.addWayPoint(q)
+    n_wp = 10
+    configs = {
+        "q": q,
+        "q10": q10,
+        "q20": q20,
+        "q22": q22,
+        "q25": q25,
+        "q30": q30,
+        "q40": q40,
+    }
+    cartesian_configs = {
+        "q": 0.0,
+        "q10": 0.0,
+        "q20": 0.0,
+        "q22": 0.0,
+        "q25": 0.0,
+        "q30": 0.0,
+        "q40": 0.0,
+    }
+    tool_frame_name = "ur10e_wrist_3_joint"
+    tool_frame_id = model.getFrameId(tool_frame_name)
+    data = model.createData()
+    for name in cartesian_configs:
+        p, R, T_ee = compute_ee_pose(configs[name], model, data, tool_frame_id)
+        cartesian_configs[name] = p.tolist()
+
     T_total = planner.computeTime()
     print(f"Total time: {T_total}")
+    min_dist = []
     renderer.publishPath(planner.publishPath())
 
     ct, ct_qp, ct_ssm, ct_planner, ct_pin, h_log, trj_error_log, scaling_log = [], [], [], [], [], [], [], []
 
+    lap_count = 0
+    on_target_count = 0
     # ------------------------------ MAIN LOOP -------------------- ----------------
-
+    prec_target = -1
     if LOG_DATA:
         test_start_publisher.publish_once(True) # pyright: ignore[reportPossiblyUnboundVariable]
     unfeasible_cnt = 0
@@ -324,7 +368,10 @@ def main():
             cycles += 1
 
             nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
-           
+            if (trajectory_time % T_total) < Tc:
+                lap_count += 1
+                prec_target = -1
+                print("LAP ADDED")
             out = ctrl.step(
                 obs_pos=obstacle_positions,
                 obs_vel=obstacle_velocities,
@@ -348,6 +395,7 @@ def main():
 
             # --------------------------- INTEGRATION ----------------------------
             t += Tc
+            end_eff_pos = out["end_effector_pos"]
 
             if USE_BRIDGE and not stop_event.is_set():
                 bridge.sendCommand(q)
@@ -356,7 +404,6 @@ def main():
                 hmin = out["h_min"]
                 dmin = out["d_min"]
                 trj_error = out["trajectory_error"]
-                end_eff_pos = out["end_effector_pos"]
                 end_eff_vel = out["end_effector_vel"]
                 vr_min = out["vr_min"]
                 vh_min = out["vh_min"]
@@ -381,6 +428,18 @@ def main():
             if not USE_BRIDGE and LOG_DATA:
                 joint_state_publisher.publish_once(q, dq, ddq)
             # ----------------------------- TIMING -------------------------------
+            dist = []
+            for i in range(len(cartesian_configs.values())):
+                q_wp = list(cartesian_configs.values())[i]
+                dist.append(np.linalg.norm(q_wp - end_eff_pos))
+                if  np.linalg.norm(q_wp - end_eff_pos) < 2e-03 and prec_target != i:
+                    on_target_count += 1
+                    prec_target = i
+                    print ("TARGET REACHED")
+                    break
+            # print("Min dist: ", np.min(dist))
+            if np.min(dist) > 0.0:
+                min_dist.append(np.min(dist))
             elapsed = time.perf_counter() - loop_start
             if cycles>1:
                 ct.append(elapsed)
@@ -390,12 +449,13 @@ def main():
 
             rest = Tc - elapsed
             if rest > 0:
-                vizualization_string =f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f} ctrl_state:{unfeasible_string}"
-
-                renderer.push_state(out["q"], out["Tbt_nominal"], out["obs_pos"], vizualization_string)
-                elapsed = time.perf_counter() - loop_start
-                rest = max(0.0,Tc - elapsed)
-                time.sleep(rest)
+                # vizualization_string =f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f} ctrl_state:{unfeasible_string}"
+                #
+                # renderer.push_state(out["q"], out["Tbt_nominal"], out["obs_pos"], vizualization_string)
+                # elapsed = time.perf_counter() - loop_start
+                # rest = max(0.0,Tc - elapsed)
+                # time.sleep(rest)
+                pass
             else:
                 timeout_cycles+=1
             if unfeasible_string != "FEASIBLE":
@@ -437,7 +497,11 @@ def main():
 
     print(f"timeout cycles = {timeout_cycles} over {cycles}, percentage = {100.0*timeout_cycles/cycles}, average = {np.mean(computation_times)}")
     print(f"unfeasible cycles = {unfeasible_cnt} over {cycles}, percentage = {100.0*unfeasible_cnt/cycles}")
-
+    print(f"LAP COUNT: {lap_count-1}")
+    print("on target count: ", on_target_count)
+    print(((trajectory_time % T_total)/T_total))
+    print(f"WAYPOINTS REACHING PERCENTAGE: {on_target_count/(n_wp * ((lap_count-1)+ ((trajectory_time % T_total)/T_total)))}")
+    print(f"MINIMUM DISTANCE: {np.min(min_dist)}")
     print_stats_table(stats)
     _ = make_summary_figure(
         computation_times,

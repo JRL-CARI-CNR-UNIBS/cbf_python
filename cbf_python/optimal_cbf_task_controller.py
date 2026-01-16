@@ -97,7 +97,7 @@ class BCFOptimalController:
         self.unfeasible_cnt = "FEASIBLE"
         self.ref_scaling = 1.0
         self.qp_scaling = self.ref_scaling
-        print(f"DELTA_Q_MAX: {self.delta_q_max}")
+        # print(f"DELTA_Q_MAX: {self.delta_q_max}")
         self.check_delta = False
 
     def set_ref_scaling(self, scaling):
@@ -175,9 +175,9 @@ class BCFOptimalController:
                     tool_frame_ids= self.frames_ids,
                     human_positions_world = obs_pos,
                 )
-                print("Reference scaling: ", ref_scaling)
+                # print("Reference scaling: ", ref_scaling)
                 self.set_ref_scaling(ref_scaling)
-                print("reference scaling attribute: ", self.ref_scaling)
+                # print("reference scaling attribute: ", self.ref_scaling)
             self.qp_scaling = self.ref_scaling
         else:
             self.qp_scaling = 0.0
@@ -264,9 +264,9 @@ class BCFOptimalController:
             for i in range(cfg.delta_q_max.shape[0]):
                 if expected_trj_err[i] > self.delta_q_max[i]:
                     self.delta_q_max[i] = expected_trj_err[i]
-            print(f"PROBLEM IS UNFEASIBLE, trajectory error: {expected_trj_err}")
-            print(f"NEW DELTA: {self.delta_q_max}")
-            print(f"INITIAL Q MAX: {cfg.delta_q_max}")
+            # print(f"PROBLEM IS UNFEASIBLE, trajectory error: {expected_trj_err}")
+            # print(f"NEW DELTA: {self.delta_q_max}")
+            # print(f"INITIAL Q MAX: {cfg.delta_q_max}")
         elif self.check_delta:
             count_dev = 0
             for i in range(nq):
@@ -274,15 +274,15 @@ class BCFOptimalController:
                     #print("QUIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII")
                     self.delta_q_max[i] = np.copy(cfg.delta_q_max[i])
                     count_dev += 1
-                    print(f"COUNT_DEV: {count_dev}, i: {i}")
+                    # print(f"COUNT_DEV: {count_dev}, i: {i}")
             if count_dev == nq:
                 self.check_delta = False
                # self.qp_scaling = self.ref_scaling
-                print("RESUMING MAIN PROBLEM")
+               #  print("RESUMING MAIN PROBLEM")
                 self.unfeasible_cnt = "FEASIBLE"
             else:
                 self.unfeasible_cnt = "RECOVERING"
-                print("NOT RESUMING MAIN PROBLEM")
+                # print("NOT RESUMING MAIN PROBLEM")
         return {
             "h_min": float(h_min),
             "d_min": float(d_min),
