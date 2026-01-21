@@ -99,15 +99,15 @@ def main():
     # ------------------------ CONTROLLER SETUP -----------------------------------
     Tc =2e-3
     cfg = ControllerConfig(Tc=Tc)
-    cfg.lambda_pos = 5000.0
-    cfg.lambda_vel = 2.55
-    cfg.lambda_scaling = 130#1.0e3
-    cfg.lambda_acc = 4.0e-05
-    delta = 4.5
+    cfg.lambda_pos = 1800.0
+    cfg.lambda_vel = 0.9
+    cfg.lambda_scaling = 400#1.0e3
+    cfg.lambda_acc = 0.00011414228363420121
+    delta = 1.4636104937214924
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*4
-    cfg.gamma = 10.0
+    cfg.gamma = 3.4210650918076775
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
 
     target_name = "ur10e_wrist_3_joint"
@@ -133,8 +133,8 @@ def main():
 
         R = quat.toRotationMatrix()
 
-        T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
-        csv_path="/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv"
+        T_wc = pin.SE3(R, np.array([0.094, -0.93, 200000.309]))
+        csv_path="skeleton_vectors/skeleton_vectors_14_NORMAL_TEST1.csv"
         #csv_publishers.swap_csv(csv_in_path, csv_out_path, 7, 17)
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
@@ -333,6 +333,7 @@ def main():
     on_target_count = 0
     # ------------------------------ MAIN LOOP -------------------- ----------------
     prec_target = -1
+    enable_lap_count = True
     if LOG_DATA:
         test_start_publisher.publish_once(True) # pyright: ignore[reportPossiblyUnboundVariable]
     unfeasible_cnt = 0
@@ -369,10 +370,7 @@ def main():
             cycles += 1
 
             nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
-            if (trajectory_time % T_total) < Tc:
-                lap_count += 1
-                prec_target = -1
-                print("LAP ADDED")
+
             out = ctrl.step(
                 obs_pos=obstacle_positions,
                 obs_vel=obstacle_velocities,
@@ -390,7 +388,17 @@ def main():
             ddq = out["ddq"]
             trajectory_time = out["trajectory_time"]
             Dtrajectory_time = out["Dtrajectory_time"]
-
+            if (trajectory_time % T_total) < Tc:
+                if enable_lap_count:
+                    lap_count += 1
+                    prec_target = -1
+                    print("Trajectory time: ", trajectory_time)
+                    print(f"T_total: {T_total}")
+                    print(f"actual scaling: {Dtrajectory_time}")
+                    enable_lap_count = False
+            else:
+                enable_lap_count = True
+                # print(f"actual lap: {int(trajectory_time % T_total)}")
             elapsed = time.perf_counter() - loop_start
             ct_qp.append(elapsed)
 
@@ -450,13 +458,13 @@ def main():
 
             rest = Tc - elapsed
             if rest > 0:
-                # vizualization_string =f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f} ctrl_state:{unfeasible_string}"
-                #
-                # renderer.push_state(out["q"], out["Tbt_nominal"], out["obs_pos"], vizualization_string)
-                # elapsed = time.perf_counter() - loop_start
-                # rest = max(0.0,Tc - elapsed)
-                # time.sleep(rest)
-                pass
+                vizualization_string =f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f} ctrl_state:{unfeasible_string}"
+
+                renderer.push_state(out["q"], out["Tbt_nominal"], out["obs_pos"], vizualization_string)
+                elapsed = time.perf_counter() - loop_start
+                rest = max(0.0,Tc - elapsed)
+                time.sleep(rest)
+                # pass
             else:
                 timeout_cycles+=1
             if unfeasible_string != "FEASIBLE":
