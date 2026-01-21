@@ -256,14 +256,11 @@ def run_episode_with_timeout(*args, timeout=600, **kwargs):
 
 # -------------------- OPTUNA OPTIMIZATION --------------------
 def objective(trial):
-    lambda_pos = trial.suggest_float("lambda_pos", low=5e2, high=5e4, log=True)
-    lambda_vel = trial.suggest_float("lambda_vel", low=1e-3, high=1e3, log=True)
-    lambda_scaling = trial.suggest_float("lambda_scaling", low=10, high=1e4, log=True)
-    lambda_acc = trial.suggest_float("lambda_acc", low=1e-14, high=1e-2, log=True)
+    wn = trial.suggest_float("wn", low=10, high=200, log=True)
+    xi = trial.suggest_float("lambda_vel", low=0.01, high=10, log=True)
     gamma = trial.suggest_float("gamma", low=1, high=10, log=True)
-    delta = trial.suggest_float("delta_deg", low=0.1, high=5, log=True)
     try:
-        viol_rate, mean_scale, mean_trajectory_error, lap_count, on_target_rate = run_episode_with_timeout(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta)
+        viol_rate, mean_scale, mean_trajectory_error, lap_count, on_target_rate = run_episode_with_timeout(wn, xi, gamma)
     except TimeoutError as e:
         print(f"Trial timed out: {e}")
         return 1000.0, -1.0, 1000.0, 0.0, 0.0  # Penalize timeout
@@ -288,6 +285,6 @@ study = optuna.create_study(
     sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
     storage=storage,
     load_if_exists=True,
-    study_name=f"dynamic_params_no_obs_viol_rate_mean_scaling_traj_error_study_{time.strftime('%Y%m%d-%H%M%S')}",
+    study_name=f"dynamic_params_PID_no_obs_viol_rate_mean_scaling_traj_error_study_{time.strftime('%Y%m%d-%H%M%S')}",
 )
 study.optimize(objective, n_trials=2500, show_progress_bar=True, n_jobs=30)
