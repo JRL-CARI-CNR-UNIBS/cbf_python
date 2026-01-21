@@ -133,7 +133,7 @@ def main():
 
         R = quat.toRotationMatrix()
 
-        T_wc = pin.SE3(R, np.array([0.094, -0.93, 200000.309]))
+        T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
         csv_path="skeleton_vectors/skeleton_vectors_14_NORMAL_TEST1.csv"
         #csv_publishers.swap_csv(csv_in_path, csv_out_path, 7, 17)
         bridge = FakeCommandBridge(

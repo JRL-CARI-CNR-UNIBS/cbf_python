@@ -4,10 +4,10 @@ import numpy as np
 import math
 import time
 import pinocchio as pin
-from joint_interpolator import SegmentedJointTrap
+from interpolator import SegmentedSE3Trap
 from sharework import loadSharework
 from fake_command_bridge import FakeCommandBridge
-from optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
+from PID_cbf_task_controller import UR10CBFController
 from plotly.io import show
 from multiprocessing import Process, Queue
 from queue import Empty
@@ -30,8 +30,6 @@ def compute_ee_pose(q, model, data, ee_frame_id):
     return p, R, T_ee
 
 
-# Camera and bridge
-R = pin.utils.rotate('z', 1.9) @ pin.utils.rotate('x', 1.57)
 # Build camera pose from your INITI snippet
 quat = pin.Quaternion(0.83, 0.185, 0.513, 0.12)
 quat.normalize()
@@ -49,8 +47,9 @@ UR10E_JOINTS = [
     "ur10e_wrist_3_joint",
 ]
 
+
+
 Tc =2e-3
-gen_cfg = ControllerConfig(Tc=Tc)
 # # Basic planner reused across trials
 q = home.copy()
 q10 = np.array([ 31.0, -78.0, 115.0, -127.0, 86.0, -32.0])*np.pi/180.0
@@ -59,27 +58,16 @@ q22 =  np.array([ 40.0, -126.0, 141.0, -100.0, 86.0, 45.0])*np.pi/180.0
 q25 =  np.array([ 130.0, -100.0, 125.0, -115.0, 94.0, -20.0])*np.pi/180.0
 q30 =  np.array([ 136.0, -60.0, 90.0, -122.0, 90.0, 45.0])*np.pi/180.0
 q40 =  np.array([ 134.0, -65.0, 70.0, -90.0, 90.0, 45.0])*np.pi/180.0
-gen_cfg.Dq_max = gen_cfg.Dq_max*0.25
-gen_cfg.DDq_max = gen_cfg.DDq_max*0.2
-planner = SegmentedJointTrap(Dq_max=gen_cfg.Dq_max*0.25, DDq_max=gen_cfg.DDq_max*0.25)
+
+v_lin_max = 26.6586 * 0.1 * 0.055  # linear velocity [m/s]
+w_max = (44.1351 * 0.1 * 0.055)  # angular velocity [rad/s]
+
+a_lin_max = 650 * 0.1 * 0.1  # linear acceleration [m/s^2]
+alpha_max = 750 * 0.1 * 0.1  # angular acceleration [rad/s^2]
+
+planner = SegmentedSE3Trap(vlin_max=v_lin_max, vang_max=w_max,
+                               alin_max=a_lin_max, aang_max=alpha_max)
 # CONFIG 1
-planner.addWayPoint(q)
-planner.addWayPoint(q10)
-planner.addWayPoint(q20)
-planner.addWayPoint(q10)
-planner.addWayPoint(q22)
-planner.addWayPoint(q25)
-planner.addWayPoint(q30)
-planner.addWayPoint(q40)
-planner.addWayPoint(q30)
-planner.addWayPoint(q)
-
-
-T_total = planner.computeTime()
-model_wrapper = loadSharework(UR10E_JOINTS)
-model = model_wrapper.model
-data = model.createData()
-n_wp = 9
 configs = {
     "q": q,
     "q10": q10,
@@ -89,6 +77,16 @@ configs = {
     "q30": q30,
     "q40": q40,
 }
+ordered_configs = []
+
+ordered_configs.extend(["q", "q10", "q20", "q10", "q22", "q25", "q30", "q40", "q30", "q"])
+
+T_total = planner.computeTime()
+model_wrapper = loadSharework(UR10E_JOINTS)
+model = model_wrapper.model
+data = model.createData()
+n_wp = 9
+
 cartesian_configs = {
     "q": 0.0,
     "q10": 0.0,
@@ -101,30 +99,47 @@ cartesian_configs = {
 tool_frame_name = "ur10e_wrist_3_joint"
 tool_frame_id = model.getFrameId(tool_frame_name)
 data = model.createData()
+
+for name in ordered_configs:
+    p, R, T_ee = compute_ee_pose(configs[name], model, data, tool_frame_id)
+    planner.addWayPoint(T_ee)
+
 for name in cartesian_configs:
     p, R, T_ee = compute_ee_pose(configs[name], model, data, tool_frame_id)
     cartesian_configs[name] = p.tolist()
 
+frame_ids = []
+for name in [ "ur10e_elbow_joint", "ur10e_wrist_3_joint",]:
+
+    # --- Frame ID (if a frame with that name exists) ---
+    try:
+        fid = model.getFrameId(name)
+    except Exception:
+        fid = None  # no frame with exactly that name
+    frame_ids.append(fid)
+
 
 # -------------------- EVALUATION FUNCTION --------------------
-def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=150.0):
+def run_episode(wn, xi, gamma, Tc=2e-3, duration=150.0):
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
-    cfg = ControllerConfig(Tc=Tc)
-    cfg.lambda_pos = lambda_pos
-    cfg.lambda_vel = lambda_vel
-    cfg.lambda_scaling = lambda_scaling
-    cfg.lambda_acc = lambda_acc
-    cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)
-    cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*2
-    cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*4
-    cfg.Dq_max = cfg.Dq_max*0.25
-    cfg.DDq_max = cfg.DDq_max*0.2
-    cfg.gamma = gamma
+    Kp_tra = np.array([1.0, 1.0, 1.0]) * wn ** 2
+    Kd_tra = np.array([1.0, 1.0, 1.0]) * 2.0 * xi * wn
+    Kp_rot = np.array([1.0, 1.0, 1.0]) * wn ** 2
+    Kd_rot = np.array([1.0, 1.0, 1.0]) * 2.0 * xi * wn
 
-    ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
-   
+    ctrl = UR10CBFController(
+        model=model,
+        tool_frame_name=tool_frame_name,
+        frames_ids=frame_ids,
+        Tc=Tc,
+        Kp_tra=Kp_tra,
+        Kd_tra=Kd_tra,
+        Kp_rot=Kp_rot,
+        Kd_rot=Kd_rot,
+        gamma=gamma,
+    )
     # quat = pin.Quaternion(0.814, 0.178, 0.535, 0.137)
     # quat.normalize()
     # R = quat.toRotationMatrix()
@@ -147,20 +162,30 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
     lap_count = 0
     on_target_count = 0
     prec_target = -1
+    Dtrajectory_time = 1.0
+    DDtrajectory_time = 0.0
     while t < duration:
-        obs_pos, obs_vel, obs_acc = bridge.getObstacles()
-        nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
+        obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
+        goal_pose, nominal_twist_goal, nominal_goal_dtwist = planner.getMotionLaw(
+            trajectory_time % T_total
+        )
         try:
             if (trajectory_time % T_total) < Tc:
                 lap_count += 1
                 prec_target = -1
+            twist_goal = nominal_twist_goal * Dtrajectory_time
+            goal_dtwist = (
+                    nominal_goal_dtwist * Dtrajectory_time ** 2.0
+                    + nominal_twist_goal * DDtrajectory_time
+            )
             out = ctrl.step(
-                obs_pos=obs_pos,
-                obs_vel=obs_vel,
-                obs_acc=obs_acc,
-                nominal_q=nominal_q,
-                nominal_Dq=nominal_Dq,
-                nominal_DDq=nominal_DDq,
+                t=t,
+                goal_pose=goal_pose,
+                twist_goal=twist_goal,
+                goal_dtwist=goal_dtwist,
+                obstacle_positions=obstacle_positions,
+                obstacle_velocities=obstacle_velocities,
+                obstacle_accelerations=obstacle_accelerations,
             )
             end_eff_pos = out["end_effector_pos"]
 
@@ -178,10 +203,10 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
         if out["h_min"] < 0 and out["vr_min"] < -1e-3:
             violations += 1
         # print(f"violations = {violations}, nsteps = {nsteps}, h_min = {out['h_min']}, Dtrajectory_time = {out['Dtrajectory_time']}")
-        sum_scale += out["Dtrajectory_time"]
+        sum_scale += Dtrajectory_time
         nsteps += 1
         t += Tc
-        trajectory_time = out["trajectory_time"]
+        trajectory_time = t
         trajectory_error_sum += out["trajectory_error"]
         time.sleep(1e-4)  # To avoid locking issues in multiprocessing
 

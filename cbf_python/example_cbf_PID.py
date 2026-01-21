@@ -22,6 +22,7 @@ from interpolator import SegmentedSE3Trap
 from visualization_daemon import VisualizationDaemon
 
 import signal
+import signal
 import os
 from datetime import datetime
 import test_publish_utils as pub_utils
