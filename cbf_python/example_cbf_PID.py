@@ -62,7 +62,7 @@ C = 0.25   # [m]  minimum separation distance
 Tr = 0.15  # [s]  controller-reaction time
 a_s = 2.5  # [m/s²] robot decel/accel capability
 Tc = 2e-3  # [s]   2 kHz control period
-gamma_default = 5.0  # CBF gain
+gamma_default = 3.20  # CBF gain
 Dq_max: np.ndarray = np.pi * np.array([1, 1, 1, 1, 1, 1], dtype=np.float64) * np.pi*0.25
 
 DDq_max: np.ndarray = np.pi * np.array([1, 1, 1, 1, 1, 1], dtype=np.float64) * np.pi * 5.0*0.2
@@ -176,7 +176,7 @@ def main():
 
     # Gains (same as original)
     wn = 40.0
-    xi = 1.0/3.0
+    xi = 0.33
     Kp_tra = np.array([1.0, 1.0, 1.0]) * wn ** 2
     Kd_tra = np.array([1.0, 1.0, 1.0]) * 2.0 * xi * wn
     Kp_rot = np.array([1.0, 1.0, 1.0]) * wn ** 2
@@ -391,11 +391,12 @@ def main():
             )
 
     # ------------------------------ MAIN LOOP ---------------------------- #
-    ctrl.reset_state(q)
+
 
     if LOG_DATA and USE_BRIDGE:
         test_start_publisher.publish_once(True) # pyright: ignore[reportPossiblyUnboundVariable]
     try:
+        ctrl.reset_state(q)
         t = 0.0
         trajectory_time = 0.0
         Dtrajectory_time = 1.0
