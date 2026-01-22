@@ -13,6 +13,28 @@ from multiprocessing import Process, Queue
 from queue import Empty
 # Database connection (for dashboard)
 POSTGRES_URL = "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
+
+def make_objective(h_min, h_max):
+    def objective(trial):
+        lambda_pos = trial.suggest_float("lambda_pos", 5e2, 5e4, log=True)
+        lambda_vel = trial.suggest_float("lambda_vel", 1e-3, 1e3, log=True)
+        lambda_scaling = trial.suggest_float("lambda_scaling", 10, 1e4, log=True)
+        lambda_acc = trial.suggest_float("lambda_acc", 1e-14, 1e-2, log=True)
+        gamma = trial.suggest_float("gamma", 1, 10, log=True)
+        delta = trial.suggest_float("delta_deg", 0.1, 5, log=True)
+
+        try:
+            viol_rate, mean_scale, mean_traj_err, low_scale_rate = run_episode_with_timeout(
+                lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta,
+                h_min, h_max, timeout=600
+            )
+        except TimeoutError:
+            # For directions: [minimize, maximize, minimize, minimize]
+            return (1e9, -1e9, 1e9, 1e9)
+
+        return (viol_rate, mean_scale, mean_traj_err, low_scale_rate)
+    return objective
+
 # ----------------- STATIC INITIALIZATION (only once) -----------------
 def compute_ee_pose(q, model, data, ee_frame_id):
     """
@@ -31,12 +53,11 @@ def compute_ee_pose(q, model, data, ee_frame_id):
 
 
 # Camera and bridge
-R = pin.utils.rotate('z', 1.9) @ pin.utils.rotate('x', 1.57)
 # Build camera pose from your INITI snippet
 quat = pin.Quaternion(0.83, 0.185, 0.513, 0.12)
 quat.normalize()
 R = quat.toRotationMatrix()
-# 
+
 T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
 
 home = np.array([90, -140, 140, -90, 90, 0]) * np.pi / 180.0
@@ -105,9 +126,9 @@ for name in cartesian_configs:
     p, R, T_ee = compute_ee_pose(configs[name], model, data, tool_frame_id)
     cartesian_configs[name] = p.tolist()
 
-scaling_thresshold = 0.5  
+scaling_threshold = 0.5  
 #-------------------- EVALUATION FUNCTION --------------------
-def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=300.0):
+def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=2000.0, h_min = -1000.0, h_max = 1000.0):
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
@@ -180,28 +201,30 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
             # Penalize infeasible or divergent QP
             print("QP failed")
             return 1.0, -1.0, 1000.0
-
-        if out["h_min"] < 0 and out["vr_min"] < -1e-3:
-            violations += 1
-        # print(f"violations = {violations}, nsteps = {nsteps}, h_min = {out['h_min']}, Dtrajectory_time = {out['Dtrajectory_time']}")
-        sum_scale += out["Dtrajectory_time"]
-        nsteps += 1
         t += Tc
+        
+        if h_min <= out["h_min"] <= h_max:
+            if out["h_min"] < 0 and out["vr_min"] < -1e-3:
+                violations += 1
+            sum_scale += out["Dtrajectory_time"]
+            nsteps += 1
+            trajectory_error_sum += out["trajectory_error"]
+            if out["Dtrajectory_time"] < scaling_threshold:
+                low_scale_count += 1
         trajectory_time = out["trajectory_time"]
-        trajectory_error_sum += out["trajectory_error"]
+        
 
-        if out["Dtrajectory_time"] < scaling_thresshold:
-            low_scale_count += 1
+       
         time.sleep(1e-4)  # To avoid locking issues in multiprocessing
 
 
-    on_target_rate = on_target_count/(n_wp * ((lap_count)+ ((trajectory_time % T_total)/T_total)))
+    #on_target_rate = on_target_count/(n_wp * ((lap_count)+ ((trajectory_time % T_total)/T_total)))
     lap_count = lap_count + ((trajectory_time % T_total)/T_total)
     viol_rate = violations / max(1, nsteps)
     mean_scale = sum_scale / max(1, nsteps)
     mean_trajectory_error = trajectory_error_sum / max(1, nsteps)
     low_scale_rate = low_scale_count / max(1, nsteps)
-    return viol_rate, mean_scale, mean_trajectory_error, lap_count, on_target_rate, low_scale_rate
+    return viol_rate, mean_scale, mean_trajectory_error, low_scale_rate
 
 
 def _run_episode_worker(args, kwargs, q):
@@ -240,20 +263,7 @@ def run_episode_with_timeout(*args, timeout=600, **kwargs):
         raise RuntimeError(f"run_episode failed in worker: {payload}")
 
 # -------------------- OPTUNA OPTIMIZATION --------------------
-def objective(trial):
-    lambda_pos = trial.suggest_float("lambda_pos", low=5e2, high=5e4, log=True)
-    lambda_vel = trial.suggest_float("lambda_vel", low=1e-3, high=1e3, log=True)
-    lambda_scaling = trial.suggest_float("lambda_scaling", low=10, high=1e4, log=True)
-    lambda_acc = trial.suggest_float("lambda_acc", low=1e-14, high=1e-2, log=True)
-    gamma = trial.suggest_float("gamma", low=1, high=10, log=True)
-    delta = trial.suggest_float("delta_deg", low=0.1, high=5, log=True)
-    try:
-        viol_rate, mean_scale, mean_trajectory_error, lap_count, on_target_rate, low_scale_rate = run_episode_with_timeout(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta)
-    except TimeoutError as e:
-        print(f"Trial timed out: {e}")
-        return 1000.0, -1.0, 1000.0, 0.0, 0.0, 1000.0  # Penalize timeout
 
-    return viol_rate, mean_scale, mean_trajectory_error, lap_count, on_target_rate, low_scale_rate
 
 
 storage = optuna.storages.RDBStorage(
@@ -268,12 +278,21 @@ storage = optuna.storages.RDBStorage(
     # failed_trial_callback=RetryFailedTrialCallback(max_retry=1),
 )
 
-study = optuna.create_study(
-    directions=["minimize", "maximize","minimize", "maximize", "maximize", "minimize"],
-    sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
-    storage=storage,
-    load_if_exists=True,
-    study_name=f"dynamic_params_no_obs_case_study_{time.strftime('%Y%m%d-%H%M%S')}",
-)
-study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "lap_count", "on_target_rate", "low_scale_rate"])
-study.optimize(objective, n_trials=2500, show_progress_bar=True, n_jobs=30)
+h_dic = {
+    "h_negative": [-1000.0, 0.0],
+    "h_q1": [0.0, 0.25],
+    "h_q2": [0.25, 0.5],
+    "h_q3": [0.5, 0.75],
+    "h_positive": [0.75, 1000.0],
+}
+for h_key, (h_min, h_max) in h_dic.items():
+
+    study = optuna.create_study(
+        directions=["minimize", "maximize","minimize", "minimize"],
+        sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
+        storage=storage,
+        #load_if_exists=True,
+        study_name=f"dynamic_params_{h_key}_{time.strftime('%Y%m%d-%H%M%S')}",
+    )
+    study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "low_scale_rate"])
+    study.optimize(make_objective(h_min, h_max), n_trials=2500, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
