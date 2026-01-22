@@ -36,8 +36,9 @@ R = pin.utils.rotate('z', 1.9) @ pin.utils.rotate('x', 1.57)
 quat = pin.Quaternion(0.83, 0.185, 0.513, 0.12)
 quat.normalize()
 R = quat.toRotationMatrix()
-# 
-T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
+T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309])) # NO OBS
+# T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
+
 
 home = np.array([90, -140, 140, -90, 90, 0]) * np.pi / 180.0
 UR10E_JOINTS = [
@@ -105,7 +106,7 @@ for name in cartesian_configs:
     p, R, T_ee = compute_ee_pose(configs[name], model, data, tool_frame_id)
     cartesian_configs[name] = p.tolist()
 
-scaling_thresshold = 0.5  
+scaling_thresshold = 0.7
 #-------------------- EVALUATION FUNCTION --------------------
 def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=300.0):
 
@@ -179,7 +180,7 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
         except Exception:
             # Penalize infeasible or divergent QP
             print("QP failed")
-            return 1.0, -1.0, 1000.0
+            return 1.0, 0.0, 10.0, 0.0, 0.0, 1.0
 
         if out["h_min"] < 0 and out["vr_min"] < -1e-3:
             violations += 1
@@ -251,7 +252,8 @@ def objective(trial):
         viol_rate, mean_scale, mean_trajectory_error, lap_count, on_target_rate, low_scale_rate = run_episode_with_timeout(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta)
     except TimeoutError as e:
         print(f"Trial timed out: {e}")
-        return 1000.0, -1.0, 1000.0, 0.0, 0.0, 1000.0  # Penalize timeout
+        return 1.0, 0.0, 10.0, 0.0, 0.0, 1.0
+ # Penalize timeout
 
     return viol_rate, mean_scale, mean_trajectory_error, lap_count, on_target_rate, low_scale_rate
 

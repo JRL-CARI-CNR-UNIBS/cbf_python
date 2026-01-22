@@ -8,7 +8,7 @@ from numba_kernels import build_free_forced_one_step, assemble_qp_inplace
 import compute_velocity_scaling_for_human_proximity as ext_scaling
 
 @dataclass
-class ControllerConfig:1800
+class ControllerConfig:
     Tc: float = 2e-3
     C: float = 0.25
     Tr: float = 0.5
