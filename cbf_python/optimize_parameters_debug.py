@@ -37,7 +37,7 @@ quat = pin.Quaternion(0.83, 0.185, 0.513, 0.12)
 quat.normalize()
 R = quat.toRotationMatrix()
 # 
-T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
+T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
 
 home = np.array([90, -140, 140, -90, 90, 0]) * np.pi / 180.0
 UR10E_JOINTS = [
@@ -107,7 +107,7 @@ for name in cartesian_configs:
 
 
 # -------------------- EVALUATION FUNCTION --------------------
-def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=150.0):
+def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=300.0):
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
@@ -147,13 +147,13 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
     lap_count = 0
     on_target_count = 0
     prec_target = -1
+    enable_lap_count = True
+
     while t < duration:
         obs_pos, obs_vel, obs_acc = bridge.getObstacles()
         nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
         try:
-            if (trajectory_time % T_total) < Tc:
-                lap_count += 1
-                prec_target = -1
+           
             out = ctrl.step(
                 obs_pos=obs_pos,
                 obs_vel=obs_vel,
@@ -163,7 +163,13 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
                 nominal_DDq=nominal_DDq,
             )
             end_eff_pos = out["end_effector_pos"]
-
+            if (trajectory_time % T_total) < Tc:
+                if enable_lap_count:
+                    lap_count += 1
+                    prec_target = -1
+                    enable_lap_count = False
+            else:
+                enable_lap_count = True
             for i in range(len(cartesian_configs.values())):
                 q_wp = list(cartesian_configs.values())[i]
                 if  np.linalg.norm(q_wp - end_eff_pos) < 2e-03 and prec_target != i:
@@ -263,6 +269,7 @@ study = optuna.create_study(
     sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
     storage=storage,
     load_if_exists=True,
-    study_name=f"dynamic_params_no_obs_viol_rate_mean_scaling_traj_error_study_{time.strftime('%Y%m%d-%H%M%S')}",
+    study_name=f"dynamic_params_no_obs_case_study_{time.strftime('%Y%m%d-%H%M%S')}",
 )
+study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "lap_count", "on_target_rate"])
 study.optimize(objective, n_trials=2500, show_progress_bar=True, n_jobs=30)

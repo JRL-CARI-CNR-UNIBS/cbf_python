@@ -66,7 +66,7 @@ class UR10CBFController:
         # print(f"n_constraints: {self.n_constraints}")
         self.useCbf = useCbf
         if useCbf:
-            self.n_constraints = 2 * 2 * nq + 18 * len(self.frames_ids)
+            self.n_constraints = 2 * 2 * nq + 18 * len(self.frames_ids) + 4
         else:
             self.n_constraints = 2 * 2 * nq
         self.A = np.zeros((self.n_constraints, nq), dtype=np.float64)
@@ -231,10 +231,12 @@ class UR10CBFController:
                 frames_p, frames_v, Jlins, dJlins, obstacle_positions, obstacle_velocities, obstacle_accelerations,
                 Tr, a_s, C, gamma, 1e-12, self.useCbf
             )
+        # print(f"n_constraints used: {row} / {self.n_constraints}")
 
         # ---------------------------- QP solve ------------------------------- #
         if self.useCbf and self.A.shape[0] > 0:
             try:
+
                 ddq, *_ = quadprog.solve_qp(
                     P,
                     b,
@@ -281,3 +283,12 @@ class UR10CBFController:
             "end_effector_pos": frames_p[-1, :].copy(),
             "end_effector_vel": frames_v[-1, :].copy(),
         }
+    def close(self):
+
+        self.model = None
+        self.data = None
+        self.FreePos = self.ForcedPos = None
+        self.FreeVel = self.ForcedVel = None
+        self.A = None
+        self.c = None
+        self.q = self.dq = self.ddq = None

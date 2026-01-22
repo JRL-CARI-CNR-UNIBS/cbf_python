@@ -11,6 +11,7 @@ from PID_cbf_task_controller import UR10CBFController
 from plotly.io import show
 from multiprocessing import Process, Queue
 from queue import Empty
+import gc
 # Database connection (for dashboard)
 POSTGRES_URL = "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
 # ----------------- STATIC INITIALIZATION (only once) -----------------
@@ -65,8 +66,8 @@ w_max = (44.1351 * 0.1 * 0.055)  # angular velocity [rad/s]
 a_lin_max = 650 * 0.1 * 0.1  # linear acceleration [m/s^2]
 alpha_max = 750 * 0.1 * 0.1  # angular acceleration [rad/s^2]
 
-planner = SegmentedSE3Trap(vlin_max=v_lin_max, vang_max=w_max,
-                               alin_max=a_lin_max, aang_max=alpha_max)
+planner = SegmentedSE3Trap(vlin_max=v_lin_max*2.4, vang_max=w_max*2.4,
+                               alin_max=a_lin_max*1.1, aang_max=alpha_max*1.1)
 # CONFIG 1
 configs = {
     "q": q,
@@ -81,9 +82,9 @@ ordered_configs = []
 
 ordered_configs.extend(["q", "q10", "q20", "q10", "q22", "q25", "q30", "q40", "q30", "q"])
 
-T_total = planner.computeTime()
 model_wrapper = loadSharework(UR10E_JOINTS)
-model = model_wrapper.model
+original_model = model_wrapper.model
+model = model_wrapper.model.copy()
 data = model.createData()
 n_wp = 9
 
@@ -103,6 +104,8 @@ data = model.createData()
 for name in ordered_configs:
     p, R, T_ee = compute_ee_pose(configs[name], model, data, tool_frame_id)
     planner.addWayPoint(T_ee)
+T_total = planner.computeTime()
+print(f"T_total = {T_total} s")
 
 for name in cartesian_configs:
     p, R, T_ee = compute_ee_pose(configs[name], model, data, tool_frame_id)
@@ -130,7 +133,7 @@ def run_episode(wn, xi, gamma, Tc=2e-3, duration=150.0):
     Kd_rot = np.array([1.0, 1.0, 1.0]) * 2.0 * xi * wn
 
     ctrl = UR10CBFController(
-        model=model,
+        model=model.copy(),
         tool_frame_name=tool_frame_name,
         frames_ids=frame_ids,
         Tc=Tc,
@@ -148,36 +151,47 @@ def run_episode(wn, xi, gamma, Tc=2e-3, duration=150.0):
 
     bridge = FakeCommandBridge(
         UR10E_JOINTS,
-        csv_path="/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv",
+        csv_path="/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors.csv",
         Tworld_to_cam=T_wc,
         slowdown_factor=1.0,
     )
 
-    ctrl.reset_state(q)
-    t = 0.0
-    trajectory_time = 0.0
-    violations, nsteps = 0, 0
-    sum_scale = 0.0
-    trajectory_error_sum = 0.0
-    lap_count = 0
-    on_target_count = 0
-    prec_target = -1
-    Dtrajectory_time = 1.0
-    DDtrajectory_time = 0.0
-    while t < duration:
-        obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
-        goal_pose, nominal_twist_goal, nominal_goal_dtwist = planner.getMotionLaw(
-            trajectory_time % T_total
-        )
-        try:
-            if (trajectory_time % T_total) < Tc:
+    try:
+        ctrl.reset_state(home)
+        t = 0.0
+        trajectory_time = 0.0
+        Dtrajectory_time = 1.0
+        DDtrajectory_time = 0.0
+        lap_count = 0
+        on_target_count = 0
+        prec_target = -1
+        violations, nsteps = 0, 0
+        sum_scale = 0.0
+        trajectory_error_sum = 0.0
+        while t < duration:
+
+            if T_total >0.0:
+                goal_pose, nominal_twist_goal, nominal_goal_dtwist = planner.getMotionLaw(
+                    trajectory_time % T_total
+                )
+            else:
+                goal_pose, nominal_twist_goal, nominal_goal_dtwist = planner.getMotionLaw(
+                trajectory_time
+                )
+            if 0 < (trajectory_time % T_total) < Tc:
                 lap_count += 1
-                prec_target = -1
+                print("LAP ADDED")
+
+            obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
+            
+            # Scale if you ever implement time-scaling; currently D=1, DD=0
             twist_goal = nominal_twist_goal * Dtrajectory_time
             goal_dtwist = (
-                    nominal_goal_dtwist * Dtrajectory_time ** 2.0
-                    + nominal_twist_goal * DDtrajectory_time
+                nominal_goal_dtwist * Dtrajectory_time ** 2.0
+                + nominal_twist_goal * DDtrajectory_time
             )
+
+            # --------- Controller step (this is the key new API) ------------- #
             out = ctrl.step(
                 t=t,
                 goal_pose=goal_pose,
@@ -187,35 +201,50 @@ def run_episode(wn, xi, gamma, Tc=2e-3, duration=150.0):
                 obstacle_velocities=obstacle_velocities,
                 obstacle_accelerations=obstacle_accelerations,
             )
+
+            q = out["q"]
+            dq = out["dq"]
+            ddq = out["ddq"]
+            h_min = out["h_min"]
+
+            # --------------------------- TIMING & VISUALS ------------------- #
+  
+            Dtrajectory_time += DDtrajectory_time * Tc
+
             end_eff_pos = out["end_effector_pos"]
+
 
             for i in range(len(cartesian_configs.values())):
                 q_wp = list(cartesian_configs.values())[i]
-                if  np.linalg.norm(q_wp - end_eff_pos) < 2e-03 and prec_target != i:
+                if np.linalg.norm(q_wp - end_eff_pos) < 2e-03 and prec_target != i:
                     on_target_count += 1
                     prec_target = i
+                    # print("TARGET REACHED")
                     break
-        except Exception:
+          
+            if out["h_min"] < 0 and out["vr_min"] < -1e-3:
+                violations += 1
+            # print(f"violations = {violations}, nsteps = {nsteps}, h_min = {out['h_min']}")
+            sum_scale += Dtrajectory_time
+            nsteps += 1
+            t += Tc
+            trajectory_time = t
+            trajectory_error_sum += out["trajectory_error"]
+            time.sleep(1e-4)  # To avoid locking issues in multiprocessing
+
+    except Exception as e:
             # Penalize infeasible or divergent QP
-            print("QP failed")
-            return 1.0, -1.0, 1000.0
-
-        if out["h_min"] < 0 and out["vr_min"] < -1e-3:
-            violations += 1
-        # print(f"violations = {violations}, nsteps = {nsteps}, h_min = {out['h_min']}, Dtrajectory_time = {out['Dtrajectory_time']}")
-        sum_scale += Dtrajectory_time
-        nsteps += 1
-        t += Tc
-        trajectory_time = t
-        trajectory_error_sum += out["trajectory_error"]
-        time.sleep(1e-4)  # To avoid locking issues in multiprocessing
-
-
+            print("QP failed, exception:", e)
+            return 1.0, -1.0, 1000.0, -1.0, -1.0
+    print ("FINE CICLO")        
     on_target_rate = on_target_count/(n_wp * ((lap_count)+ ((trajectory_time % T_total)/T_total)))
     lap_count = lap_count + ((trajectory_time % T_total)/T_total)
     viol_rate = violations / max(1, nsteps)
     mean_scale = sum_scale / max(1, nsteps)
     mean_trajectory_error = trajectory_error_sum / max(1, nsteps)
+    ctrl.close()
+    del ctrl
+    gc.collect()
     return viol_rate, mean_scale, mean_trajectory_error, lap_count, on_target_rate
 
 
@@ -257,7 +286,7 @@ def run_episode_with_timeout(*args, timeout=600, **kwargs):
 # -------------------- OPTUNA OPTIMIZATION --------------------
 def objective(trial):
     wn = trial.suggest_float("wn", low=10, high=200, log=True)
-    xi = trial.suggest_float("lambda_vel", low=0.01, high=10, log=True)
+    xi = trial.suggest_float("xi", low=0.01, high=10, log=True)
     gamma = trial.suggest_float("gamma", low=1, high=10, log=True)
     try:
         viol_rate, mean_scale, mean_trajectory_error, lap_count, on_target_rate = run_episode_with_timeout(wn, xi, gamma)
@@ -288,3 +317,5 @@ study = optuna.create_study(
     study_name=f"dynamic_params_PID_no_obs_viol_rate_mean_scaling_traj_error_study_{time.strftime('%Y%m%d-%H%M%S')}",
 )
 study.optimize(objective, n_trials=2500, show_progress_bar=True, n_jobs=30)
+
+# print(run_episode(40, 0.33, 5))  # For debugging
