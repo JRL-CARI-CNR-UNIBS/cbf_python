@@ -99,15 +99,15 @@ def main():
     # ------------------------ CONTROLLER SETUP -----------------------------------
     Tc =2e-3
     cfg = ControllerConfig(Tc=Tc)
-    cfg.lambda_pos = 1800.0
-    cfg.lambda_vel = 0.9
-    cfg.lambda_scaling = 400#1.0e3
-    cfg.lambda_acc = 0.00011414228363420121
-    delta = 1.4636104937214924
+    cfg.lambda_pos = 5000.0
+    cfg.lambda_vel = 2.55
+    cfg.lambda_scaling = 130
+    cfg.lambda_acc = 0.000011414228363420121
+    delta = 4.5
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*4
-    cfg.gamma = 3.4210650918076775
+    cfg.gamma = 10.0    
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
 
     target_name = "ur10e_wrist_3_joint"

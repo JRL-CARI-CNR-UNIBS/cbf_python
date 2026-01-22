@@ -316,6 +316,7 @@ study = optuna.create_study(
     load_if_exists=True,
     study_name=f"dynamic_params_PID_no_obs_viol_rate_mean_scaling_traj_error_study_{time.strftime('%Y%m%d-%H%M%S')}",
 )
+study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "lap_count", "on_target_rate", "low_scale_rate"])
 study.optimize(objective, n_trials=2500, show_progress_bar=True, n_jobs=30)
 
 # print(run_episode(40, 0.33, 5))  # For debugging
