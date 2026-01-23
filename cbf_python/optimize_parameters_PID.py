@@ -226,7 +226,7 @@ def run_episode(wn, xi, gamma, Tc=2e-3, duration=150.0):
             if out["h_min"] < 0 and out["vr_min"] < -1e-3:
                 violations += 1
             # print(f"violations = {violations}, nsteps = {nsteps}, h_min = {out['h_min']}")
-            sum_scale += Dtrajectory_time
+            # sum_scale += Dtrajectory_time
             nsteps += 1
             t += Tc
             trajectory_time = t
@@ -236,17 +236,16 @@ def run_episode(wn, xi, gamma, Tc=2e-3, duration=150.0):
     except Exception as e:
             # Penalize infeasible or divergent QP
             print("QP failed, exception:", e)
-            return 1.0, -1.0, 1000.0, -1.0, -1.0
+            return 1.0, 1000.0, -1.0
     print ("FINE CICLO")        
     on_target_rate = on_target_count/(n_wp * ((lap_count)+ ((trajectory_time % T_total)/T_total)))
-    lap_count = lap_count + ((trajectory_time % T_total)/T_total)
+    # lap_count = lap_count + ((trajectory_time % T_total)/T_total)
     viol_rate = violations / max(1, nsteps)
-    mean_scale = sum_scale / max(1, nsteps)
     mean_trajectory_error = trajectory_error_sum / max(1, nsteps)
     ctrl.close()
     del ctrl
     gc.collect()
-    return viol_rate, mean_scale, mean_trajectory_error, lap_count, on_target_rate
+    return viol_rate,  mean_trajectory_error, on_target_rate
 
 
 def _run_episode_worker(args, kwargs, q):
@@ -293,9 +292,9 @@ def objective(trial):
         viol_rate, mean_scale, mean_trajectory_error, lap_count, on_target_rate = run_episode_with_timeout(wn, xi, gamma)
     except TimeoutError as e:
         print(f"Trial timed out: {e}")
-        return 1000.0, -1.0, 1000.0, 0.0, 0.0  # Penalize timeout
+        return 1.0, 1000.0, 0.0  # Penalize timeout
 
-    return viol_rate, mean_scale, mean_trajectory_error, lap_count, on_target_rate
+    return viol_rate, mean_trajectory_error, on_target_rate
 
 
 storage = optuna.storages.RDBStorage(
@@ -311,11 +310,11 @@ storage = optuna.storages.RDBStorage(
 )
 
 study = optuna.create_study(
-    directions=["minimize", "maximize","minimize", "maximize", "maximize"],
+    directions=["minimize","minimize", "maximize"],
     sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
     storage=storage,
     load_if_exists=True,
-    study_name=f"dynamic_params_PID_no_obs_viol_rate_mean_scaling_traj_error_study_{time.strftime('%Y%m%d-%H%M%S')}",
+    study_name=f"dynamic_params_PID_study_{time.strftime('%Y%m%d-%H%M%S')}",
 )
 study.optimize(objective, n_trials=2500, show_progress_bar=True, n_jobs=30)
 
