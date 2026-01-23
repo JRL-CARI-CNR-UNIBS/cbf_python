@@ -25,8 +25,8 @@ def make_objective(h_min, h_max):
 
         try:
             viol_rate, mean_scale, mean_traj_err, low_scale_rate = run_episode_with_timeout(
-                lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta,
-                h_min, h_max, timeout=600
+                lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=2000.0,
+                h_min = h_min, h_max = h_max, timeout=600
             )
         except TimeoutError:
             # For directions: [minimize, maximize, minimize, minimize]
@@ -296,3 +296,5 @@ for h_key, (h_min, h_max) in h_dic.items():
     )
     study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "low_scale_rate"])
     study.optimize(make_objective(h_min, h_max), n_trials=2500, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
+
+    # print (run_episode(1e3,1e3,1e3,1e-3,5,1))
