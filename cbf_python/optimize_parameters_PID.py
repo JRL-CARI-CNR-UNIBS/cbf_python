@@ -123,7 +123,7 @@ for name in [ "ur10e_elbow_joint", "ur10e_wrist_3_joint",]:
 
 
 # -------------------- EVALUATION FUNCTION --------------------
-def run_episode(wn, xi, gamma, Tc=2e-3, duration=1500.0):
+def run_episode(wn, xi, gamma, Tc=2e-3, duration=150.0):
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
@@ -151,9 +151,10 @@ def run_episode(wn, xi, gamma, Tc=2e-3, duration=1500.0):
 
     bridge = FakeCommandBridge(
         UR10E_JOINTS,
-        csv_path="/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv",
+        csv_path="/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors.csv",
         Tworld_to_cam=T_wc,
         slowdown_factor=1.0,
+        t0 = 0.0,
     )
 
     try:
@@ -180,9 +181,9 @@ def run_episode(wn, xi, gamma, Tc=2e-3, duration=1500.0):
                 )
             if 0 < (trajectory_time % T_total) < Tc:
                 lap_count += 1
-                # print("LAP ADDED")
+                print("LAP ADDED")
 
-            obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
+            obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles(elapsed=t)
             
             # Scale if you ever implement time-scaling; currently D=1, DD=0
             twist_goal = nominal_twist_goal * Dtrajectory_time
@@ -225,7 +226,7 @@ def run_episode(wn, xi, gamma, Tc=2e-3, duration=1500.0):
             if out["h_min"] < 0 and out["vr_min"] < -1e-3:
                 violations += 1
             # print(f"violations = {violations}, nsteps = {nsteps}, h_min = {out['h_min']}")
-            sum_scale += Dtrajectory_time
+            # sum_scale += Dtrajectory_time
             nsteps += 1
             t += Tc
             trajectory_time = t
@@ -235,20 +236,16 @@ def run_episode(wn, xi, gamma, Tc=2e-3, duration=1500.0):
     except Exception as e:
             # Penalize infeasible or divergent QP
             print("QP failed, exception:", e)
-            return 1.0, -1.0, 1000.0, -1.0, -1.0
+            return 1.0, 1000.0, -1.0
     print ("FINE CICLO")        
-    on_target_rate = on_target_count / (n_wp * ((lap_count) + ((trajectory_time % T_total) / T_total)))
-    #                on_target_count / (n_wp * ((lap_count) + ((trajectory_time % T_total) / T_total)))
-    lap_count = lap_count + ((trajectory_time % T_total)/T_total)
+    on_target_rate = on_target_count/(n_wp * ((lap_count)+ ((trajectory_time % T_total)/T_total)))
+    # lap_count = lap_count + ((trajectory_time % T_total)/T_total)
     viol_rate = violations / max(1, nsteps)
-    mean_scale = sum_scale / max(1, nsteps)
     mean_trajectory_error = trajectory_error_sum / max(1, nsteps)
-    print("on target count: ", on_target_count)
-
     ctrl.close()
     del ctrl
     gc.collect()
-    return viol_rate, mean_scale, mean_trajectory_error, lap_count, on_target_rate
+    return viol_rate,  mean_trajectory_error, on_target_rate
 
 
 def _run_episode_worker(args, kwargs, q):
@@ -259,7 +256,7 @@ def _run_episode_worker(args, kwargs, q):
     except Exception as e:
         q.put(("err", repr(e)))
 
-def run_episode_with_timeout(*args, timeout=900, **kwargs):
+def run_episode_with_timeout(*args, timeout=600, **kwargs):
     """
     Run run_episode(...), but stop it if it takes longer than `timeout` seconds.
     Returns the tuple from run_episode on success.
@@ -295,9 +292,9 @@ def objective(trial):
         viol_rate, mean_scale, mean_trajectory_error, lap_count, on_target_rate = run_episode_with_timeout(wn, xi, gamma)
     except TimeoutError as e:
         print(f"Trial timed out: {e}")
-        return 1000.0, -1.0, 1000.0, 0.0, 0.0  # Penalize timeout
+        return 1.0, 1000.0, 0.0  # Penalize timeout
 
-    return viol_rate, mean_scale, mean_trajectory_error, lap_count, on_target_rate
+    return viol_rate, mean_trajectory_error, on_target_rate
 
 
 storage = optuna.storages.RDBStorage(
@@ -313,13 +310,12 @@ storage = optuna.storages.RDBStorage(
 )
 
 study = optuna.create_study(
-    directions=["minimize", "maximize","minimize", "maximize", "maximize"],
+    directions=["minimize","minimize", "maximize"],
     sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
     storage=storage,
     load_if_exists=True,
-    study_name=f"dynamic_params_PID_no_obs_viol_rate_mean_scaling_traj_error_study_{time.strftime('%Y%m%d-%H%M%S')}",
+    study_name=f"dynamic_params_PID_study_{time.strftime('%Y%m%d-%H%M%S')}",
 )
-study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "lap_count", "on_target_rate"])
 study.optimize(objective, n_trials=2500, show_progress_bar=True, n_jobs=30)
 
-# print(run_episode(80, 0.06, 8))  # For debugging
+# print(run_episode(40, 0.33, 5))  # For debugging

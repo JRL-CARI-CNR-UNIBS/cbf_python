@@ -38,9 +38,8 @@ class FakeCommandBridge(BaseCommandBridgeABC):
         slowdown_factor: float = 0.4,
         on_publish: Optional[Callable[[np.ndarray], None]] = None,
         auto_diff_if_missing: bool = False,
-        t0=time.monotonic(),
     ) -> None:
-        super().__init__(ordered_joint_names,threshold=threshold)
+        super().__init__(ordered_joint_names, threshold=threshold)
 
         # --- Build default Tworld->cam if none provided (INITI snippet) ---
         if Tworld_to_cam is None:
@@ -53,8 +52,7 @@ class FakeCommandBridge(BaseCommandBridgeABC):
 
         # --- Simulation knobs ---
         self._slowdown = float(slowdown_factor)
-        self._t0 = t0
-        print("T0: ", self._t0)
+        self._t0 = time.monotonic()
         self._on_publish = on_publish
         self.last_command: Optional[np.ndarray] = None  # for inspection/tests
         self.actual_joint_positions_ = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
@@ -73,15 +71,14 @@ class FakeCommandBridge(BaseCommandBridgeABC):
                 pass  # publishing callback is best-effort here
 
     # --------------------- ABC: obstacles provider ------------------
-    def getObstacles(self, elapsed = time.monotonic(), max_age_sec: float = 0.5) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def getObstacles(self, max_age_sec: float = 0.5) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Returns (pos[K,3], vel[K,3], acc[K,3]) for the current simulated time.
 
         The CSV may contain any number of keypoints K; arrays are shaped (K,3).
         """
         # current raw time scaled by slowdown
-        elapsed = elapsed - self._t0
-        print("ELAPSED: ", elapsed)
+        elapsed = time.monotonic() - self._t0
         t_raw = self._slowdown * elapsed
 
         T = self._human_T

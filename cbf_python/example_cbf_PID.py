@@ -30,7 +30,7 @@ from PID_cbf_task_controller import UR10CBFController
 import csv_publishers
 import threading
 USE_BRIDGE = False
-LOG_DATA = True
+LOG_DATA = False
 log_path = "resullts/simulation/PID"
 stop_event = threading.Event()
 duration  = 150.0
@@ -62,7 +62,6 @@ C = 0.25   # [m]  minimum separation distance
 Tr = 0.15  # [s]  controller-reaction time
 a_s = 2.5  # [m/s²] robot decel/accel capability
 Tc = 2e-3  # [s]   2 kHz control period
-gamma_default = 3.20  # CBF gain
 Dq_max: np.ndarray = np.pi * np.array([1, 1, 1, 1, 1, 1], dtype=np.float64) * np.pi*0.25
 
 DDq_max: np.ndarray = np.pi * np.array([1, 1, 1, 1, 1, 1], dtype=np.float64) * np.pi * 5.0*0.2
@@ -140,6 +139,7 @@ def main():
             Tworld_to_cam=T_wc,
             # slowdown_factor=0.1,
             slowdown_factor=1.0,
+            t0 = 0.0
 
         )
         rclpy.init()
@@ -175,8 +175,13 @@ def main():
     tool_frame_name = target_name
 
     # Gains (same as original)
-    wn = 40.0
-    xi = 0.33
+    # wn =  59.187270296013395
+    # xi = 0.21842533124715255
+    gamma_default = 10 # CBF gain2.126488902627753
+    wn =  169.88226052057638
+    xi = 0.7423736875851532
+    # gamma_default = 10 # CBF gain2.126488902627753
+
     Kp_tra = np.array([1.0, 1.0, 1.0]) * wn ** 2
     Kd_tra = np.array([1.0, 1.0, 1.0]) * 2.0 * xi * wn
     Kp_rot = np.array([1.0, 1.0, 1.0]) * wn ** 2
@@ -415,8 +420,11 @@ def main():
             if 0 < (trajectory_time % T_total) < Tc:
                 lap_count += 1
                 print("LAP ADDED")
-
-            obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
+            if USE_BRIDGE:
+                obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
+            else:
+                obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles(elapsed = t)
+                # print("ELAPSED: ", t)
             # elapsed = time.perf_counter() - loop_start
             # print("elapsed time: ", elapsed)
 
@@ -462,14 +470,14 @@ def main():
 
             if not stop_event.is_set() and LOG_DATA:
                 nom_x, nom_y, nom_z = goal_pose.translation.tolist()
-                joint_target_publisher.publish_once([nom_x, nom_y, nom_z], twist_goal[0:3], goal_dtwist[0:3])
+                joint_target_publisher.publish_once(t, [nom_x, nom_y, nom_z], twist_goal[0:3], goal_dtwist[0:3])
                 hmin = out["h_min"]
                 dmin = out["d_min"]
                 trj_error = out["trajectory_error"]
                 end_eff_vel = out["end_effector_vel"]
                 vr_min = out["vr_min"]
                 vh_min = out["vh_min"]
-                cbf_out_publisher.publish_once(
+                cbf_out_publisher.publish_once( t,
                     [
                         hmin,
                         dmin,
@@ -484,9 +492,9 @@ def main():
                         vh_min,
                     ]
                 )  # pyright: ignore[reportPossiblyUnboundVariable]
-                human_pos_publisher.publish_once(obstacle_positions)
+                human_pos_publisher.publish_once(t, obstacle_positions)
             if not USE_BRIDGE and LOG_DATA:
-                joint_state_publisher.publish_once(q, dq, ddq)
+                joint_state_publisher.publish_once(t, q, dq, ddq)
 
             for i in range(len(cartesian_configs.values())):
                 q_wp = list(cartesian_configs.values())[i]
@@ -500,18 +508,18 @@ def main():
 
             vizualization_string = f"h = {h_min:.2f} m, err={out['trajectory_error']:.2f}"
             if rest > 0:
-                # # time.sleep(0.0001)
-                renderer.push_state(
-                    q,
-                    goal_pose,
-                    obstacle_positions,
-                    vizualization_string,
-                )
-                # account for visualization time as well
-                elapsed = time.perf_counter() - loop_start
-                rest = max(0.0, Tc - elapsed)
-                time.sleep(rest)
-                # pass
+                time.sleep(0.0001)
+                # renderer.push_state(
+                #     q,
+                #     goal_pose,
+                #     obstacle_positions,
+                #     vizualization_string,
+                # )
+                # # account for visualization time as well
+                # elapsed = time.perf_counter() - loop_start
+                # rest = max(0.0, Tc - elapsed)
+                # time.sleep(rest)
+                pass
             else:
                 print(f"TIMEOUT, elapsed:{elapsed:.4f}")
         print ("FINE CICLO")

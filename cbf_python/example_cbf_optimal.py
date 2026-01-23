@@ -99,15 +99,15 @@ def main():
     # ------------------------ CONTROLLER SETUP -----------------------------------
     Tc =2e-3
     cfg = ControllerConfig(Tc=Tc)
-    cfg.lambda_pos = 5000.0
-    cfg.lambda_vel = 2.55
-    cfg.lambda_scaling = 130
-    cfg.lambda_acc = 0.000011414228363420121
-    delta = 4.5
+    cfg.lambda_pos = 1800.0
+    cfg.lambda_vel = 0.9
+    cfg.lambda_scaling = 400#1.0e3
+    cfg.lambda_acc = 0.00011414228363420121
+    delta = 1.4636104937214924
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*4
-    cfg.gamma = 10.0    
+    cfg.gamma = 3.4210650918076775
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
 
     target_name = "ur10e_wrist_3_joint"
@@ -133,7 +133,7 @@ def main():
 
         R = quat.toRotationMatrix()
 
-        T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
+        T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
         csv_path="skeleton_vectors/skeleton_vectors_14_NORMAL_TEST1.csv"
         #csv_publishers.swap_csv(csv_in_path, csv_out_path, 7, 17)
         bridge = FakeCommandBridge(
@@ -142,6 +142,7 @@ def main():
             Tworld_to_cam=T_wc,
             # slowdown_factor=0.1,
             slowdown_factor=1.0,
+            t0= 0.0
 
         )
         rclpy.init()
@@ -360,10 +361,10 @@ def main():
 
             loop_start = time.perf_counter()
 
-
-
-            obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
-
+            if USE_BRIDGE:
+                obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
+            else:
+                obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles(elapsed=t)
             # print ("obstacle_positions:", obstacle_positions)
             # print ("type(obstacle_positions):", type(obstacle_positions))
             # print("size(obstacle_positions): ", len(obstacle_positions))
@@ -409,7 +410,7 @@ def main():
             if USE_BRIDGE and not stop_event.is_set():
                 bridge.sendCommand(q)
             if not stop_event.is_set() and LOG_DATA:
-                joint_target_publisher.publish_once(nominal_q, nominal_Dq, nominal_DDq) # pyright: ignore[reportPossiblyUnboundVariable]
+                joint_target_publisher.publish_once(t, nominal_q, nominal_Dq, nominal_DDq) # pyright: ignore[reportPossiblyUnboundVariable]
                 hmin = out["h_min"]
                 dmin = out["d_min"]
                 trj_error = out["trajectory_error"]
@@ -418,6 +419,7 @@ def main():
                 vh_min = out["vh_min"]
                 scaling = out["Dtrajectory_time"]
                 cbf_out_publisher.publish_once(
+                    t,
                     [
                         hmin,
                         dmin,
@@ -433,9 +435,9 @@ def main():
                         scaling,
                     ]
                 ) # pyright: ignore[reportPossiblyUnboundVariable]
-                human_pos_publisher.publish_once(obstacle_positions)
+                human_pos_publisher.publish_once(t, obstacle_positions)
             if not USE_BRIDGE and LOG_DATA:
-                joint_state_publisher.publish_once(q, dq, ddq)
+                joint_state_publisher.publish_once(t, q, dq, ddq)
             # ----------------------------- TIMING -------------------------------
             dist = []
             for i in range(len(cartesian_configs.values())):
@@ -465,6 +467,7 @@ def main():
                 rest = max(0.0,Tc - elapsed)
                 time.sleep(rest)
                 # pass
+                #  time.sleep(0.0001)
             else:
                 timeout_cycles+=1
             if unfeasible_string != "FEASIBLE":
