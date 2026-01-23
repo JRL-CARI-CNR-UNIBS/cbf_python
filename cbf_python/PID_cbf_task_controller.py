@@ -246,7 +246,7 @@ class UR10CBFController:
                 )
             except ValueError as err:
                 if "constraints are inconsistent" in str(err):
-                    print("[QP] infeasible – applying fallback damping.")
+                    # print("[QP] infeasible – applying fallback damping.")
                     ddq = -10.0 * self.dq
                 else:
                     raise

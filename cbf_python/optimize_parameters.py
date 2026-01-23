@@ -36,8 +36,8 @@ R = pin.utils.rotate('z', 1.9) @ pin.utils.rotate('x', 1.57)
 quat = pin.Quaternion(0.83, 0.185, 0.513, 0.12)
 quat.normalize()
 R = quat.toRotationMatrix()
-T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309])) # NO OBS
-# T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
+# T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309])) # NO OBS
+T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
 
 
 home = np.array([90, -140, 140, -90, 90, 0]) * np.pi / 180.0
@@ -108,7 +108,7 @@ for name in cartesian_configs:
 
 scaling_thresshold = 0.7
 #-------------------- EVALUATION FUNCTION --------------------
-def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=300.0):
+def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=150.0):
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
@@ -137,6 +137,7 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
         csv_path="/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv",
         Tworld_to_cam=T_wc,
         slowdown_factor=1.0,
+        t0 = 0.0,
     )
 
     ctrl.reset_state(q)
@@ -152,7 +153,7 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
 
     low_scale_count = 0
     while t < duration:
-        obs_pos, obs_vel, obs_acc = bridge.getObstacles()
+        obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=t)
         nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
         try:
             out = ctrl.step(
@@ -164,13 +165,7 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
                 nominal_DDq=nominal_DDq,
             )
             end_eff_pos = out["end_effector_pos"]
-            if (trajectory_time % T_total) < Tc:
-                if enable_lap_count:
-                    lap_count += 1
-                    prec_target = -1
-                    enable_lap_count = False
-            else:
-                enable_lap_count = True
+           
             for i in range(len(cartesian_configs.values())):
                 q_wp = list(cartesian_configs.values())[i]
                 if  np.linalg.norm(q_wp - end_eff_pos) < 2e-03 and prec_target != i:
@@ -190,6 +185,13 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
         t += Tc
         trajectory_time = out["trajectory_time"]
         trajectory_error_sum += out["trajectory_error"]
+        if (trajectory_time % T_total) < Tc:
+            if enable_lap_count:
+                lap_count += 1
+                prec_target = -1
+                enable_lap_count = False
+        else:
+            enable_lap_count = True
 
         if out["Dtrajectory_time"] < scaling_thresshold:
             low_scale_count += 1

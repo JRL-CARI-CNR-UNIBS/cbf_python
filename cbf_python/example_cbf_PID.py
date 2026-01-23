@@ -417,9 +417,7 @@ def main():
                 goal_pose, nominal_twist_goal, nominal_goal_dtwist = planner.getMotionLaw(
                 trajectory_time
                 )
-            if 0 < (trajectory_time % T_total) < Tc:
-                lap_count += 1
-                print("LAP ADDED")
+            
             if USE_BRIDGE:
                 obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
             else:
@@ -462,7 +460,9 @@ def main():
             t += Tc
             trajectory_time += Dtrajectory_time * Tc + 0.5 * DDtrajectory_time * Tc ** 2.0
             Dtrajectory_time += DDtrajectory_time * Tc
-
+            if 0 < (trajectory_time % T_total) < Tc:
+                lap_count += 1
+                print("LAP ADDED")
             if USE_BRIDGE:
                 # print(f"Sending command: {q}")
                 bridge.sendCommand(q)
