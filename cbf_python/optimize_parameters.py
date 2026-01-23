@@ -25,7 +25,7 @@ def make_objective(h_min, h_max):
 
         try:
             viol_rate, mean_scale, mean_traj_err, low_scale_rate = run_episode_with_timeout(
-                lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=2000.0,
+                lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=300.0,
                 h_min = h_min, h_max = h_max, timeout=600
             )
         except TimeoutError:

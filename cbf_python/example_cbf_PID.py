@@ -30,7 +30,7 @@ from PID_cbf_task_controller import UR10CBFController
 import csv_publishers
 import threading
 USE_BRIDGE = False
-LOG_DATA = True
+LOG_DATA = False
 log_path = "resullts/simulation/PID"
 stop_event = threading.Event()
 duration  = 150.0
