@@ -154,6 +154,7 @@ def run_episode(wn, xi, gamma, Tc=2e-3, duration=150.0):
         csv_path="/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors.csv",
         Tworld_to_cam=T_wc,
         slowdown_factor=1.0,
+        t0 = 0.0,
     )
 
     try:
@@ -182,7 +183,7 @@ def run_episode(wn, xi, gamma, Tc=2e-3, duration=150.0):
                 lap_count += 1
                 print("LAP ADDED")
 
-            obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
+            obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles(elapsed=t)
             
             # Scale if you ever implement time-scaling; currently D=1, DD=0
             twist_goal = nominal_twist_goal * Dtrajectory_time

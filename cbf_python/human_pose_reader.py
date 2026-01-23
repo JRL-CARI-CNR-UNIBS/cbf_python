@@ -46,6 +46,7 @@ class PoseReader:
             raise ValueError("CSV must have a 'time' column as its first field.")
 
         # Parse time and dt
+
         self._times: np.ndarray = df["time"].to_numpy(float)          # (N,)
         if len(self._times) < 2:
             raise ValueError("CSV must contain at least two time samples.")

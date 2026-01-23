@@ -74,11 +74,11 @@ class _CsvWriter:
                     writer = csv.writer(f)
                     writer.writerow(self.column_names)
 
-    def append_row(self, row: Sequence[Any]):
+    def append_row(self,t, row: Sequence[Any]):
         """
         Append a single row (list/tuple) to the CSV file.
         """
-        now = time()
+        now = t
         final_row = []
         final_row.append(str(now))
         final_row.extend(row)
@@ -240,7 +240,7 @@ class JointTargetCsvPublisher:
         self._writer = _CsvWriter(csv_path, column_names)
         self._bus = _get_global_bus()
 
-    def _publish_now(self, q, dq, ddq):
+    def _publish_now(self,t,  q, dq, ddq):
         """
         Synchronous implementation: immediately appends a row to the CSV.
         This is run in the background worker thread via the global bus.
@@ -267,10 +267,11 @@ class JointTargetCsvPublisher:
             row.append(q_list[i])
             row.append(dq_list[i])
             row.append(ddq_list[i])
-        self._writer.append_row(row)
+        self._writer.append_row(t, row)
 
     def publish_once(
         self,
+        t,
         q,
         dq,
         ddq,
@@ -287,7 +288,7 @@ class JointTargetCsvPublisher:
 
         This mirrors your ROS2 style: same data arguments, extra async controls.
         """
-        self._bus.submit(self._publish_now, q, dq, ddq, block=block, timeout=timeout)
+        self._bus.submit(self._publish_now, t, q, dq, ddq, block=block, timeout=timeout)
 
 
 class DoubleArrayCsvPublisher:
@@ -320,7 +321,7 @@ class DoubleArrayCsvPublisher:
         self._writer = _CsvWriter(csv_path, column_names)
         self._bus = _get_global_bus()
 
-    def _publish_now(self, array):
+    def _publish_now(self, t, array):
         """
         Synchronous implementation: immediately appends a row to the CSV.
         Runs in the background worker thread via the global bus.
@@ -330,10 +331,11 @@ class DoubleArrayCsvPublisher:
         else:
             values = _to_list(array)
 
-        self._writer.append_row(values)
+        self._writer.append_row(t, values)
 
     def publish_once(
         self,
+        t,
         array,
         *,
         block: bool = False,
@@ -342,7 +344,7 @@ class DoubleArrayCsvPublisher:
         """
         Enqueue a row [array...] to be written asynchronously.
         """
-        self._bus.submit(self._publish_now, array, block=block, timeout=timeout)
+        self._bus.submit(self._publish_now, t,array, block=block, timeout=timeout)
 
 
 class TestStartCsvPublisher:
@@ -379,7 +381,8 @@ class TestStartCsvPublisher:
         Runs on the background worker.
         """
         row = [bool(bool_value)]
-        self._writer.append_row(row)
+        t = time()
+        self._writer.append_row(t, row)
 
     def publish_once(
         self,

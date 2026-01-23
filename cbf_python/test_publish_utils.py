@@ -182,7 +182,7 @@ class JointTargetPublisher(Node):
         msg.effort   = ddq
 
         self.pub.publish(msg)
-    def publish_once(self, q, dq, ddq, *, block: bool = False, timeout: Optional[float] = None):
+    def publish_once(self, t, q, dq, ddq, *, block: bool = False, timeout: Optional[float] = None):
         """
         Public API (same signature as before, with extra optional args):
         - Non-blocking by default; drops messages if the queue is full.
@@ -236,7 +236,7 @@ class DoubleArrayPublisher(Node):
         self.pub.publish(msg)
 
 
-    def publish_once(self, array, *, block: bool = False, timeout: Optional[float] = None):
+    def publish_once(self,t, array, *, block: bool = False, timeout: Optional[float] = None):
         """
         Public API (same signature as before, with extra optional args):
         - Non-blocking by default; drops messages if the queue is full.

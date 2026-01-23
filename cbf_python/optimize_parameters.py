@@ -157,6 +157,7 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
         csv_path="/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv",
         Tworld_to_cam=T_wc,
         slowdown_factor=1.0,
+        t0=0.0
     )
 
     ctrl.reset_state(q)
@@ -172,7 +173,7 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
 
     low_scale_count = 0
     while t < duration:
-        obs_pos, obs_vel, obs_acc = bridge.getObstacles()
+        obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed = t)
         nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
         try:
             out = ctrl.step(
