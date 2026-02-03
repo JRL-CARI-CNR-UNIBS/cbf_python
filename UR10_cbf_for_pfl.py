@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from pinocchio.visualize import MeshcatVisualizer
 from visualization_daemon import VisualizationDaemon
 from sharework import loadSharework
-from optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
+# from optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
 
 from interpolator import SegmentedSE3Trap
 from joint_interpolator import SegmentedJointTrap
@@ -124,7 +124,7 @@ def main():
     viz.loadViewerModel()
     
     # Visualizziamo solo le mani (2 ostacoli)
-    for i in range(2):
+    for i in range(20):
         viz.viewer[f"obstacle_{i}"].set_object(mgeom.Sphere(0.1), mgeom.MeshLambertMaterial(color=0xFF0000))
     viz.viewer["goal"].set_object(mgeom.Box([0.2, 0.2, 0.02]), mgeom.MeshLambertMaterial(color=0x00FF00))
 
@@ -148,9 +148,11 @@ def main():
         R = quat.toRotationMatrix()
 
         T_wc = pin.SE3(R, np.array([0.108, -0.883, 2.351]))
-        csv_path = "C:/Users/Pietro/OneDrive/Desktop/cbf_python/skeleton_vectors_22.csv"
+        # csv_path = "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_22.csv"
+        csv_path = "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv"
+        # csv_path = "C:/Users/Pietro/OneDrive/Desktop/cbf_python/skeleton_vectors_22.csv"
         #csv_path = "C:/Users/Pietro/OneDrive/Desktop/cbf_python/UR10_obst.csv"
-        bridge = FakeCommandBridge(UR10E_JOINTS, csv_path=csv_path, Tworld_to_cam=T_wc, slowdown_factor=1.0)
+        bridge = FakeCommandBridge(UR10E_JOINTS, csv_path=csv_path, Tworld_to_cam=T_wc, slowdown_factor=1.0, t0=0.0)
         first_joint_position = home
 
     # Controller Initialization
@@ -252,7 +254,7 @@ def main():
 
             #     next_csv_update_time += CSV_UPDATE_TIME
             
-            obs_pos, obs_vel, obs_acc = bridge.getObstacles()
+            obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=t)
 
             
 
