@@ -81,7 +81,7 @@ class FakeCommandBridge(BaseCommandBridgeABC):
         """
         # current raw time scaled by slowdown
         elapsed = elapsed - self._t0
-        print("ELAPSED: ", elapsed)
+        # print("ELAPSED: ", elapsed)
         t_raw = self._slowdown * elapsed
 
         T = self._human_T

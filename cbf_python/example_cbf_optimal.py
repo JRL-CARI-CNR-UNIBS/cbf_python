@@ -18,6 +18,7 @@
 # • Added graceful keyboard‑interrupt handling: Ctrl‑C shuts down cleanly.
 # -----------------------------------------------------------------------------
 import os
+import csv
 import time
 
 import meshcat.geometry as mgeom
@@ -74,13 +75,13 @@ def _on_sigint_with_bridge(bridge, signum, frame):
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
-    USE_BRIDGE = True
+    USE_BRIDGE = False
     LOG_DATA = False
     log_path = "resullts/simulation/scaling"
     # rclpy.init()
 
 
-    duration = 150.0
+    duration = 15000.0
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
@@ -99,15 +100,23 @@ def main():
     # ------------------------ CONTROLLER SETUP -----------------------------------
     Tc =2e-3
     cfg = ControllerConfig(Tc=Tc)
-    cfg.lambda_pos = 1800.0
-    cfg.lambda_vel = 0.9
-    cfg.lambda_scaling = 400#1.0e3
-    cfg.lambda_acc = 0.00011414228363420121
-    delta = 1.4636104937214924
+    # PAPER PARAMETERS
+    # cfg.lambda_pos =  1083.9977322239226
+    # cfg.lambda_vel = 0.019463569108586626
+    # cfg.lambda_scaling =   88.92080107598409
+    # cfg.lambda_acc =  9.684370933446392e-08
+    # delta = 4.427823857718463
+    # cfg.gamma =   9.651586852673113
+    # H NEG PARAMETERS
+    cfg.lambda_pos =  4546.472540883941
+    cfg.lambda_vel = 0.03138841584594653
+    cfg.lambda_scaling =  10.527954810453938
+    cfg.lambda_acc =   8.946285146754514e-09
+    delta = 4.042172548316627
+    cfg.gamma =   1.3692971700147198
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*4
-    cfg.gamma = 3.4210650918076775
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
 
     target_name = "ur10e_wrist_3_joint"
@@ -133,7 +142,9 @@ def main():
 
         R = quat.toRotationMatrix()
 
-        T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
+        T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
+        # T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
+
         csv_path="skeleton_vectors/skeleton_vectors_14_NORMAL_TEST1.csv"
         #csv_publishers.swap_csv(csv_in_path, csv_out_path, 7, 17)
         bridge = FakeCommandBridge(
@@ -297,7 +308,7 @@ def main():
     planner.addWayPoint(q40)
     planner.addWayPoint(q30)
     planner.addWayPoint(q)
-    n_wp = 9
+    n_wp = 10
     configs = {
         "q": q,
         "q10": q10,
@@ -341,11 +352,9 @@ def main():
     try:
 
         t = 0.0
-
         trajectory_time = 0.0
-
-
-        timeout_cycles = cycles =0
+        timeout_cycles = cycles = 0
+        violations = sum_scale = trajectory_error_sum = 0
 
         ctrl.reset_state(q)
         # test_start = True
@@ -365,9 +374,9 @@ def main():
                 obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
             else:
                 obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles(elapsed=t)
-            # print ("obstacle_positions:", obstacle_positions)
-            # print ("type(obstacle_positions):", type(obstacle_positions))
-            # print("size(obstacle_positions): ", len(obstacle_positions))
+            print ("obstacle_positions:", obstacle_positions)
+            print ("type(obstacle_positions):", type(obstacle_positions))
+            print("size(obstacle_positions): ", obstacle_positions.shape)
             cycles += 1
 
             nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
@@ -393,9 +402,9 @@ def main():
                 if enable_lap_count:
                     lap_count += 1
                     prec_target = -1
-                    print("Trajectory time: ", trajectory_time)
-                    print(f"T_total: {T_total}")
-                    print(f"actual scaling: {Dtrajectory_time}")
+                    # print("Trajectory time: ", trajectory_time)
+                    # print(f"T_total: {T_total}")
+                    # print(f"actual scaling: {Dtrajectory_time}")
                     enable_lap_count = False
             else:
                 enable_lap_count = True
@@ -446,7 +455,7 @@ def main():
                 if  np.linalg.norm(q_wp - end_eff_pos) < 2e-03 and prec_target != i:
                     on_target_count += 1
                     prec_target = i
-                    print ("TARGET REACHED")
+                    # print ("TARGET REACHED")
                     break
             # print("Min dist: ", np.min(dist))
             if np.min(dist) > 0.0:
@@ -458,16 +467,21 @@ def main():
                 h_log.append(out["h_min"])
                 trj_error_log.append(out["trajectory_error"])
 
+            if out["h_min"] < 0 and out["vr_min"] < -1e-3:
+                violations += 1
+            sum_scale += out["Dtrajectory_time"]
+            trajectory_error_sum += out["trajectory_error"]
+
             rest = Tc - elapsed
             if rest > 0:
                 vizualization_string =f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f} ctrl_state:{unfeasible_string}"
 
-                renderer.push_state(out["q"], out["Tbt_nominal"], out["obs_pos"], vizualization_string)
-                elapsed = time.perf_counter() - loop_start
-                rest = max(0.0,Tc - elapsed)
-                time.sleep(rest)
-                # pass
-                #  time.sleep(0.0001)
+                # renderer.push_state(out["q"], out["Tbt_nominal"], out["obs_pos"], vizualization_string)
+                # elapsed = time.perf_counter() - loop_start
+                # rest = max(0.0,Tc - elapsed)
+                # time.sleep(rest)
+                pass
+                time.sleep(0.0001)
             else:
                 timeout_cycles+=1
             if unfeasible_string != "FEASIBLE":
@@ -510,13 +524,22 @@ def main():
         "computation_times": computation_times,
     }
 
+    on_target_rate = on_target_count / (n_wp * ((lap_count) + ((trajectory_time % T_total) / T_total)))
+    lap_count = lap_count + ((trajectory_time % T_total) / T_total)
+    viol_rate = violations / max(1, cycles)
+    mean_scale = sum_scale / max(1, cycles)
+    mean_trajectory_error = trajectory_error_sum / max(1, cycles)
+
+
     print(f"timeout cycles = {timeout_cycles} over {cycles}, percentage = {100.0*timeout_cycles/cycles}, average = {np.mean(computation_times)}")
     print(f"unfeasible cycles = {unfeasible_cnt} over {cycles}, percentage = {100.0*unfeasible_cnt/cycles}")
     print(f"LAP COUNT: {lap_count}")
     print("on target count: ", on_target_count)
     print(((trajectory_time % T_total)/T_total))
     print(f"WAYPOINTS REACHING PERCENTAGE: {on_target_rate*100.0} %")
-    print(f"MINIMUM DISTANCE: {np.min(min_dist)}")
+    print(f"VIOLATION RATE: {viol_rate}")
+    print(f"MEAN SCALING: {mean_scale}")
+    print(f"MEAN TRAJECTORY ERROR: {mean_trajectory_error}")
     print_stats_table(stats)
     _ = make_summary_figure(
         computation_times,
@@ -533,5 +556,53 @@ def main():
             folder_name = test_path
         generate_cartesian_trajectory(folder_name+"/")
 
+    # SAVING RESULTS
+    file_path = 'resullts/simulation_data.csv'
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+    # Intestazioni delle colonne (headers)
+    headers = [
+        "test_type",
+        "lambda_pos",
+        "lambda_vel",
+        "lambda_scaling",
+        "lambda_acc",
+        "delta",
+        "gamma",
+        'on_target_rate',
+        'lap_count',
+        'viol_rate',
+        'mean_scale',
+        'mean_trajectory_error'
+    ]
+
+    # I dati da salvare (calcolati come nel tuo esempio)
+    row_data = {
+        "test_type": "TEST_H_NEGATIVE_NORMAL",
+        "lambda_pos": cfg.lambda_pos,
+        "lambda_vel": cfg.lambda_vel,
+        "lambda_scaling": cfg.lambda_scaling,
+        "lambda_acc": cfg.lambda_acc,
+        "delta": delta,
+        "gamma": cfg.gamma,
+        'on_target_rate': on_target_rate,
+        'lap_count': lap_count,
+        'viol_rate': viol_rate,
+        'mean_scale': mean_scale,
+        'mean_trajectory_error': mean_trajectory_error
+    }
+
+    # Controllo se il file esiste già per scrivere l'header solo la prima volta
+    file_exists = os.path.isfile(file_path)
+
+    with open(file_path, mode='a', newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=headers)
+
+        # Se il file è nuovo, scriviamo l'intestazione
+        if not file_exists:
+            writer.writeheader()
+
+        # Aggiungiamo la riga con i risultati
+        writer.writerow(row_data)
 if __name__ == "__main__":
     main()

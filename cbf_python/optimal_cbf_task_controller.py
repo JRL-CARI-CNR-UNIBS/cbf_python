@@ -54,7 +54,7 @@ class BCFOptimalController:
         # frames (IDs)
         self.tool_frame_id = self.model.getFrameId(cfg.prefix + cfg.tool_frame)
         self.elbow_frame_id = self.model.getFrameId(cfg.prefix + cfg.elbow_frame)
-        self.frames_ids = [self.elbow_frame_id, self.tool_frame_id]
+        self.frames_ids = [ self.tool_frame_id]
 
         # NUMBA-prebuilt blocks
         self.FreePos, self.ForcedPos, self.FreeVel, self.ForcedVel = \

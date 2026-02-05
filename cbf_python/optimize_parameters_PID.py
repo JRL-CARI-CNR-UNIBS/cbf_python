@@ -179,9 +179,6 @@ def run_episode(wn, xi, gamma, Tc=2e-3, duration=150.0):
                 goal_pose, nominal_twist_goal, nominal_goal_dtwist = planner.getMotionLaw(
                 trajectory_time
                 )
-            if 0 < (trajectory_time % T_total) < Tc:
-                lap_count += 1
-                print("LAP ADDED")
 
             obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles(elapsed=t)
             
@@ -231,6 +228,11 @@ def run_episode(wn, xi, gamma, Tc=2e-3, duration=150.0):
             t += Tc
             trajectory_time = t
             trajectory_error_sum += out["trajectory_error"]
+
+            if 0 < (trajectory_time % T_total) < Tc:
+                lap_count += 1
+                print("LAP ADDED")
+
             time.sleep(1e-4)  # To avoid locking issues in multiprocessing
 
     except Exception as e:

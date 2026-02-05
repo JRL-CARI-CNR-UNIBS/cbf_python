@@ -168,7 +168,7 @@ def append_cbf_rows_loop(
 
 
             # FOR DEBUGGING ONLY, REMOVE htest AND dtest ABOVE LATER
-            if o == 7 and f == frames_p.shape[0]-1: # last frame, left hand keypoint
+            if o == min(7, nO-1) and f == frames_p.shape[0]-1: # last frame, left hand keypoint
                 vr_min = vr
                 vh_min = vh
                 dmin = d

@@ -33,7 +33,7 @@ USE_BRIDGE = False
 LOG_DATA = False
 log_path = "resullts/simulation/PID"
 stop_event = threading.Event()
-duration  = 150.0
+duration  = 15000.0
 def _on_sigint_with_bridge(bridge, signum, frame):
     stop_event.set()
     try:
@@ -177,9 +177,9 @@ def main():
     # Gains (same as original)
     # wn =  59.187270296013395
     # xi = 0.21842533124715255
-    gamma_default = 10 # CBF gain2.126488902627753
-    wn =  169.88226052057638
-    xi = 0.7423736875851532
+    gamma_default =  4.38 # CBF gain2.126488902627753
+    wn = 192.80068783925893
+    xi = 0.1713422938520229
     # gamma_default = 10 # CBF gain2.126488902627753
 
     Kp_tra = np.array([1.0, 1.0, 1.0]) * wn ** 2
@@ -417,9 +417,7 @@ def main():
                 goal_pose, nominal_twist_goal, nominal_goal_dtwist = planner.getMotionLaw(
                 trajectory_time
                 )
-            if 0 < (trajectory_time % T_total) < Tc:
-                lap_count += 1
-                print("LAP ADDED")
+
             if USE_BRIDGE:
                 obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
             else:
@@ -462,6 +460,10 @@ def main():
             t += Tc
             trajectory_time += Dtrajectory_time * Tc + 0.5 * DDtrajectory_time * Tc ** 2.0
             Dtrajectory_time += DDtrajectory_time * Tc
+
+            if 0 < (trajectory_time % T_total) < Tc:
+                lap_count += 1
+                print("LAP ADDED")
 
             if USE_BRIDGE:
                 # print(f"Sending command: {q}")
@@ -508,7 +510,7 @@ def main():
 
             vizualization_string = f"h = {h_min:.2f} m, err={out['trajectory_error']:.2f}"
             if rest > 0:
-                time.sleep(0.0001)
+                #
                 # renderer.push_state(
                 #     q,
                 #     goal_pose,
@@ -519,6 +521,7 @@ def main():
                 # elapsed = time.perf_counter() - loop_start
                 # rest = max(0.0, Tc - elapsed)
                 # time.sleep(rest)
+                time.sleep(0.0001)
                 pass
             else:
                 print(f"TIMEOUT, elapsed:{elapsed:.4f}")
@@ -537,7 +540,7 @@ def main():
             pub_utils.publish_test_start_once(False)
         except Exception as e:
             print(f"[shutdown] one-shot publish failed: {e}")
-    n_wp = 9
+    n_wp = 10
     print(f"LAP COUNT: {lap_count}")
     print("on target count: ", on_target_count)
     print(((trajectory_time % T_total) / T_total))
