@@ -54,7 +54,7 @@ class FakeCommandBridge(BaseCommandBridgeABC):
         # --- Simulation knobs ---
         self._slowdown = float(slowdown_factor)
         self._t0 = t0
-        print("T0: ", self._t0)
+        # print("T0: ", self._t0)
         self._on_publish = on_publish
         self.last_command: Optional[np.ndarray] = None  # for inspection/tests
         self.actual_joint_positions_ = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
@@ -81,7 +81,7 @@ class FakeCommandBridge(BaseCommandBridgeABC):
         """
         # current raw time scaled by slowdown
         elapsed = elapsed - self._t0
-        # print("ELAPSED: ", elapsed)
+        # ("ELAPSED: ", elprintapsed)
         t_raw = self._slowdown * elapsed
 
         T = self._human_T
