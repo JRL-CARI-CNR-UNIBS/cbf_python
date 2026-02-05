@@ -25,11 +25,10 @@ from typing import List
 
 import numpy as np
 import rclpy
-from builtin_interfaces.msg import Duration
 from controller_manager_msgs.srv import SwitchController
 
 # Import the class from the same directory or your installed package
-from joint_command_bridge_modified import JointStateCommandBridge
+from Command_bridge.joint_command_bridge_modified import JointStateCommandBridge
 
 
 UR10E_JOINTS: List[str] = [

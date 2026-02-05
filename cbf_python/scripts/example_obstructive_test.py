@@ -18,7 +18,6 @@
 # • Added graceful keyboard‑interrupt handling: Ctrl‑C shuts down cleanly.
 # -----------------------------------------------------------------------------
 import os
-import csv
 import time
 
 import meshcat.geometry as mgeom
@@ -27,91 +26,36 @@ import numpy as np
 import pinocchio as pin
 from pinocchio.visualize import MeshcatVisualizer
 
-from joint_interpolator import SegmentedJointTrap
-from visualization_daemon import VisualizationDaemon
+from scripts.util.joint_interpolator import SegmentedJointTrap
+from scripts.util.visualization_daemon import VisualizationDaemon
 from sharework import loadSharework
 
-from bcf_utils import make_summary_figure, print_stats_table
+from scripts.util.bcf_utils import make_summary_figure, print_stats_table
 
-import functools
+from Controller.optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
 
-from optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
-
-import math
 from datetime import datetime
-import test_publish_utils as pub_utils
 import rclpy
 
-import signal
 import threading
-import csv_publishers
-from reference_xyz_trajectory import generate_cartesian_trajectory
+from scripts.util import csv_publishers, test_publish_utils as pub_utils
+from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
+from scripts.util.test_utils import compute_ee_pose, generate_velocity
+
 
 stop_event = threading.Event()
 
-
-def generate_velocity(start_point, end_point, magnitude):
-    """
-    Calculates velocity components (vx, vy, vz) from start_point to end_point.
-
-    Args:
-        start_point: List or array [x, y, z]
-        end_point: List or array [x, y, z]
-        magnitude: The desired speed (scalar)
-
-    Returns:
-        List of [vx, vy, vz]
-    """
-    # Convert both to numpy arrays for vector math
-    A = np.array(start_point)
-    B = np.array(end_point)
-
-    # 1. Get the direction vector
-    direction = A - B
-
-    # 2. Calculate the Euclidean distance (norm)
-    distance = np.linalg.norm(direction)
-
-    # 3. Handle the case where A and B are the same point to avoid division by zero
-    if distance == 0:
-        return [0.0, 0.0, 0.0]
-
-    # 4. Normalize and scale
-    velocity = (direction / distance) * magnitude
-
-    # Return as a list
-    return velocity
-def compute_ee_pose(q, model, data, ee_frame_id):
-    """
-    Compute forward kinematics of the end-effector for joint config q.
-    Returns (position, rotation_matrix, SE3).
-    """
-    # Forward kinematics for all joints
-    pin.forwardKinematics(model, data, q)
-    # Update frame placements
-    pin.updateFramePlacements(model, data)
-
-    T_ee = data.oMf[ee_frame_id]  # SE3 from world (o) to frame (f=tool0)
-    p = T_ee.translation  # 3D position
-    R = T_ee.rotation  # 3x3 rotation matrix
-    return p, R, T_ee
-
-
-def _on_sigint_with_bridge(bridge, signum, frame):
+def _on_sigint_with_bridge():
     stop_event.set()
-    try:
-        bridge.shutdown()
-    except Exception:
-        pass
+
 
 
 # signal.signal(signal.SIGINT, _on_sigint_with_bridge)
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
-    USE_BRIDGE = False
     LOG_DATA = False
-    log_path = "resullts/simulation/scaling"
+    log_path = "../resullts/simulation/scaling"
     # rclpy.init()
 
     duration = 15000.0
@@ -154,27 +98,6 @@ def main():
     target_name = "ur10e_wrist_3_joint"
     idx = UR10E_JOINTS.index(target_name)
 
-    from fake_command_bridge import FakeCommandBridge
-    # Build camera pose from your INITI snippet
-    quat = pin.Quaternion(0.83, 0.185, 0.513, 0.12)
-    quat.normalize()
-
-    R = quat.toRotationMatrix()
-
-    T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
-    # T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
-
-    csv_path = "skeleton_vectors/skeleton_vectors_14_NORMAL_TEST1.csv"
-    # csv_publishers.swap_csv(csv_in_path, csv_out_path, 7, 17)
-    bridge = FakeCommandBridge(
-        UR10E_JOINTS,
-        csv_path=csv_path,
-        Tworld_to_cam=T_wc,
-        # slowdown_factor=0.1,
-        slowdown_factor=1.0,
-        t0=0.0
-
-    )
     rclpy.init()
     first_joint_position = home
     # ------------------------ PUBLISHER TARGETS  SETUP-----------------------------------
@@ -195,7 +118,6 @@ def main():
             column_names="time,joint_0_pos,joint_0_vel,joint_0_acceleration,joint_1_pos,joint_1_vel,joint_1_acceleration,joint_2_pos,joint_2_vel,joint_2_acceleration,joint_3_pos,joint_3_vel,joint_3_acceleration,joint_4_pos,joint_4_vel,joint_4_acceleration,joint_5_pos,joint_5_vel,joint_5_acceleration",
             joint_names=UR10E_JOINTS,
         )
-
         test_start_publisher = csv_publishers.TestStartCsvPublisher(
             csv_path=test_path + "/TEST_START.csv",
             column_names="time,val"
@@ -235,10 +157,8 @@ def main():
     viz.viewer["goal"].set_object(
         mgeom.Box([side, side, side / 10]), mgeom.MeshLambertMaterial(color=0x00FF00)
     )
-
     # HUD text node
     renderer = VisualizationDaemon(viz)  # default 60 Hz
-
     # --------------------------- CONTROL INITIALISATION --------------------------
     q = first_joint_position.copy()
 
@@ -298,7 +218,6 @@ def main():
 
     lap_count = 0
     on_target_count = 0
-    Dtrajectory_time = 1.0
     # ------------------------------ MAIN LOOP -------------------- ----------------
     prec_target = -1
     enable_lap_count = True
@@ -319,19 +238,11 @@ def main():
         obstacle_accelerations = np.zeros(3)
         ee_pos = np.zeros(3)
         count_move = 0
+        Dtrajectory_time = 1.0
+        low_scale_count = 0
+        scaling_threshold = 0.5
         while t < duration and not stop_event.is_set():
-
-            h_min = np.inf
-
             loop_start = time.perf_counter()
-
-            # if USE_BRIDGE:
-            #     obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
-            # else:
-            #     obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles(elapsed=t)
-            # print ("obstacle_positions:", obstacle_positions)
-            # print ("type(obstacle_positions):", type(obstacle_positions))
-            # print("size(obstacle_positions): ", len(obstacle_positions))
             if (cycles % 500 == 0):
                 q_temp, dq_temp, ddq_temp =  planner.getMotionLaw((trajectory_time+2) % T_total)
                 obstacle_positions,a,b = compute_ee_pose(q_temp, model, data, tool_frame_id)
@@ -350,9 +261,9 @@ def main():
                 obstacle_positions[0][1] += 0.01
                 count_move += 1
 
-                print(obstacle_positions)
-                print(f"TYPE OF OBSTACLE POSITIONS: {type(obstacle_positions)}")
-                print(f"SIZE OF OBS POSITIONS: {obstacle_positions.shape}")
+                # print(obstacle_positions)
+                # print(f"TYPE OF OBSTACLE POSITIONS: {type(obstacle_positions)}")
+                # print(f"SIZE OF OBS POSITIONS: {obstacle_positions.shape}")
             cycles += 1
 
             nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
@@ -379,9 +290,6 @@ def main():
                 if enable_lap_count:
                     lap_count += 1
                     prec_target = -1
-                    # print("Trajectory time: ", trajectory_time)
-                    # print(f"T_total: {T_total}")
-                    # print(f"actual scaling: {Dtrajectory_time}")
                     enable_lap_count = False
             else:
                 enable_lap_count = True
@@ -393,11 +301,8 @@ def main():
             t += Tc
             end_eff_pos = out["end_effector_pos"]
 
-            if USE_BRIDGE and not stop_event.is_set():
-                bridge.sendCommand(q)
             if not stop_event.is_set() and LOG_DATA:
-                joint_target_publisher.publish_once(t, nominal_q, nominal_Dq,
-                                                    nominal_DDq)  # pyright: ignore[reportPossiblyUnboundVariable]
+                joint_target_publisher.publish_once(t, nominal_q, nominal_Dq, nominal_DDq)  # pyright: ignore[reportPossiblyUnboundVariable]
                 hmin = out["h_min"]
                 dmin = out["d_min"]
                 trj_error = out["trajectory_error"]
@@ -423,7 +328,7 @@ def main():
                     ]
                 )  # pyright: ignore[reportPossiblyUnboundVariable]
                 human_pos_publisher.publish_once(t, obstacle_positions)
-            if not USE_BRIDGE and LOG_DATA:
+            if LOG_DATA:
                 joint_state_publisher.publish_once(t, q, dq, ddq)
             # ----------------------------- TIMING -------------------------------
             dist = []
@@ -433,9 +338,7 @@ def main():
                 if np.linalg.norm(q_wp - end_eff_pos) < 2e-03 and prec_target != i:
                     on_target_count += 1
                     prec_target = i
-                    # print ("TARGET REACHED")
                     break
-            # print("Min dist: ", np.min(dist))
             if np.min(dist) > 0.0:
                 min_dist.append(np.min(dist))
             elapsed = time.perf_counter() - loop_start
@@ -449,6 +352,9 @@ def main():
                 violations += 1
             sum_scale += out["Dtrajectory_time"]
             trajectory_error_sum += out["trajectory_error"]
+
+            if out["Dtrajectory_time"] < scaling_threshold:
+                low_scale_count += 1
 
             rest = Tc - elapsed
             if rest > 0:
@@ -472,41 +378,30 @@ def main():
         stop_event.set()
     #
     finally:
-        # bridge.shutdown()
-        # time.sleep(0.1)
-        # # 1) stop components that may be spinning their own executors (e.g., the bridge)
-        # try:
-        #     if 'bridge' in locals() and hasattr(bridge, 'shutdown'):
-        #         bridge.shutdown()
-        # except Exception:
-        #     print("Error during bridge shutdown")
-        # print(286)
-
         try:
             pub_utils.publish_test_start_once(False)
         except Exception as e:
             print(f"[shutdown] one-shot publish failed: {e}")
-    # Call with your
+
     computation_times = np.array(ct)
     scaling_log = np.array(scaling_log)
     h_log = np.array(h_log)
     trj_error_log = np.array(trj_error_log)
     print(f"LAP COUNT: {lap_count}")
 
-    on_target_rate = on_target_count / (n_wp * ((lap_count) + ((trajectory_time % T_total) / T_total)))
-    lap_count = lap_count + ((trajectory_time % T_total) / T_total)
+
     print(f"average scaling = {np.mean(scaling_log)}")
 
     # computation_times_others=computation_times-(computation_times_planner+computation_times_pin+computation_times_qp+computation_times_ssm)
     stats = {
         "computation_times": computation_times,
     }
-
-    on_target_rate = on_target_count / (n_wp * ((lap_count) + ((trajectory_time % T_total) / T_total)))
     lap_count = lap_count + ((trajectory_time % T_total) / T_total)
+    on_target_rate = on_target_count / (n_wp * ((lap_count) + ((trajectory_time % T_total) / T_total)))
     viol_rate = violations / max(1, cycles)
     mean_scale = sum_scale / max(1, cycles)
     mean_trajectory_error = trajectory_error_sum / max(1, cycles)
+    low_scale_rate = low_scale_count / max(1, cycles)
 
     print(
         f"timeout cycles = {timeout_cycles} over {cycles}, percentage = {100.0 * timeout_cycles / cycles}, average = {np.mean(computation_times)}")
@@ -518,6 +413,7 @@ def main():
     print(f"VIOLATION RATE: {viol_rate}")
     print(f"MEAN SCALING: {mean_scale}")
     print(f"MEAN TRAJECTORY ERROR: {mean_trajectory_error}")
+    print(f"LOW SCALE RATE: {low_scale_rate}")
     print_stats_table(stats)
     _ = make_summary_figure(
         computation_times,
@@ -528,10 +424,7 @@ def main():
     folder_name = ""
     # CREATING CARTESIAN REFERENCE CSV FILE
     if LOG_DATA:
-        if USE_BRIDGE:
-            folder_name = ""  # UPDATE WITH THE PATH THE TRAJECTORY LOGGER NODE USES
-        else:
-            folder_name = test_path
+        folder_name = test_path
         generate_cartesian_trajectory(folder_name + "/")
     #
     # # SAVING RESULTS
@@ -551,7 +444,8 @@ def main():
     #     'lap_count',
     #     'viol_rate',
     #     'mean_scale',
-    #     'mean_trajectory_error'
+    #     'mean_trajectory_error',
+    #     'low_scale_rate'
     # ]
     #
     # # I dati da salvare (calcolati come nel tuo esempio)
@@ -568,6 +462,7 @@ def main():
     #     'viol_rate': viol_rate,
     #     'mean_scale': mean_scale,
     #     'mean_trajectory_error': mean_trajectory_error
+    #     'low_scale_rate' : low_scale_rate
     # }
     #
     # # Controllo se il file esiste già per scrivere l'header solo la prima volta

@@ -1,12 +1,12 @@
 import pinocchio as pin
 import numpy as np
 
-from cbf_numba_lib import (
-    assemble_qp_PID_problem, compute_q_ref_from_goal
+from Controller.Numba_scripts.cbf_numba_lib import (
+    assemble_qp_PID_problem
 )
 import quadprog
 
-from numba_kernels import build_free_forced_one_step
+from Controller.Numba_scripts.numba_kernels import build_free_forced_one_step
 
 Tr = 0.5
 a_s = 4.5

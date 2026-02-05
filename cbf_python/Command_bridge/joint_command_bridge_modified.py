@@ -6,7 +6,6 @@ from typing import Iterable, List, Optional, Dict, Tuple
 import numpy as np
 import time
 from functools import partial
-import math
 
 import rclpy
 from rclpy.node import Node
@@ -24,7 +23,7 @@ from builtin_interfaces.msg import Duration as MsgDuration
 from zed_skeleton_kinematics_msgs.msg import ObjectsKinematicsStamped
 
 # NEW: import the abstract, ROS-agnostic base
-from base_command_bridge_abc import BaseCommandBridgeABC
+from Command_bridge.base_command_bridge_abc import BaseCommandBridgeABC
 
 
 class JointStateCommandBridge(Node, BaseCommandBridgeABC):

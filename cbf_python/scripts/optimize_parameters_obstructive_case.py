@@ -1,65 +1,42 @@
 import optuna
 import optunahub
 import numpy as np
-import math
 import time
 import pinocchio as pin
-from joint_interpolator import SegmentedJointTrap
+from scripts.util.joint_interpolator import SegmentedJointTrap
 from sharework import loadSharework
-from fake_command_bridge import FakeCommandBridge
-from optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
-from plotly.io import show
+from Command_bridge.fake_command_bridge import FakeCommandBridge
+from Controller.optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
 from multiprocessing import Process, Queue
 from queue import Empty
+
+from scripts.util.test_utils import compute_ee_pose, generate_velocity
+
 # Database connection (for dashboard)
 POSTGRES_URL = "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
 
-def make_objective(h_min, h_max):
+def make_objective():
     def objective(trial):
-        lambda_pos = trial.suggest_float("lambda_pos", 5e2, 5e4, log=True)
+        lambda_pos = trial.suggest_float("lambda_pos", 1, 1e6, log=True)
         lambda_vel = trial.suggest_float("lambda_vel", 1e-3, 1e3, log=True)
-        lambda_scaling = trial.suggest_float("lambda_scaling", 10, 1e4, log=True)
-        lambda_acc = trial.suggest_float("lambda_acc", 1e-14, 1e-2, log=True)
-        gamma = trial.suggest_float("gamma", 1, 10, log=True)
-        delta = trial.suggest_float("delta_deg", 0.1, 5, log=True)
+        lambda_scaling = trial.suggest_float("lambda_scaling", 1e-02, 1e4, log=True)
+        lambda_acc = trial.suggest_float("lambda_acc", 1e-14, 1, log=True)
+        gamma = trial.suggest_float("gamma", 1, 20, log=True)
+        delta = trial.suggest_float("delta_deg", 0.1, 50, log=True)
 
         try:
-            viol_rate, mean_scale, mean_traj_err, low_scale_rate = run_episode_with_timeout(
-                lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=500.0,
-                h_min = h_min, h_max = h_max, timeout=600
+            viol_rate, mean_scale, mean_traj_err, low_scale_rate, lap_count = run_episode_with_timeout(
+                lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=1000.0,
+                timeout=600
             )
         except TimeoutError:
             # For directions: [minimize, maximize, minimize, minimize]
-            return (1e9, -1e9, 1e9, 1e9)
+            return (1e9, -1e9, 1e9, 1e9,0.0)
 
-        return (viol_rate, mean_scale, mean_traj_err, low_scale_rate)
+        return (viol_rate, mean_scale, mean_traj_err, low_scale_rate, lap_count)
     return objective
 
 # ----------------- STATIC INITIALIZATION (only once) -----------------
-def compute_ee_pose(q, model, data, ee_frame_id):
-    """
-    Compute forward kinematics of the end-effector for joint config q.
-    Returns (position, rotation_matrix, SE3).
-    """
-    # Forward kinematics for all joints
-    pin.forwardKinematics(model, data, q)
-    # Update frame placements
-    pin.updateFramePlacements(model, data)
-
-    T_ee = data.oMf[ee_frame_id]  # SE3 from world (o) to frame (f=tool0)
-    p = T_ee.translation          # 3D position
-    R = T_ee.rotation             # 3x3 rotation matrix
-    return p, R, T_ee
-
-
-# Camera and bridge
-# Build camera pose from your INITI snippet
-quat = pin.Quaternion(0.83, 0.185, 0.513, 0.12)
-quat.normalize()
-R = quat.toRotationMatrix()
-
-T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
-
 home = np.array([90, -140, 140, -90, 90, 0]) * np.pi / 180.0
 UR10E_JOINTS = [
     "ur10e_shoulder_pan_joint",
@@ -86,12 +63,8 @@ planner = SegmentedJointTrap(Dq_max=gen_cfg.Dq_max*0.25, DDq_max=gen_cfg.DDq_max
 # CONFIG 1
 planner.addWayPoint(q)
 planner.addWayPoint(q10)
-planner.addWayPoint(q20)
-planner.addWayPoint(q10)
 planner.addWayPoint(q22)
 planner.addWayPoint(q25)
-planner.addWayPoint(q30)
-planner.addWayPoint(q40)
 planner.addWayPoint(q30)
 planner.addWayPoint(q)
 
@@ -128,7 +101,7 @@ for name in cartesian_configs:
 
 scaling_threshold = 0.5  
 #-------------------- EVALUATION FUNCTION --------------------
-def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=500.0, h_min = -1000.0, h_max = 1000.0):
+def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=500.0):
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
@@ -145,22 +118,8 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
     cfg.gamma = gamma
 
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
-   
-    # quat = pin.Quaternion(0.814, 0.178, 0.535, 0.137)
-    # quat.normalize()
-    # R = quat.toRotationMatrix()
-
-    # T_wc = pin.SE3(R, np.array([0.108, -0.883, 2.351]))
-
-    bridge = FakeCommandBridge(
-        UR10E_JOINTS,
-        csv_path="/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv",
-        Tworld_to_cam=T_wc,
-        slowdown_factor=1.0,
-        t0=0.0
-    )
-
     ctrl.reset_state(q)
+
     t = 0.0
     trajectory_time = 0.0
     violations, nsteps = 0, 0
@@ -170,16 +129,39 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
     on_target_count = 0
     prec_target = -1
     enable_lap_count = True
-
     low_scale_count = 0
+    obstacle_positions = np.zeros(3)
+    obstacle_velocities = np.zeros(3)
+    obstacle_accelerations = np.zeros(3)
+    end_eff_pos = np.zeros(3)
+    count_move = 0
+    Dtrajectory_time = 1.0
+
     while t < duration:
-        obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed = t)
+
+        if (nsteps % 500 == 0):
+            q_temp, dq_temp, ddq_temp = planner.getMotionLaw((trajectory_time + 2) % T_total)
+            obstacle_positions, a, b = compute_ee_pose(q_temp, model, data, tool_frame_id)
+            obstacle_positions = obstacle_positions.tolist()
+            obstacle_positions[0] = obstacle_positions[0] + 0.0
+            obstacle_positions[1] = obstacle_positions[1] + 0.0
+            obstacle_positions[2] = obstacle_positions[2] - 0.2
+            obstacle_positions = np.array(obstacle_positions)
+            obstacle_positions = obstacle_positions.reshape(1, 3)
+            obstacle_velocities = generate_velocity(end_eff_pos, obstacle_positions, 0.05)
+            obstacle_velocities = obstacle_velocities.reshape(1, 3)
+            obstacle_accelerations = obstacle_accelerations.reshape(1, 3)
+            count_move = 0
+        if Dtrajectory_time < 0.05 and count_move < 40:
+            obstacle_positions[0][0] += 0.01
+            obstacle_positions[0][1] += 0.01
+            count_move += 1
         nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
         try:
             out = ctrl.step(
-                obs_pos=obs_pos,
-                obs_vel=obs_vel,
-                obs_acc=obs_acc,
+                obs_pos=obstacle_positions,
+                obs_vel=obstacle_velocities,
+                obs_acc=obstacle_accelerations,
                 nominal_q=nominal_q,
                 nominal_Dq=nominal_Dq,
                 nominal_DDq=nominal_DDq,
@@ -204,28 +186,25 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
             return 1.0, -1.0, 1000.0, 1.0
         t += Tc
         
-        if h_min <= out["h_min"] <= h_max:
-            if out["h_min"] < 0 and out["vr_min"] < -1e-3:
-                violations += 1
-            sum_scale += out["Dtrajectory_time"]
-            nsteps += 1
-            trajectory_error_sum += out["trajectory_error"]
-            if out["Dtrajectory_time"] < scaling_threshold:
-                low_scale_count += 1
+        if out["h_min"] < 0 and out["vr_min"] < -1e-3:
+            violations += 1
+        sum_scale += out["Dtrajectory_time"]
+        nsteps += 1
+        trajectory_error_sum += out["trajectory_error"]
+        if out["Dtrajectory_time"] < scaling_threshold:
+            low_scale_count += 1
         trajectory_time = out["trajectory_time"]
-        
 
-       
         time.sleep(1e-4)  # To avoid locking issues in multiprocessing
 
 
-    #on_target_rate = on_target_count/(n_wp * ((lap_count)+ ((trajectory_time % T_total)/T_total)))
+    # on_target_rate = on_target_count/(n_wp * ((lap_count)+ ((trajectory_time % T_total)/T_total)))
     lap_count = lap_count + ((trajectory_time % T_total)/T_total)
     viol_rate = violations / max(1, nsteps)
     mean_scale = sum_scale / max(1, nsteps)
     mean_trajectory_error = trajectory_error_sum / max(1, nsteps)
     low_scale_rate = low_scale_count / max(1, nsteps)
-    return viol_rate, mean_scale, mean_trajectory_error, low_scale_rate
+    return viol_rate, mean_scale, mean_trajectory_error, low_scale_rate, lap_count
 
 
 def _run_episode_worker(args, kwargs, q):
@@ -264,9 +243,6 @@ def run_episode_with_timeout(*args, timeout=600, **kwargs):
         raise RuntimeError(f"run_episode failed in worker: {payload}")
 
 # -------------------- OPTUNA OPTIMIZATION --------------------
-
-
-
 storage = optuna.storages.RDBStorage(
     url=POSTGRES_URL,
     engine_kwargs={
@@ -279,23 +255,15 @@ storage = optuna.storages.RDBStorage(
     # failed_trial_callback=RetryFailedTrialCallback(max_retry=1),
 )
 
-h_dic = {
-    "h_negative": [-1000.0, 0.0],
-    "h_q1": [0.0, 0.25],
-    "h_q2": [0.25, 0.5],
-    "h_q3": [0.5, 0.75],
-    "h_positive": [0.75, 1000.0],
-}
-for h_key, (h_min, h_max) in h_dic.items():
 
-    study = optuna.create_study(
-        directions=["minimize", "maximize","minimize", "minimize"],
-        sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
-        storage=storage,
-        #load_if_exists=True,
-        study_name=f"dynamic_params_{h_key}_{time.strftime('%Y%m%d-%H%M%S')}",
-    )
-    study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "low_scale_rate"])
-    study.optimize(make_objective(h_min, h_max), n_trials=2500, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
+study = optuna.create_study(
+    directions=["minimize", "maximize","minimize", "minimize", "maximize"],
+    sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
+    storage=storage,
+    #load_if_exists=True,
+    study_name=f"dynamic_params_obstructed case_{time.strftime('%Y%m%d-%H%M%S')}",
+)
+study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "low_scale_rate", "lap count"])
+study.optimize(make_objective(), n_trials=5000, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
 
-    # print (run_episode(1e3,1e3,1e3,1e-3,5,1))
+# print (run_episode(1e3,1e3,1e3,1e-3,5,1))

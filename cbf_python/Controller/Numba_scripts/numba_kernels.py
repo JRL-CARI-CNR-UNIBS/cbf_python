@@ -116,7 +116,7 @@ def fill_acc_rows(A, c, row, nq, DDq_max):
 # def compute_h_and_constraints_numba(p_bt, op, v_lin, ov, Tr, a_s, C, oa, atol, Jlin, dJlin, dq, gamma):
 #     return h, row_vec(=shape (nq,)), bound
 # try:
-from ssm_cbf_acc import compute_h_and_constraints_numba  # ensure this is @njit
+from Controller.Numba_scripts.ssm_cbf_acc import compute_h_and_constraints_numba  # ensure this is @njit
 #     #HAS_CBF = True
 #     print("IMPORTED")
 # except Exception:

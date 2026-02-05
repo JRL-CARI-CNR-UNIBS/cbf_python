@@ -27,25 +27,24 @@ import numpy as np
 import pinocchio as pin
 from pinocchio.visualize import MeshcatVisualizer
 
-from joint_interpolator import SegmentedJointTrap
-from visualization_daemon import VisualizationDaemon
+from scripts.util.joint_interpolator import SegmentedJointTrap
+from scripts.util.visualization_daemon import VisualizationDaemon
 from sharework import loadSharework
 
-from bcf_utils import make_summary_figure, print_stats_table
+from scripts.util.bcf_utils import make_summary_figure, print_stats_table
 
 import functools
 
-from optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
+from Controller.optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
 
 import math
 from datetime import datetime
-import test_publish_utils as pub_utils
 import rclpy
 
 import signal
 import threading
-import csv_publishers
-from reference_xyz_trajectory import generate_cartesian_trajectory
+from scripts.util import csv_publishers, test_publish_utils as pub_utils
+from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
 
 stop_event = threading.Event()
 
@@ -77,7 +76,7 @@ def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
     USE_BRIDGE = False
     LOG_DATA = False
-    log_path = "resullts/simulation/scaling"
+    log_path = "../resullts/simulation/scaling"
     # rclpy.init()
 
 
@@ -122,7 +121,7 @@ def main():
     target_name = "ur10e_wrist_3_joint"
     idx = UR10E_JOINTS.index(target_name)
     if USE_BRIDGE:
-        from joint_command_bridge_modified import JointStateCommandBridge
+        from Command_bridge.joint_command_bridge_modified import JointStateCommandBridge
         bridge = JointStateCommandBridge(
             ordered_joint_names=UR10E_JOINTS,
             threshold=1.1)  # radians (or native units)
@@ -135,7 +134,7 @@ def main():
         first_joint_position = bridge.getPositions()
         bridge.switch_to_forward_position_controller_service()
     else:
-        from fake_command_bridge import FakeCommandBridge
+        from Command_bridge.fake_command_bridge import FakeCommandBridge
         # Build camera pose from your INITI snippet
         quat = pin.Quaternion(0.83, 0.185, 0.513, 0.12)
         quat.normalize()
@@ -145,7 +144,7 @@ def main():
         T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
         # T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
 
-        csv_path="skeleton_vectors/skeleton_vectors_14_NORMAL_TEST1.csv"
+        csv_path= "../skeleton_vectors/skeleton_vectors_14_NORMAL_TEST1.csv"
         #csv_publishers.swap_csv(csv_in_path, csv_out_path, 7, 17)
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
@@ -374,9 +373,9 @@ def main():
                 obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
             else:
                 obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles(elapsed=t)
-            print ("obstacle_positions:", obstacle_positions)
-            print ("type(obstacle_positions):", type(obstacle_positions))
-            print("size(obstacle_positions): ", obstacle_positions.shape)
+            # print ("obstacle_positions:", obstacle_positions)
+            # print ("type(obstacle_positions):", type(obstacle_positions))
+            # print("size(obstacle_positions): ", obstacle_positions.shape)
             cycles += 1
 
             nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
@@ -557,7 +556,7 @@ def main():
         generate_cartesian_trajectory(folder_name+"/")
 
     # SAVING RESULTS
-    file_path = 'resullts/simulation_data.csv'
+    file_path = '../resullts/simulation_data.csv'
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
     # Intestazioni delle colonne (headers)

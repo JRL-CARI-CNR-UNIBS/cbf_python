@@ -4,8 +4,9 @@ import numpy as np
 import quadprog
 import pinocchio as pin
 
-from numba_kernels import build_free_forced_one_step, assemble_qp_inplace
-import compute_velocity_scaling_for_human_proximity as ext_scaling
+from Controller.Numba_scripts.numba_kernels import build_free_forced_one_step, assemble_qp_inplace
+from Controller import compute_velocity_scaling_for_human_proximity as ext_scaling
+
 
 @dataclass
 class ControllerConfig:

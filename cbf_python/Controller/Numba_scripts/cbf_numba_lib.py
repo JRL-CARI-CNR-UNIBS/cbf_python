@@ -5,7 +5,7 @@
 import numpy as np
 from numba import njit
 import pinocchio as pin
-from numba_kernels import fill_vel_rows, fill_acc_rows, append_cbf_rows_loop
+from Controller.Numba_scripts.numba_kernels import fill_vel_rows, fill_acc_rows, append_cbf_rows_loop
 
 # Default constants (kept here so JITted functions have literal defaults)
 C_DEFAULT = 0.25   # [m]
