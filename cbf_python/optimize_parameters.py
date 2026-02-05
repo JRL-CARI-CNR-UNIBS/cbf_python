@@ -25,7 +25,7 @@ def make_objective(h_min, h_max):
 
         try:
             viol_rate, mean_scale, mean_traj_err, low_scale_rate = run_episode_with_timeout(
-                lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=300.0,
+                lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=500.0,
                 h_min = h_min, h_max = h_max, timeout=600
             )
         except TimeoutError:
@@ -128,7 +128,7 @@ for name in cartesian_configs:
 
 scaling_threshold = 0.5  
 #-------------------- EVALUATION FUNCTION --------------------
-def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=2000.0, h_min = -1000.0, h_max = 1000.0):
+def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=500.0, h_min = -1000.0, h_max = 1000.0):
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
@@ -201,7 +201,7 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
         except Exception:
             # Penalize infeasible or divergent QP
             print("QP failed")
-            return 1.0, -1.0, 1000.0
+            return 1.0, -1.0, 1000.0, 1.0
         t += Tc
         
         if h_min <= out["h_min"] <= h_max:
