@@ -18,7 +18,17 @@ In un terminale (ctrl+t)
 ros2 launch zed_skeleton_kinematics zed_skeleton_kinematics.launch.py
 
 
+per scheletonizzazione e registrazione:
+ros2 launch zed_skeleton_kinematics zed_skeleton_kinematics_logging.launch.py fcutoff_arg:=35.0 output_csv_arg:='/home/nyquist/projects/tesisti/agnelli/cbf_python/skeletons_csv' enable_skeleton_logging_arg:=true
+
+per visualizzazione vettori cinematica: 
+python skeleton_vectors_viz_node.py
 ---------------------
 cd /home/nyquist/projects/tesisti/agnelli
 source agnelli/bin/activate
 
+
+-------------------
+In Rviz bisogna fornire il topic: 
+/zed/zed_node/body_trk/skeletons_kinematics/vel_markers 
+sotto la voce ?    
