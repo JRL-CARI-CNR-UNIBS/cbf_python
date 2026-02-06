@@ -182,7 +182,7 @@ def main():
     Kp_rot = np.array([1, 1, 1]) * wn ** 2
     Kd_rot = np.array([1, 1, 1]) * 2.0 * xi * wn
     
-    planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=1.2, alin_max=1.8, aang_max=2.0)
+    planner_cart = SegmentedSE3Trap(vlin_max=0.06, vang_max=0.12, alin_max=1.8, aang_max=2.0)
     
     q_start = first_joint_position.copy()
     q10 = np.array([31.0, -78.0, 115.0, -127.0, 86.0, -32.0]) * np.pi / 180.0
@@ -226,7 +226,7 @@ def main():
     h_prev = 100.0
     h_min = 100.0
     
-    v_max = 20;
+    v_max = 0.3;
     v_pfl = 0.25;
     
     print(f"Starting Simulation. Duration: 150s.")
@@ -253,9 +253,12 @@ def main():
             #     obs_vel = [new_all_vel[i] for i in hand_indices if i < len(new_all_vel)]
 
             #     next_csv_update_time += CSV_UPDATE_TIME
-            
-            obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=t)
+            if USE_BRIDGE:
+                obs_pos, obs_vel, obs_acc = bridge.getObstacles()
+            else:
+                obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=t)
 
+            
             
 
             # --- Variables for Logging ---
