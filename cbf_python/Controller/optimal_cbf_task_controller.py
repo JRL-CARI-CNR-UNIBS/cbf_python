@@ -204,7 +204,9 @@ class BCFOptimalController:
         if row < self.n_constraints:
             self.A[row:, :].fill(0.0)
             self.c[row:].fill(-1.0)
+        self.update_parameters(h_min)
 
+        # print (f"UPDATED LAMBDAS: POS: {self.cfg.lambda_pos}, VEL: {self.cfg.lambda_vel}, SCALING: {self.cfg.lambda_scaling}, ACC: {self.cfg.lambda_acc}, GAMMA: {self.cfg.gamma}, DELTA_Q_MAX: {self.cfg.delta_q_max}")
         # Dense QP matrices/vectors
         P = (cfg.lambda_pos * self.P_pos +
              cfg.lambda_vel * self.P_vel +
@@ -272,7 +274,6 @@ class BCFOptimalController:
             count_dev = 0
             for i in range(nq):
                 if expected_trj_err[i] <= cfg.delta_q_max[i]:
-                    #print("QUIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII")
                     self.delta_q_max[i] = np.copy(cfg.delta_q_max[i])
                     count_dev += 1
                     # print(f"COUNT_DEV: {count_dev}, i: {i}")
@@ -303,3 +304,6 @@ class BCFOptimalController:
             "DDtrajectory_time": float(self.DDtrajectory_time),
             "unfeasible_cnt": self.unfeasible_cnt,
         }
+
+    def update_parameters(self, h):
+        pass
