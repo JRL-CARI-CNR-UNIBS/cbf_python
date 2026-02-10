@@ -25,42 +25,42 @@ def make_objective():
         cfg.lambda_0_acc = trial.suggest_float("lambda_0_acc", 1e-15, 1e-4, log=True)
         cfg.lambda_0_scaling = trial.suggest_float("lambda_0_scaling", 10, 1e5, log=True)
         cfg.gamma_0 = trial.suggest_float("gamma_0", 0.1, 20, log=True)
-        cfg.delta_0 = trial.suggest_float("delta_0_deg", 0.1, 20, log=True)
+        # cfg.delta_0 = trial.suggest_float("delta_0_deg", 0.1, 20, log=True)
 
         cfg.lambda_f_pos = trial.suggest_float("lambda_f_pos", 100, 1e6, log=True)
         cfg.lambda_f_vel = trial.suggest_float("lambda_f_vel", 1, 1e4, log=True)
         cfg.lambda_f_acc = trial.suggest_float("lambda_f_acc", 1e-15, 1e-4, log=True)
         cfg.lambda_f_scaling = trial.suggest_float("lambda_f_scaling", 10, 1e5, log=True)
         cfg.gamma_f = trial.suggest_float("gamma_f", 0.1, 20, log=True)
-        cfg.delta_f = trial.suggest_float("delta_f_deg", 0.1, 20, log=True)
+        # cfg.delta_f = trial.suggest_float("delta_f_deg", 0.1, 20, log=True)
 
         cfg.n_pos = trial.suggest_float("n_pos", 1e-9, 1, log=True)
         cfg.n_vel= trial.suggest_float("n_vel", 1e-9, 1, log=True)
         cfg.n_acc = trial.suggest_float("n_acc", 1e-9, 1, log=True)
         cfg.n_scaling = trial.suggest_float("n_scaling", 1e-9, 1, log=True)
         cfg.n_gamma = trial.suggest_float("n_gamma", 1e-9, 1, log=True)
-        cfg.n_delta = trial.suggest_float("n_delta", 1e-9, 1, log=True)
+        # cfg.n_delta = trial.suggest_float("n_delta", 1e-9, 1, log=True)
         
         cfg.m_pos = trial.suggest_float("m_pos", 1, 10, log=True)
         cfg.m_vel = trial.suggest_float("m_vel", 1, 10, log=True)
         cfg.m_acc = trial.suggest_float("m_acc", 1, 10, log=True)
         cfg.m_scaling = trial.suggest_float("m_scaling", 1, 10, log=True)
         cfg.m_gamma = trial.suggest_float("m_gamma", 1, 10, log=True)
-        cfg.m_delta = trial.suggest_float("m_delta", 1, 10, log=True)
+        # cfg.m_delta = trial.suggest_float("m_delta", 1, 10, log=True)
 
         cfg.w_pos = trial.suggest_float("w_pos", 1e-9, 1, log = True)
         cfg.w_vel = trial.suggest_float("w_vel", 1e-9, 1, log = True)
         cfg.w_acc = trial.suggest_float("w_acc", 1e-9, 1, log = True)
         cfg.w_scaling = trial.suggest_float("w_scaling", 1e-9, 1, log = True)
         cfg.w_gamma = trial.suggest_float("w_gamma", 1e-9, 1, log = True)
-        cfg.w_delta = trial.suggest_float("w_delta", 1e-9, 1, log = True)
+        # cfg.w_delta = trial.suggest_float("w_delta", 1e-9, 1, log = True)
 
         cfg.lambda_pos = cfg.lambda_0_pos
         cfg.lambda_vel = cfg.lambda_0_vel
         cfg.lambda_scaling = cfg.lambda_0_scaling
         cfg.lambda_acc = cfg.lambda_0_acc
         cfg.gamma = cfg.gamma_0
-        delta = cfg.delta_0
+        delta = 4.5
 
         cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)
         cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*2
@@ -323,8 +323,8 @@ study.optimize(make_objective(), n_trials=5000, show_progress_bar=True, n_jobs=3
     # print (run_episode(1e3,1e3,1e3,1e-3,5,1))
 
 
-'''
-TRIAL BELLI
+''' 
+TRIAL BELLI delta variabile
 
 4999
 4780

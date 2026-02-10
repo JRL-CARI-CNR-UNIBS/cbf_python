@@ -75,9 +75,9 @@ class PolynomialOptimalController(BCFOptimalController):
         self.cfg.gamma = compute_generic_lambda(h, self.cfg.h_t, self.cfg.gamma_0,
                                                      self.cfg.gamma_f, self.cfg.n_gamma,
                                                      self.cfg.m_gamma, self.cfg.w_gamma)
-        new_delta = compute_generic_lambda(h, self.cfg.h_t, self.cfg.delta_0,
-                                                     self.cfg.delta_f, self.cfg.n_delta,
-                                                     self.cfg.m_delta, self.cfg.w_delta)
-        self.cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * new_delta)
-        self.cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * new_delta)*2
-        self.cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * new_delta)*4
+        # new_delta = compute_generic_lambda(h, self.cfg.h_t, self.cfg.delta_0,
+        #                                              self.cfg.delta_f, self.cfg.n_delta,
+        #                                              self.cfg.m_delta, self.cfg.w_delta)
+        # self.cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * new_delta)
+        # self.cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * new_delta)*2
+        # self.cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * new_delta)*4

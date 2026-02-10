@@ -22,7 +22,7 @@ def make_objective():
         lambda_scaling = trial.suggest_float("lambda_scaling", 1e-02, 1e4, log=True)
         lambda_acc = trial.suggest_float("lambda_acc", 1e-14, 1, log=True)
         gamma = trial.suggest_float("gamma", 1, 20, log=True)
-        delta = trial.suggest_float("delta_deg", 0.1, 50, log=True)
+        delta = 4.5
 
         try:
             viol_rate, mean_scale, mean_traj_err, low_scale_rate, lap_count = run_episode_with_timeout(
