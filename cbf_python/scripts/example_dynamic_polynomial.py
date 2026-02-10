@@ -46,7 +46,18 @@ import threading
 from scripts.util import csv_publishers, test_publish_utils as pub_utils
 from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
 from Controller.dynamic_params_controllers import PolynomialControllerConfig, PolynomialOptimalController
+import pandas as pd
 stop_event = threading.Event()
+
+params_filename = "../parameters_set.csv"
+set_ID = 4999
+duration = 15000.0
+
+SHOW_DATA = False
+
+USE_BRIDGE = False
+LOG_DATA = False
+SAVE_DATA = True
 
 def compute_ee_pose(q, model, data, ee_frame_id):
     """
@@ -80,7 +91,6 @@ def main():
     # rclpy.init()
 
 
-    duration = 15000.0
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
@@ -100,57 +110,46 @@ def main():
     Tc =2e-3
     cfg = PolynomialControllerConfig(Tc=Tc)
     # PAPER PARAMETERS
-    # cfg.lambda_pos =  1083.9977322239226
-    # cfg.lambda_vel = 0.019463569108586626
-    # cfg.lambda_scaling =   88.92080107598409
-    # cfg.lambda_acc =  9.684370933446392e-08
-    # delta = 4.427823857718463
-    # cfg.gamma =   9.651586852673113
-    # H NEG PARAMETERS
-    # cfg.lambda_pos =  4546.472540883941
-    # cfg.lambda_vel = 0.03138841584594653
-    # cfg.lambda_scaling =  10.527954810453938
-    # cfg.lambda_acc =   8.946285146754514e-09
-    # delta = 4.042172548316627
-    # cfg.gamma =   1.3692971700147198
-
-    cfg = PolynomialControllerConfig(Tc=2e-3)
 
     cfg.h_t = 2.0
-    cfg.lambda_0_pos =  1546.472540883941
-    cfg.lambda_0_vel = 0.03138841584594653
-    cfg.lambda_0_acc =  8.946285146754514e-09
-    cfg.lambda_0_scaling = 10.527954810453938
-    cfg.gamma_0 = 1.3692971700147198
-    cfg.delta_0 = 4.042172548316627
 
-    cfg.lambda_f_pos = 10839.977322239226
-    cfg.lambda_f_vel = 1.9463569108586626
-    cfg.lambda_f_acc = 9.684370933446392e-14
-    cfg.lambda_f_scaling = 880.92080107598409
-    cfg.gamma_f = 9.651586852673113
-    cfg.delta_f = 1.5
+    df = pd.read_csv(params_filename)
 
-    cfg.n_pos = 0.5
-    cfg.n_vel = 0.5
-    cfg.n_acc = 0.5
-    cfg.n_scaling = 0.5
-    cfg.n_gamma = 0.5
-    cfg.n_delta = 0.5
 
-    cfg.m_pos = 2.0
-    cfg.m_vel = 2.0
-    cfg.m_acc = 2.0
-    cfg.m_scaling = 2.0
-    cfg.m_gamma = 2.0
-    cfg.m_delta = 2.0
+    cfg.lambda_0_pos = float(df.loc[df["ID"] == set_ID, "lambda_0_pos"].values[0])
+    cfg.lambda_0_vel = float(df.loc[df["ID"] == set_ID, "lambda_0_vel"].values[0]) 
+    cfg.lambda_0_acc =  float(df.loc[df["ID"] == set_ID, "lambda_0_acc"].values[0])
+    cfg.lambda_0_scaling = float(df.loc[df["ID"] == set_ID, "lambda_0_scaling"].values[0])
+    cfg.gamma_0 = float(df.loc[df["ID"] == set_ID, "gamma_0"].values[0])
+    cfg.delta_0 = float(df.loc[df["ID"] == set_ID, "delta_0_deg"].values[0])
 
-    cfg.w_pos = 0.5
-    cfg.w_vel = 0.5
-    cfg.w_acc = 0.5
-    cfg.w_scaling = 0.5
-    cfg.w_gamma = 0.5
-    cfg.w_delta = 0.5
+    cfg.lambda_f_pos = float(df.loc[df["ID"] == set_ID, "lambda_f_pos"].values[0])
+    cfg.lambda_f_vel = float(df.loc[df["ID"] == set_ID, "lambda_f_vel"].values[0])
+    cfg.lambda_f_acc = float(df.loc[df["ID"] == set_ID, "lambda_f_acc"].values[0])
+    cfg.lambda_f_scaling = float(df.loc[df["ID"] == set_ID, "lambda_f_scaling"].values[0])
+    cfg.gamma_f = float(df.loc[df["ID"] == set_ID, "gamma_f"].values[0])
+    cfg.delta_f = float(df.loc[df["ID"] == set_ID, "delta_f_deg"].values[0])
+
+    cfg.n_pos = float(df.loc[df["ID"] == set_ID, "n_pos"].values[0])
+    cfg.n_vel = float(df.loc[df["ID"] == set_ID, "n_vel"].values[0])
+    cfg.n_acc = float(df.loc[df["ID"] == set_ID, "n_acc"].values[0])
+    cfg.n_scaling = float(df.loc[df["ID"] == set_ID, "n_scaling"].values[0])
+    cfg.n_gamma = float(df.loc[df["ID"] == set_ID, "n_gamma"].values[0])
+    cfg.n_delta = float(df.loc[df["ID"] == set_ID, "n_delta"].values[0])
+
+    cfg.m_pos = float(df.loc[df["ID"] == set_ID, "m_pos"].values[0])
+    cfg.m_vel = float(df.loc[df["ID"] == set_ID, "m_vel"].values[0])
+    cfg.m_acc = float(df.loc[df["ID"] == set_ID, "m_acc"].values[0])
+    cfg.m_scaling = float(df.loc[df["ID"] == set_ID, "m_scaling"].values[0])
+    cfg.m_gamma = float(df.loc[df["ID"] == set_ID, "m_gamma"].values[0])
+    cfg.m_delta = float(df.loc[df["ID"] == set_ID, "m_delta"].values[0])
+
+    cfg.w_pos = float(df.loc[df["ID"] == set_ID, "w_pos"].values[0])
+    cfg.w_vel =  float(df.loc[df["ID"] == set_ID, "w_vel"].values[0])
+    cfg.w_acc = float(df.loc[df["ID"] == set_ID, "w_acc"].values[0])
+    cfg.w_scaling = float(df.loc[df["ID"] == set_ID, "w_scaling"].values[0])
+    cfg.w_gamma = float(df.loc[df["ID"] == set_ID, "w_gamma"].values[0])
+    cfg.w_delta = float(df.loc[df["ID"] == set_ID, "w_delta"].values[0])
 
     cfg.lambda_pos = cfg.lambda_0_pos
     cfg.lambda_vel = cfg.lambda_0_vel
@@ -163,9 +162,6 @@ def main():
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
 
-
-
-    # TODO PARMETERS
 
     ctrl = PolynomialOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
 
@@ -524,14 +520,15 @@ def main():
 
             rest = Tc - elapsed
             if rest > 0:
-                vizualization_string =f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f} ctrl_state:{unfeasible_string}"
+                if SHOW_DATA:
+                    vizualization_string =f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f} ctrl_state:{unfeasible_string}"
 
-                renderer.push_state(out["q"], out["Tbt_nominal"], out["obs_pos"], vizualization_string)
-                elapsed = time.perf_counter() - loop_start
-                rest = max(0.0,Tc - elapsed)
-                time.sleep(rest)
-                # pass
-                # time.sleep(0.0001)
+                    renderer.push_state(out["q"], out["Tbt_nominal"], out["obs_pos"], vizualization_string)
+                    elapsed = time.perf_counter() - loop_start
+                    rest = max(0.0,Tc - elapsed)
+                    time.sleep(rest)
+                else:
+                    time.sleep(0.0001)
             else:
                 timeout_cycles+=1
             if unfeasible_string != "FEASIBLE":
@@ -607,52 +604,53 @@ def main():
         generate_cartesian_trajectory(folder_name+"/")
 
     # SAVING RESULTS
-    # file_path = '../resullts/simulation_data.csv'
-    # os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    #
-    # # Intestazioni delle colonne (headers)
-    # headers = [
-    #     "test_type",
-    #     "lambda_pos",
-    #     "lambda_vel",
-    #     "lambda_scaling",
-    #     "lambda_acc",
-    #     "delta",
-    #     "gamma",
-    #     'on_target_rate',
-    #     'lap_count',
-    #     'viol_rate',
-    #     'mean_scale',
-    #     'mean_trajectory_error'
-    # ]
-    #
-    # # I dati da salvare (calcolati come nel tuo esempio)
-    # row_data = {
-    #     "test_type": "TEST_H_NEGATIVE_NORMAL",
-    #     "lambda_pos": cfg.lambda_pos,
-    #     "lambda_vel": cfg.lambda_vel,
-    #     "lambda_scaling": cfg.lambda_scaling,
-    #     "lambda_acc": cfg.lambda_acc,
-    #     "delta": delta,
-    #     "gamma": cfg.gamma,
-    #     'on_target_rate': on_target_rate,
-    #     'lap_count': lap_count,
-    #     'viol_rate': viol_rate,
-    #     'mean_scale': mean_scale,
-    #     'mean_trajectory_error': mean_trajectory_error
-    # }
-    #
-    # # Controllo se il file esiste già per scrivere l'header solo la prima volta
-    # file_exists = os.path.isfile(file_path)
-    #
-    # with open(file_path, mode='a', newline='') as file:
-    #     writer = csv.DictWriter(file, fieldnames=headers)
-    #
-    #     # Se il file è nuovo, scriviamo l'intestazione
-    #     if not file_exists:
-    #         writer.writeheader()
-    #
-    #     # Aggiungiamo la riga con i risultati
-    #     writer.writerow(row_data)
+    if SAVE_DATA:
+        file_path = '../resullts/simulation_data.csv'
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+        # Intestazioni delle colonne (headers)
+        headers = [
+            "test_type",
+            "lambda_pos",
+            "lambda_vel",
+            "lambda_scaling",
+            "lambda_acc",
+            "delta",
+            "gamma",
+            'on_target_rate',
+            'lap_count',
+            'viol_rate',
+            'mean_scale',
+            'mean_trajectory_error'
+        ]
+
+        # I dati da salvare (calcolati come nel tuo esempio)
+        row_data = {
+            "test_type": f"TEST_POLYNOMIAL_ID_{set_ID}",
+            "lambda_pos": cfg.lambda_pos,
+            "lambda_vel": cfg.lambda_vel,
+            "lambda_scaling": cfg.lambda_scaling,
+            "lambda_acc": cfg.lambda_acc,
+            "delta": delta,
+            "gamma": cfg.gamma,
+            'on_target_rate': on_target_rate,
+            'lap_count': lap_count,
+            'viol_rate': viol_rate,
+            'mean_scale': mean_scale,
+            'mean_trajectory_error': mean_trajectory_error
+        }
+
+        # Controllo se il file esiste già per scrivere l'header solo la prima volta
+        file_exists = os.path.isfile(file_path)
+
+        with open(file_path, mode='a', newline='') as file:
+            writer = csv.DictWriter(file, fieldnames=headers)
+
+            # Se il file è nuovo, scriviamo l'intestazione
+            if not file_exists:
+                writer.writeheader()
+
+            # Aggiungiamo la riga con i risultati
+            writer.writerow(row_data)
 if __name__ == "__main__":
     main()

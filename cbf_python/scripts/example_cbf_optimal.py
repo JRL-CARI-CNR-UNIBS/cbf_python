@@ -45,6 +45,19 @@ import signal
 import threading
 from scripts.util import csv_publishers, test_publish_utils as pub_utils
 from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
+import pandas as pd
+
+
+params_filename = "../parameters_set.csv"
+set_ID = 4999
+duration = 150.0
+
+SHOW_DATA = True
+USE_BRIDGE = False
+LOG_DATA = False
+SAVE_DATA = False
+
+parameters_type = "f"
 
 stop_event = threading.Event()
 
@@ -74,13 +87,10 @@ def _on_sigint_with_bridge(bridge, signum, frame):
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
-    USE_BRIDGE = False
-    LOG_DATA = False
     log_path = "../resullts/simulation/scaling"
     # rclpy.init()
 
 
-    duration = 15000.0
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
@@ -106,13 +116,15 @@ def main():
     # cfg.lambda_acc =  9.684370933446392e-08
     # delta = 4.427823857718463
     # cfg.gamma =   9.651586852673113
-    # H NEG PARAMETERS
-    cfg.lambda_pos =  4546.472540883941
-    cfg.lambda_vel = 0.03138841584594653
-    cfg.lambda_scaling =  10.527954810453938
-    cfg.lambda_acc =   8.946285146754514e-09
-    delta = 4.042172548316627
-    cfg.gamma =   1.3692971700147198
+    df = pd.read_csv(params_filename)
+
+    cfg.lambda_pos = float(df.loc[df["ID"] == set_ID, f"lambda_{parameters_type}_pos"].values[0])
+    cfg.lambda_vel = float(df.loc[df["ID"] == set_ID, f"lambda_{parameters_type}_vel"].values[0])
+    cfg.lambda_acc = float(df.loc[df["ID"] == set_ID, f"lambda_{parameters_type}_acc"].values[0])
+    cfg.lambda_scaling = float(df.loc[df["ID"] == set_ID, f"lambda_{parameters_type}_scaling"].values[0])
+    cfg.gamma = float(df.loc[df["ID"] == set_ID, f"gamma_{parameters_type}"].values[0])
+    delta = float(df.loc[df["ID"] == set_ID, f"delta_{parameters_type}_deg"].values[0])
+
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*4
@@ -140,9 +152,10 @@ def main():
         quat.normalize()
 
         R = quat.toRotationMatrix()
-
-        T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
-        # T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
+        if parameters_type == "0":
+            T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
+        else:
+            T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
 
         csv_path= "../skeleton_vectors/skeleton_vectors_14_NORMAL_TEST1.csv"
         #csv_publishers.swap_csv(csv_in_path, csv_out_path, 7, 17)
@@ -474,14 +487,15 @@ def main():
             rest = Tc - elapsed
             print(ctrl.cfg.delta_q_max)
             if rest > 0:
-                vizualization_string =f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f} ctrl_state:{unfeasible_string}"
+                if SHOW_DATA:
+                    vizualization_string =f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f} ctrl_state:{unfeasible_string}"
 
-                # renderer.push_state(out["q"], out["Tbt_nominal"], out["obs_pos"], vizualization_string)
-                # elapsed = time.perf_counter() - loop_start
-                # rest = max(0.0,Tc - elapsed)
-                # time.sleep(rest)
-                pass
-                time.sleep(0.0001)
+                    renderer.push_state(out["q"], out["Tbt_nominal"], out["obs_pos"], vizualization_string)
+                    elapsed = time.perf_counter() - loop_start
+                    rest = max(0.0,Tc - elapsed)
+                    time.sleep(rest)
+                else:
+                    time.sleep(0.0001)
             else:
                 timeout_cycles+=1
             if unfeasible_string != "FEASIBLE":
@@ -556,53 +570,54 @@ def main():
             folder_name = test_path
         generate_cartesian_trajectory(folder_name+"/")
 
-    # SAVING RESULTS
-    file_path = '../resullts/simulation_data.csv'
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    # SAVING RESuLTS
+    if SAVE_DATA:
+        file_path = '../resullts/simulation_data.csv'
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
-    # Intestazioni delle colonne (headers)
-    headers = [
-        "test_type",
-        "lambda_pos",
-        "lambda_vel",
-        "lambda_scaling",
-        "lambda_acc",
-        "delta",
-        "gamma",
-        'on_target_rate',
-        'lap_count',
-        'viol_rate',
-        'mean_scale',
-        'mean_trajectory_error'
-    ]
+        # Intestazioni delle colonne (headers)
+        headers = [
+            "test_type",
+            "lambda_pos",
+            "lambda_vel",
+            "lambda_scaling",
+            "lambda_acc",
+            "delta",
+            "gamma",
+            'on_target_rate',
+            'lap_count',
+            'viol_rate',
+            'mean_scale',
+            'mean_trajectory_error'
+        ]
 
-    # I dati da salvare (calcolati come nel tuo esempio)
-    row_data = {
-        "test_type": "TEST_H_NEGATIVE_NORMAL",
-        "lambda_pos": cfg.lambda_pos,
-        "lambda_vel": cfg.lambda_vel,
-        "lambda_scaling": cfg.lambda_scaling,
-        "lambda_acc": cfg.lambda_acc,
-        "delta": delta,
-        "gamma": cfg.gamma,
-        'on_target_rate': on_target_rate,
-        'lap_count': lap_count,
-        'viol_rate': viol_rate,
-        'mean_scale': mean_scale,
-        'mean_trajectory_error': mean_trajectory_error
-    }
+        # I dati da salvare (calcolati come nel tuo esempio)
+        row_data = {
+            "test_type": "TEST_H_NEGATIVE_NORMAL",
+            "lambda_pos": cfg.lambda_pos,
+            "lambda_vel": cfg.lambda_vel,
+            "lambda_scaling": cfg.lambda_scaling,
+            "lambda_acc": cfg.lambda_acc,
+            "delta": delta,
+            "gamma": cfg.gamma,
+            'on_target_rate': on_target_rate,
+            'lap_count': lap_count,
+            'viol_rate': viol_rate,
+            'mean_scale': mean_scale,
+            'mean_trajectory_error': mean_trajectory_error
+        }
 
-    # Controllo se il file esiste già per scrivere l'header solo la prima volta
-    file_exists = os.path.isfile(file_path)
+        # Controllo se il file esiste già per scrivere l'header solo la prima volta
+        file_exists = os.path.isfile(file_path)
 
-    with open(file_path, mode='a', newline='') as file:
-        writer = csv.DictWriter(file, fieldnames=headers)
+        with open(file_path, mode='a', newline='') as file:
+            writer = csv.DictWriter(file, fieldnames=headers)
 
-        # Se il file è nuovo, scriviamo l'intestazione
-        if not file_exists:
-            writer.writeheader()
+            # Se il file è nuovo, scriviamo l'intestazione
+            if not file_exists:
+                writer.writeheader()
 
-        # Aggiungiamo la riga con i risultati
-        writer.writerow(row_data)
+            # Aggiungiamo la riga con i risultati
+            writer.writerow(row_data)
 if __name__ == "__main__":
     main()
