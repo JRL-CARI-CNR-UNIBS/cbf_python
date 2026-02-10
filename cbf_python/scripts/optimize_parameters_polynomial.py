@@ -48,12 +48,12 @@ def make_objective():
         cfg.m_gamma = trial.suggest_float("m_gamma", 1, 10, log=True)
         cfg.m_delta = trial.suggest_float("m_delta", 1, 10, log=True)
 
-        cfg.w_pos = trial.suggest_float("w_pos", 0, 1, log = True)
-        cfg.w_vel = trial.suggest_float("w_vel", 0, 1, log = True)
-        cfg.w_acc = trial.suggest_float("w_acc", 0, 1, log = True)
-        cfg.w_scaling = trial.suggest_float("w_scaling", 0, 1, log = True)
-        cfg.w_gamma = trial.suggest_float("w_gamma", 0, 1, log = True)
-        cfg.w_delta = trial.suggest_float("w_delta", 0, 1, log = True)
+        cfg.w_pos = trial.suggest_float("w_pos", 1e-9, 1, log = True)
+        cfg.w_vel = trial.suggest_float("w_vel", 1e-9, 1, log = True)
+        cfg.w_acc = trial.suggest_float("w_acc", 1e-9, 1, log = True)
+        cfg.w_scaling = trial.suggest_float("w_scaling", 1e-9, 1, log = True)
+        cfg.w_gamma = trial.suggest_float("w_gamma", 1e-9, 1, log = True)
+        cfg.w_delta = trial.suggest_float("w_delta", 1e-9, 1, log = True)
 
         cfg.lambda_pos = cfg.lambda_0_pos
         cfg.lambda_vel = cfg.lambda_0_vel
@@ -69,12 +69,12 @@ def make_objective():
 
         try:
             viol_rate, mean_scale, mean_traj_err, low_scale_rate = run_episode_with_timeout(
-                cfg = cfg, Tc=2e-3, duration=500.0,
-                h_min = h_min, h_max = h_max, timeout=600
+                cfg = cfg, Tc=2e-3, duration=1000.0,
+                timeout=6000
             )
         except TimeoutError:
             # For directions: [minimize, maximize, minimize, minimize]
-            return (1e9, -1e9, 1e9, 1e9)
+            return (1.0, -1.0, 10.0, 1.1)
 
         return (viol_rate, mean_scale, mean_traj_err, low_scale_rate)
     return objective
@@ -102,7 +102,7 @@ quat = pin.Quaternion(0.83, 0.185, 0.513, 0.12)
 quat.normalize()
 R = quat.toRotationMatrix()
 
-T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
+T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
 
 home = np.array([90, -140, 140, -90, 90, 0]) * np.pi / 180.0
 UR10E_JOINTS = [
@@ -232,17 +232,16 @@ def run_episode(Tc=2e-3, duration=500.0, cfg = PolynomialControllerConfig() ):
         except Exception:
             # Penalize infeasible or divergent QP
             print("QP failed")
-            return 1.0, -1.0, 1000.0, 1.0
+            return 1.0, -1.0, 10.0, 1.0
         t += Tc
         
-        if h_min <= out["h_min"] <= h_max:
-            if out["h_min"] < 0 and out["vr_min"] < -1e-3:
-                violations += 1
-            sum_scale += out["Dtrajectory_time"]
-            nsteps += 1
-            trajectory_error_sum += out["trajectory_error"]
-            if out["Dtrajectory_time"] < scaling_threshold:
-                low_scale_count += 1
+        if out["h_min"] < 0 and out["vr_min"] < -1e-3:
+            violations += 1
+        sum_scale += out["Dtrajectory_time"]
+        nsteps += 1
+        trajectory_error_sum += out["trajectory_error"]
+        if out["Dtrajectory_time"] < scaling_threshold:
+            low_scale_count += 1
         trajectory_time = out["trajectory_time"]
         
 
@@ -322,3 +321,17 @@ study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error
 study.optimize(make_objective(), n_trials=5000, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
 
     # print (run_episode(1e3,1e3,1e3,1e-3,5,1))
+
+
+'''
+TRIAL BELLI
+
+4999
+4780
+4789
+4845
+4706
+4630
+4558
+761
+'''
