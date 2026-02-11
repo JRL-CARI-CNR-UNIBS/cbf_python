@@ -335,3 +335,12 @@ TRIAL BELLI delta variabile
 4558
 761
 '''
+
+''' 
+TRIAL BELLI delta fisso
+
+3083
+3289
+3978
+4937
+'''

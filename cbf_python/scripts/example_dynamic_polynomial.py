@@ -46,33 +46,21 @@ import threading
 from scripts.util import csv_publishers, test_publish_utils as pub_utils
 from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
 from Controller.dynamic_params_controllers import PolynomialControllerConfig, PolynomialOptimalController
+from scripts.util.test_utils import generate_obs_state, generate_velocity, compute_ee_pose
 import pandas as pd
+
 stop_event = threading.Event()
 
 params_filename = "../parameters_set.csv"
 set_ID = 4999
 duration = 15000.0
 
-SHOW_DATA = False
-
 USE_BRIDGE = False
 LOG_DATA = False
-SAVE_DATA = True
 
-def compute_ee_pose(q, model, data, ee_frame_id):
-    """
-    Compute forward kinematics of the end-effector for joint config q.
-    Returns (position, rotation_matrix, SE3).
-    """
-    # Forward kinematics for all joints
-    pin.forwardKinematics(model, data, q)
-    # Update frame placements
-    pin.updateFramePlacements(model, data)
-
-    T_ee = data.oMf[ee_frame_id]  # SE3 from world (o) to frame (f=tool0)
-    p = T_ee.translation          # 3D position
-    R = T_ee.rotation             # 3x3 rotation matrix
-    return p, R, T_ee
+SHOW_DATA = True
+SAVE_DATA = False
+test_type = "O"
 
 def _on_sigint_with_bridge(bridge, signum, frame):
     stop_event.set()
@@ -121,35 +109,35 @@ def main():
     cfg.lambda_0_acc =  float(df.loc[df["ID"] == set_ID, "lambda_0_acc"].values[0])
     cfg.lambda_0_scaling = float(df.loc[df["ID"] == set_ID, "lambda_0_scaling"].values[0])
     cfg.gamma_0 = float(df.loc[df["ID"] == set_ID, "gamma_0"].values[0])
-    cfg.delta_0 = float(df.loc[df["ID"] == set_ID, "delta_0_deg"].values[0])
+    # cfg.delta_0 = float(df.loc[df["ID"] == set_ID, "delta_0_deg"].values[0])
 
     cfg.lambda_f_pos = float(df.loc[df["ID"] == set_ID, "lambda_f_pos"].values[0])
     cfg.lambda_f_vel = float(df.loc[df["ID"] == set_ID, "lambda_f_vel"].values[0])
     cfg.lambda_f_acc = float(df.loc[df["ID"] == set_ID, "lambda_f_acc"].values[0])
     cfg.lambda_f_scaling = float(df.loc[df["ID"] == set_ID, "lambda_f_scaling"].values[0])
     cfg.gamma_f = float(df.loc[df["ID"] == set_ID, "gamma_f"].values[0])
-    cfg.delta_f = float(df.loc[df["ID"] == set_ID, "delta_f_deg"].values[0])
+    # cfg.delta_f = float(df.loc[df["ID"] == set_ID, "delta_f_deg"].values[0])
 
     cfg.n_pos = float(df.loc[df["ID"] == set_ID, "n_pos"].values[0])
     cfg.n_vel = float(df.loc[df["ID"] == set_ID, "n_vel"].values[0])
     cfg.n_acc = float(df.loc[df["ID"] == set_ID, "n_acc"].values[0])
     cfg.n_scaling = float(df.loc[df["ID"] == set_ID, "n_scaling"].values[0])
     cfg.n_gamma = float(df.loc[df["ID"] == set_ID, "n_gamma"].values[0])
-    cfg.n_delta = float(df.loc[df["ID"] == set_ID, "n_delta"].values[0])
+    # cfg.n_delta = float(df.loc[df["ID"] == set_ID, "n_delta"].values[0])
 
     cfg.m_pos = float(df.loc[df["ID"] == set_ID, "m_pos"].values[0])
     cfg.m_vel = float(df.loc[df["ID"] == set_ID, "m_vel"].values[0])
     cfg.m_acc = float(df.loc[df["ID"] == set_ID, "m_acc"].values[0])
     cfg.m_scaling = float(df.loc[df["ID"] == set_ID, "m_scaling"].values[0])
     cfg.m_gamma = float(df.loc[df["ID"] == set_ID, "m_gamma"].values[0])
-    cfg.m_delta = float(df.loc[df["ID"] == set_ID, "m_delta"].values[0])
+    # cfg.m_delta = float(df.loc[df["ID"] == set_ID, "m_delta"].values[0])
 
     cfg.w_pos = float(df.loc[df["ID"] == set_ID, "w_pos"].values[0])
     cfg.w_vel =  float(df.loc[df["ID"] == set_ID, "w_vel"].values[0])
     cfg.w_acc = float(df.loc[df["ID"] == set_ID, "w_acc"].values[0])
     cfg.w_scaling = float(df.loc[df["ID"] == set_ID, "w_scaling"].values[0])
     cfg.w_gamma = float(df.loc[df["ID"] == set_ID, "w_gamma"].values[0])
-    cfg.w_delta = float(df.loc[df["ID"] == set_ID, "w_delta"].values[0])
+    # cfg.w_delta = float(df.loc[df["ID"] == set_ID, "w_delta"].values[0])
 
     cfg.lambda_pos = cfg.lambda_0_pos
     cfg.lambda_vel = cfg.lambda_0_vel
@@ -157,6 +145,7 @@ def main():
     cfg.lambda_acc = cfg.lambda_0_acc
     cfg.gamma = cfg.gamma_0
     delta = cfg.delta_0
+    delta = 4.5
 
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta)
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
@@ -315,6 +304,7 @@ def main():
         # test_start = True
         while np.linalg.norm(home-bridge.getPositions()) > 0.01:
             loop_start = time.perf_counter()
+
             obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
 
             nominal_q, nominal_Dq, nominal_DDq = start_planner.getMotionLaw(trajectory_time_initial)
@@ -346,15 +336,15 @@ def main():
 
     planner.addWayPoint(q)
     planner.addWayPoint(q10)
-    planner.addWayPoint(q20)
-    planner.addWayPoint(q10)
+    # planner.addWayPoint(q20)
+    # planner.addWayPoint(q10)
     planner.addWayPoint(q22)
     planner.addWayPoint(q25)
     planner.addWayPoint(q30)
-    planner.addWayPoint(q40)
-    planner.addWayPoint(q30)
+    # planner.addWayPoint(q40)
+    # planner.addWayPoint(q30)
     planner.addWayPoint(q)
-    n_wp = 10
+    n_wp = 6
     configs = {
         "q": q,
         "q10": q10,
@@ -402,24 +392,32 @@ def main():
         timeout_cycles = cycles = 0
         violations = sum_scale = trajectory_error_sum = 0
 
+        count_move = 0
+        end_eff_pos = np.zeros(3)
+        Dtrajectory_time = 1.0
         ctrl.reset_state(q)
         # test_start = True
+        enable_spawm = True
+
+        if test_type == "O":
+            obstacle_positions = np.zeros(3)
+            obstacle_velocities = np.zeros(3)
+            obstacle_accelerations = np.zeros(3)
+            obstacle_accelerations = obstacle_accelerations.reshape(1, 3)
         while t < duration and not stop_event.is_set():
-            # if t%T_total == 0:
-            #     test_start = False
-            #     test_start_publisher.publish_once(test_start)
-            # elif not test_start:
-            #     test_start = True
-            #     test_start_publisher.publish_once(test_start)
-            # print(f"{T_total}")
-            h_min = np.inf
 
             loop_start = time.perf_counter()
 
             if USE_BRIDGE:
                 obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
             else:
-                obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles(elapsed=t)
+                if test_type == "O":
+                    obstacle_positions, obstacle_velocities, enable_spawn, count_move = generate_obs_state(
+                        obstacle_positions, obstacle_velocities, cycles, enable_spawm, planner, trajectory_time,
+                        T_total, model, data, tool_frame_id, end_eff_pos, Dtrajectory_time, count_move)
+
+                else:
+                    obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
             # print ("obstacle_positions:", obstacle_positions)
             # print ("type(obstacle_positions):", type(obstacle_positions))
             # print("size(obstacle_positions): ", obstacle_positions.shape)
@@ -587,13 +585,13 @@ def main():
     print(f"VIOLATION RATE: {viol_rate}")
     print(f"MEAN SCALING: {mean_scale}")
     print(f"MEAN TRAJECTORY ERROR: {mean_trajectory_error}")
-    print_stats_table(stats)
-    _ = make_summary_figure(
-        computation_times,
-        h_log,
-        trj_error_log,
-        scaling_log,
-    )
+    # print_stats_table(stats)
+    # _ = make_summary_figure(
+    #     computation_times,
+    #     h_log,
+    #     trj_error_log,
+    #     scaling_log,
+    # )
     folder_name = ""
     # CREATING CARTESIAN REFERENCE CSV FILE
     if LOG_DATA:

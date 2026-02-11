@@ -40,17 +40,17 @@ import rclpy
 import threading
 from scripts.util import csv_publishers, test_publish_utils as pub_utils
 from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
-from scripts.util.test_utils import compute_ee_pose, generate_velocity
+from scripts.util.test_utils import generate_obs_state, compute_ee_pose, generate_velocity
 import  pandas as pd
 import csv
 
 params_filename = "../parameters_set.csv"
-set_ID = 4999
-duration = 150.0
+set_ID = 0
+duration = 15000.0
 
-SHOW_DATA = True
+SHOW_DATA = False
 LOG_DATA = False
-SAVE_DATA = False
+SAVE_DATA = True
 parameters_type = "0"
 stop_event = threading.Event()
 
@@ -66,7 +66,6 @@ def main():
     log_path = "../resullts/simulation/scaling"
     # rclpy.init()
 
-    duration = 15000.0
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
@@ -253,27 +252,14 @@ def main():
         Dtrajectory_time = 1.0
         low_scale_count = 0
         scaling_threshold = 0.5
+        consecutive_low_scale_cycles = 0
+        enable_spawn = True
+        obstacle_accelerations = obstacle_accelerations.reshape(1, 3)
         while t < duration and not stop_event.is_set():
             loop_start = time.perf_counter()
-            if (cycles % 500 == 0):
-                q_temp, dq_temp, ddq_temp =  planner.getMotionLaw((trajectory_time+2) % T_total)
-                obstacle_positions,a,b = compute_ee_pose(q_temp, model, data, tool_frame_id)
-                obstacle_positions = obstacle_positions.tolist()
-                obstacle_positions[0] = obstacle_positions[0]+0.0
-                obstacle_positions[1] = obstacle_positions[1]+0.0
-                obstacle_positions[2] = obstacle_positions[2]-0.2
-                obstacle_positions = np.array(obstacle_positions)
-                obstacle_positions = obstacle_positions.reshape(1,3)
-                obstacle_velocities = generate_velocity(ee_pos, obstacle_positions, 0.05)
-                obstacle_velocities = obstacle_velocities.reshape(1,3)
-                obstacle_accelerations = obstacle_accelerations.reshape(1,3)
-                count_move = 0
-            if Dtrajectory_time <0.05 and count_move < 40:
-                obstacle_positions[0][0] += 0.01
-                obstacle_positions[0][1] += 0.01
-                count_move += 1
+            obstacle_positions, obstacle_velocities, enable_spawn, count_move = generate_obs_state(obstacle_positions, obstacle_velocities, cycles, enable_spawn, planner, trajectory_time, T_total, model, data, tool_frame_id, ee_pos, Dtrajectory_time, count_move)
 
-                # print(obstacle_positions)
+            # print(obstacle_positions)
                 # print(f"TYPE OF OBSTACLE POSITIONS: {type(obstacle_positions)}")
                 # print(f"SIZE OF OBS POSITIONS: {obstacle_positions.shape}")
             cycles += 1
@@ -312,7 +298,7 @@ def main():
             # --------------------------- INTEGRATION ----------------------------
             t += Tc
             end_eff_pos = out["end_effector_pos"]
-
+            # print(t)
             if not stop_event.is_set() and LOG_DATA:
                 joint_target_publisher.publish_once(t, nominal_q, nominal_Dq, nominal_DDq)  # pyright: ignore[reportPossiblyUnboundVariable]
                 hmin = out["h_min"]
@@ -427,13 +413,13 @@ def main():
     print(f"MEAN SCALING: {mean_scale}")
     print(f"MEAN TRAJECTORY ERROR: {mean_trajectory_error}")
     print(f"LOW SCALE RATE: {low_scale_rate}")
-    print_stats_table(stats)
-    _ = make_summary_figure(
-        computation_times,
-        h_log,
-        trj_error_log,
-        scaling_log,
-    )
+    # print_stats_table(stats)
+    # _ = make_summary_figure(
+    #     computation_times,
+    #     h_log,
+    #     trj_error_log,
+    #     scaling_log,
+    # )
     folder_name = ""
     # CREATING CARTESIAN REFERENCE CSV FILE
     if LOG_DATA:
@@ -442,7 +428,8 @@ def main():
     #
     # # SAVING RESULTS
     if SAVE_DATA:
-        file_path = 'resullts/simulation_data.csv'
+        print("SAVING RESULTS")
+        file_path = '../resullts/simulation_data.csv'
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
         # Intestazioni delle colonne (headers)
@@ -464,7 +451,7 @@ def main():
 
         # I dati da salvare (calcolati come nel tuo esempio)
         row_data = {
-            "test_type": "TEST_H_NEGATIVE_NORMAL",
+            "test_type": F"TEST_OBSTRUCTIVE_ID_{set_ID}",
             "lambda_pos": cfg.lambda_pos,
             "lambda_vel": cfg.lambda_vel,
             "lambda_scaling": cfg.lambda_scaling,

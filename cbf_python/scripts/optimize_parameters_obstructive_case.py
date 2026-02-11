@@ -10,7 +10,7 @@ from Controller.optimal_cbf_task_controller import BCFOptimalController, Control
 from multiprocessing import Process, Queue
 from queue import Empty
 
-from scripts.util.test_utils import compute_ee_pose, generate_velocity
+from scripts.util.test_utils import compute_ee_pose, generate_velocity, generate_obs_state
 
 # Database connection (for dashboard)
 POSTGRES_URL = "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
@@ -136,26 +136,18 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
     end_eff_pos = np.zeros(3)
     count_move = 0
     Dtrajectory_time = 1.0
-
+    enable_spawn = True
     while t < duration:
 
-        if (nsteps % 500 == 0):
-            q_temp, dq_temp, ddq_temp = planner.getMotionLaw((trajectory_time + 2) % T_total)
-            obstacle_positions, a, b = compute_ee_pose(q_temp, model, data, tool_frame_id)
-            obstacle_positions = obstacle_positions.tolist()
-            obstacle_positions[0] = obstacle_positions[0] + 0.0
-            obstacle_positions[1] = obstacle_positions[1] + 0.0
-            obstacle_positions[2] = obstacle_positions[2] - 0.2
-            obstacle_positions = np.array(obstacle_positions)
-            obstacle_positions = obstacle_positions.reshape(1, 3)
-            obstacle_velocities = generate_velocity(end_eff_pos, obstacle_positions, 0.05)
-            obstacle_velocities = obstacle_velocities.reshape(1, 3)
-            obstacle_accelerations = obstacle_accelerations.reshape(1, 3)
-            count_move = 0
-        if Dtrajectory_time < 0.05 and count_move < 40:
-            obstacle_positions[0][0] += 0.01
-            obstacle_positions[0][1] += 0.01
-            count_move += 1
+        obstacle_positions, obstacle_velocities, enable_spawn, count_move = generate_obs_state(obstacle_positions,
+                                                                                               obstacle_velocities,
+                                                                                               nsteps, enable_spawn,
+                                                                                               planner, trajectory_time,
+                                                                                               T_total, model, data,
+                                                                                               tool_frame_id, end_eff_pos,
+                                                                                               Dtrajectory_time,
+                                                                                               count_move)
+
         nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
         try:
             out = ctrl.step(
