@@ -129,7 +129,7 @@ def append_cbf_rows_loop(
     frames_p, frames_vlin,  # (nF,3), (nF,3)
     obs_p, obs_v, obs_a,    # (nO,3)
     Jlins, dJlins, dq,      # (nF,3,nq)
-    Tr, a_s, C, gamma, atol, HAS_CBF
+    Tr, a_s, C, gamma, atol, HAS_CBF, keypoint_to_log
 ):
     hmin = 1e9
     htest = 1e09
@@ -158,22 +158,21 @@ def append_cbf_rows_loop(
             h, row_vec, bound, d, vr, vh = compute_h_and_constraints_numba(
                 p_bt, op, vlin, ov, Tr, a_s, C, oa, atol, Jlin, dJlin, dq, gamma, HAS_CBF
             )
-            if h < htest:
-                htest = h
-                i_h = o
-            if d < dtest:
-                dtest = h
-                i_d = o
-
-
-
-            # FOR DEBUGGING ONLY, REMOVE htest AND dtest ABOVE LATER
-            if o == min(7, nO-1) and f == frames_p.shape[0]-1: # last frame, left hand keypoint
-                vr_min = vr
-                vh_min = vh
-                dmin = d
-                hmin = h
-            #print(f"ADDING TO ROW: {row}")
+            # keypoint to log positive or zero -> select the corresponding keypoint
+            # keypoint to log negative -> select the global minimum
+            if keypoint_to_log >= 0:
+                if o == min(keypoint_to_log, nO-1) and f == frames_p.shape[0]-1: # last frame, left hand keypoint
+                    vr_min = vr
+                    vh_min = vh
+                    dmin = d
+                    hmin = h
+            else:
+                if h < hmin:
+                    vr_min = vr
+                    vh_min = vh
+                    dmin = d
+                    hmin = h
+            #print(f"ADDING T O ROW: {row}")
             if HAS_CBF:
                 for j in range(nq):
                     A[row, j] = row_vec[j]
@@ -247,7 +246,7 @@ def assemble_qp_inplace(
     Dq_max, DDq_max, delta_q_max,
     # CBF inputs (optional; pass empty arrays if unused)
     frames_p, frames_vlin, Jlins, dJlins, obs_p, obs_v, obs_a,
-    Tr, a_s, C, gamma, DDtraj_max, atol, ref_scaling, HAS_CBF
+    Tr, a_s, C, gamma, DDtraj_max, atol, ref_scaling, HAS_CBF, keypoint_to_log
 ):
     nq = q.size
     # zero A, c
@@ -275,7 +274,8 @@ def assemble_qp_inplace(
     # CBF rows (if any)
     if frames_p.size != 0 and obs_p.size != 0:
         row, hmin, dmin, vr_min, vh_min, htest, dtest, i_h, i_d = append_cbf_rows_loop(
-            A, c, row, frames_p, frames_vlin, obs_p, obs_v, obs_a, Jlins, dJlins, dq, Tr, a_s, C, gamma, atol, HAS_CBF
+            A, c, row, frames_p, frames_vlin, obs_p, obs_v, obs_a, Jlins, dJlins, dq, Tr, a_s, C, gamma, atol, HAS_CBF,
+            keypoint_to_log
         )
     else:
         hmin = 1e9

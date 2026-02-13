@@ -49,13 +49,13 @@ import pandas as pd
 
 
 params_filename = "../parameters_set.csv"
-set_ID = 4999
-duration = 150.0
+set_ID = "0"
+duration = 15000.0
 
-SHOW_DATA = True
+SHOW_DATA = False
 USE_BRIDGE = False
 LOG_DATA = False
-SAVE_DATA = False
+SAVE_DATA = True
 
 parameters_type = "f"
 
@@ -118,12 +118,12 @@ def main():
     # cfg.gamma =   9.651586852673113
     df = pd.read_csv(params_filename)
 
-    cfg.lambda_pos = float(df.loc[df["ID"] == set_ID, f"lambda_{parameters_type}_pos"].values[0])
-    cfg.lambda_vel = float(df.loc[df["ID"] == set_ID, f"lambda_{parameters_type}_vel"].values[0])
-    cfg.lambda_acc = float(df.loc[df["ID"] == set_ID, f"lambda_{parameters_type}_acc"].values[0])
-    cfg.lambda_scaling = float(df.loc[df["ID"] == set_ID, f"lambda_{parameters_type}_scaling"].values[0])
-    cfg.gamma = float(df.loc[df["ID"] == set_ID, f"gamma_{parameters_type}"].values[0])
-    delta = float(df.loc[df["ID"] == set_ID, f"delta_{parameters_type}_deg"].values[0])
+    cfg.lambda_pos = float(df.loc[df["ID"] == set_ID, f"lambda_0_pos"].values[0])
+    cfg.lambda_vel = float(df.loc[df["ID"] == set_ID, f"lambda_0_vel"].values[0])
+    cfg.lambda_acc = float(df.loc[df["ID"] == set_ID, f"lambda_0_acc"].values[0])
+    cfg.lambda_scaling = float(df.loc[df["ID"] == set_ID, f"lambda_0_scaling"].values[0])
+    cfg.gamma = float(df.loc[df["ID"] == set_ID, f"gamma_0"].values[0])
+    delta = float(df.loc[df["ID"] == set_ID, f"delta_0_deg"].values[0])
 
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*2
@@ -312,15 +312,15 @@ def main():
 
     planner.addWayPoint(q)
     planner.addWayPoint(q10)
-    planner.addWayPoint(q20)
-    planner.addWayPoint(q10)
+    # planner.addWayPoint(q20)
+    # planner.addWayPoint(q10)
     planner.addWayPoint(q22)
     planner.addWayPoint(q25)
     planner.addWayPoint(q30)
-    planner.addWayPoint(q40)
-    planner.addWayPoint(q30)
+    # planner.addWayPoint(q40)
+    # planner.addWayPoint(q30)
     planner.addWayPoint(q)
-    n_wp = 10
+    n_wp = 6
     configs = {
         "q": q,
         "q10": q10,
@@ -369,6 +369,8 @@ def main():
         violations = sum_scale = trajectory_error_sum = 0
 
         ctrl.reset_state(q)
+        low_scale_count = 0
+        scaling_threshold = 0.5
         # test_start = True
         while t < duration and not stop_event.is_set():
             # if t%T_total == 0:
@@ -483,9 +485,10 @@ def main():
                 violations += 1
             sum_scale += out["Dtrajectory_time"]
             trajectory_error_sum += out["trajectory_error"]
-
+            if (Dtrajectory_time) < scaling_threshold:
+                low_scale_count += 1
             rest = Tc - elapsed
-            print(ctrl.cfg.delta_q_max)
+            # print(ctrl.cfg.delta_q_max)
             if rest > 0:
                 if SHOW_DATA:
                     vizualization_string =f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f} ctrl_state:{unfeasible_string}"
@@ -543,24 +546,26 @@ def main():
     viol_rate = violations / max(1, cycles)
     mean_scale = sum_scale / max(1, cycles)
     mean_trajectory_error = trajectory_error_sum / max(1, cycles)
+    low_scale_rate = low_scale_count / max(1, cycles)
+
 
 
     print(f"timeout cycles = {timeout_cycles} over {cycles}, percentage = {100.0*timeout_cycles/cycles}, average = {np.mean(computation_times)}")
     print(f"unfeasible cycles = {unfeasible_cnt} over {cycles}, percentage = {100.0*unfeasible_cnt/cycles}")
     print(f"LAP COUNT: {lap_count}")
     print("on target count: ", on_target_count)
-    print(((trajectory_time % T_total)/T_total))
     print(f"WAYPOINTS REACHING PERCENTAGE: {on_target_rate*100.0} %")
-    print(f"VIOLATION RATE: {viol_rate}")
+    print(f"VIOLATION RATE: {viol_rate*100}")
     print(f"MEAN SCALING: {mean_scale}")
     print(f"MEAN TRAJECTORY ERROR: {mean_trajectory_error}")
-    print_stats_table(stats)
-    _ = make_summary_figure(
-        computation_times,
-        h_log,
-        trj_error_log,
-        scaling_log,
-    )
+    print(f"LOW SCALE RATE: {low_scale_rate*100}")
+    # print_stats_table(stats)
+    # _ = make_summary_figure(
+    #     computation_times,
+    #     h_log,
+    #     trj_error_log,
+    #     scaling_log,
+    # )
     folder_name = ""
     # CREATING CARTESIAN REFERENCE CSV FILE
     if LOG_DATA:
@@ -588,12 +593,13 @@ def main():
             'lap_count',
             'viol_rate',
             'mean_scale',
-            'mean_trajectory_error'
+            'mean_trajectory_error',
+            "low_scale_rate"
         ]
 
         # I dati da salvare (calcolati come nel tuo esempio)
         row_data = {
-            "test_type": "TEST_H_NEGATIVE_NORMAL",
+            "test_type": "TEST_STATIC_NO_HUMAN",
             "lambda_pos": cfg.lambda_pos,
             "lambda_vel": cfg.lambda_vel,
             "lambda_scaling": cfg.lambda_scaling,
@@ -604,7 +610,8 @@ def main():
             'lap_count': lap_count,
             'viol_rate': viol_rate,
             'mean_scale': mean_scale,
-            'mean_trajectory_error': mean_trajectory_error
+            'mean_trajectory_error': mean_trajectory_error,
+            "low_scale_rate": low_scale_rate
         }
 
         # Controllo se il file esiste già per scrivere l'header solo la prima volta

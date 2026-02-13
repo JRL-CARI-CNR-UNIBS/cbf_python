@@ -1,7 +1,10 @@
 import pandas as pd
+import numpy as np
+import time
+n = 5
+m = 6
+o = 7
+a = [n, m,o]
 
-csv = pd.read_csv("parameters_set.csv")
-n_pos = float( csv.loc[csv["ID"] == 4999, "n_pos"].values[0])
-
-print(n_pos)
-print(type(n_pos))
+a[0] += 5
+print(n)

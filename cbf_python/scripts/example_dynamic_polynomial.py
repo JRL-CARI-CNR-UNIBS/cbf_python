@@ -45,23 +45,27 @@ import signal
 import threading
 from scripts.util import csv_publishers, test_publish_utils as pub_utils
 from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
-from Controller.dynamic_params_controllers import PolynomialControllerConfig, PolynomialOptimalController
+from Controller.dynamic_params_controllers import (PolynomialControllerConfig, PolynomialOptimalController,
+                                                   StocasticalControllerConfig, StocasticalOptimalController, compute_generic_lambda)
 from scripts.util.test_utils import generate_obs_state, generate_velocity, compute_ee_pose
 import pandas as pd
+from scripts.util.mean_visualizer import StocasticalCBFVisualizer
 
 stop_event = threading.Event()
 
 params_filename = "../parameters_set.csv"
-set_ID = 4999
-duration = 15000.0
+set_ID = "3083_no_delta"
+duration = 150.0
 
 USE_BRIDGE = False
-LOG_DATA = False
+LOG_DATA = True
 
 SHOW_DATA = True
 SAVE_DATA = False
-test_type = "O"
+test_type = "0"
 
+PLOT_MEAN = False
+USE_STOCASTIC = False
 def _on_sigint_with_bridge(bridge, signum, frame):
     stop_event.set()
     try:
@@ -73,8 +77,7 @@ def _on_sigint_with_bridge(bridge, signum, frame):
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
-    USE_BRIDGE = False
-    LOG_DATA = False
+
     log_path = "../resullts/simulation/scaling"
     # rclpy.init()
 
@@ -96,7 +99,7 @@ def main():
 
     # ------------------------ CONTROLLER SETUP -----------------------------------
     Tc =2e-3
-    cfg = PolynomialControllerConfig(Tc=Tc)
+    cfg = StocasticalControllerConfig(Tc=Tc)
     # PAPER PARAMETERS
 
     cfg.h_t = 2.0
@@ -139,6 +142,12 @@ def main():
     cfg.w_gamma = float(df.loc[df["ID"] == set_ID, "w_gamma"].values[0])
     # cfg.w_delta = float(df.loc[df["ID"] == set_ID, "w_delta"].values[0])
 
+    if USE_STOCASTIC:
+        cfg.n = 50
+        cfg.cv_tol = 0.5
+        cfg.k_min = 1e-4
+        cfg.p = 2
+
     cfg.lambda_pos = cfg.lambda_0_pos
     cfg.lambda_vel = cfg.lambda_0_vel
     cfg.lambda_scaling = cfg.lambda_0_scaling
@@ -151,8 +160,10 @@ def main():
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
 
-
-    ctrl = PolynomialOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
+    if USE_STOCASTIC:
+        ctrl = StocasticalOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
+    else:
+        ctrl = PolynomialOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
 
     target_name = "ur10e_wrist_3_joint"
     idx = UR10E_JOINTS.index(target_name)
@@ -177,11 +188,13 @@ def main():
 
         R = quat.toRotationMatrix()
 
-        T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
-        # T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
+        if test_type == "0":
+            T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
+        else:
+            T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
 
         csv_path= "../skeleton_vectors/skeleton_vectors_14_NORMAL_TEST1.csv"
-        #csv_publishers.swap_csv(csv_in_path, csv_out_path, 7, 17)
+        # csv_path= "../skeleton_vectors/skeleton_vectors_22.csv"
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
             csv_path=csv_path,
@@ -385,6 +398,9 @@ def main():
     if LOG_DATA:
         test_start_publisher.publish_once(True) # pyright: ignore[reportPossiblyUnboundVariable]
     unfeasible_cnt = 0
+    low_scale_count = 0
+    scaling_threshold = 0.5
+    visualizer = StocasticalCBFVisualizer()
     try:
 
         t = 0.0
@@ -417,7 +433,7 @@ def main():
                         T_total, model, data, tool_frame_id, end_eff_pos, Dtrajectory_time, count_move)
 
                 else:
-                    obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
+                    obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles(elapsed=t)
             # print ("obstacle_positions:", obstacle_positions)
             # print ("type(obstacle_positions):", type(obstacle_positions))
             # print("size(obstacle_positions): ", obstacle_positions.shape)
@@ -515,7 +531,13 @@ def main():
                 violations += 1
             sum_scale += out["Dtrajectory_time"]
             trajectory_error_sum += out["trajectory_error"]
+            if out["Dtrajectory_time"] < scaling_threshold:
+                low_scale_count += 1
 
+            if PLOT_MEAN:
+                visualizer.update_vectors(out["h_min"], t, cycles)
+                visualizer.lambda_stoc_vec.append(ctrl.cfg.lambda_pos)
+                visualizer.lambda_det_vec.append(compute_generic_lambda(out["h_min"], ctrl.cfg.h_t,ctrl.cfg.polynomial_dict["pos"]))
             rest = Tc - elapsed
             if rest > 0:
                 if SHOW_DATA:
@@ -574,6 +596,7 @@ def main():
     viol_rate = violations / max(1, cycles)
     mean_scale = sum_scale / max(1, cycles)
     mean_trajectory_error = trajectory_error_sum / max(1, cycles)
+    low_scale_rate = low_scale_count / max(1, cycles)
 
 
     print(f"timeout cycles = {timeout_cycles} over {cycles}, percentage = {100.0*timeout_cycles/cycles}, average = {np.mean(computation_times)}")
@@ -600,7 +623,8 @@ def main():
         else:
             folder_name = test_path
         generate_cartesian_trajectory(folder_name+"/")
-
+    if PLOT_MEAN:
+        visualizer.plot_mean_std(ctrl.cfg.lambda_0_pos, ctrl.cfg.lambda_f_pos)
     # SAVING RESULTS
     if SAVE_DATA:
         file_path = '../resullts/simulation_data.csv'
@@ -619,7 +643,8 @@ def main():
             'lap_count',
             'viol_rate',
             'mean_scale',
-            'mean_trajectory_error'
+            'mean_trajectory_error',
+            'low_scale_rate'
         ]
 
         # I dati da salvare (calcolati come nel tuo esempio)
@@ -635,7 +660,9 @@ def main():
             'lap_count': lap_count,
             'viol_rate': viol_rate,
             'mean_scale': mean_scale,
-            'mean_trajectory_error': mean_trajectory_error
+            'mean_trajectory_error': mean_trajectory_error,
+            'low_scale_rate': low_scale_rate
+
         }
 
         # Controllo se il file esiste già per scrivere l'header solo la prima volta

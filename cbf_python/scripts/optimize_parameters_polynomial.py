@@ -9,51 +9,94 @@ from Command_bridge.fake_command_bridge import FakeCommandBridge
 from Controller.optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
 from multiprocessing import Process, Queue
 from queue import Empty
-from Controller.dynamic_params_controllers import PolynomialControllerConfig, PolynomialOptimalController
-
+from Controller.dynamic_params_controllers import (PolynomialControllerConfig, PolynomialOptimalController,
+                                                   StocasticalControllerConfig, StocasticalOptimalController)
+import pandas as pd
 # Database connection (for dashboard)
 POSTGRES_URL = "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
+OPTIMIZE_POLY = False
+OPTIMIZE_STOCHASTIC = True
+params_filename = "../parameters_set.csv"
+set_ID = "3083_no_delta"
 
 def make_objective():
     def objective(trial):
 
-        cfg = PolynomialControllerConfig(Tc = 2e-3)
+        cfg = StocasticalControllerConfig(Tc = 2e-3)
 
         cfg.h_t = 2.0
-        cfg.lambda_0_pos = trial.suggest_float("lambda_0_pos", 100, 1e6, log=True)
-        cfg.lambda_0_vel = trial.suggest_float("lambda_0_vel", 1, 1e4, log=True)
-        cfg.lambda_0_acc = trial.suggest_float("lambda_0_acc", 1e-15, 1e-4, log=True)
-        cfg.lambda_0_scaling = trial.suggest_float("lambda_0_scaling", 10, 1e5, log=True)
-        cfg.gamma_0 = trial.suggest_float("gamma_0", 0.1, 20, log=True)
-        # cfg.delta_0 = trial.suggest_float("delta_0_deg", 0.1, 20, log=True)
+        if OPTIMIZE_POLY:
+            cfg.lambda_0_pos = trial.suggest_float("lambda_0_pos", 100, 1e6, log=True)
+            cfg.lambda_0_vel = trial.suggest_float("lambda_0_vel", 1, 1e4, log=True)
+            cfg.lambda_0_acc = trial.suggest_float("lambda_0_acc", 1e-15, 1e-4, log=True)
+            cfg.lambda_0_scaling = trial.suggest_float("lambda_0_scaling", 10, 1e5, log=True)
+            cfg.gamma_0 = trial.suggest_float("gamma_0", 0.1, 20, log=True)
+            # cfg.delta_0 = trial.suggest_float("delta_0_deg", 0.1, 20, log=True)
 
-        cfg.lambda_f_pos = trial.suggest_float("lambda_f_pos", 100, 1e6, log=True)
-        cfg.lambda_f_vel = trial.suggest_float("lambda_f_vel", 1, 1e4, log=True)
-        cfg.lambda_f_acc = trial.suggest_float("lambda_f_acc", 1e-15, 1e-4, log=True)
-        cfg.lambda_f_scaling = trial.suggest_float("lambda_f_scaling", 10, 1e5, log=True)
-        cfg.gamma_f = trial.suggest_float("gamma_f", 0.1, 20, log=True)
-        # cfg.delta_f = trial.suggest_float("delta_f_deg", 0.1, 20, log=True)
+            cfg.lambda_f_pos = trial.suggest_float("lambda_f_pos", 100, 1e6, log=True)
+            cfg.lambda_f_vel = trial.suggest_float("lambda_f_vel", 1, 1e4, log=True)
+            cfg.lambda_f_acc = trial.suggest_float("lambda_f_acc", 1e-15, 1e-4, log=True)
+            cfg.lambda_f_scaling = trial.suggest_float("lambda_f_scaling", 10, 1e5, log=True)
+            cfg.gamma_f = trial.suggest_float("gamma_f", 0.1, 20, log=True)
+            # cfg.delta_f = trial.suggest_float("delta_f_deg", 0.1, 20, log=True)
 
-        cfg.n_pos = trial.suggest_float("n_pos", 1e-9, 1, log=True)
-        cfg.n_vel= trial.suggest_float("n_vel", 1e-9, 1, log=True)
-        cfg.n_acc = trial.suggest_float("n_acc", 1e-9, 1, log=True)
-        cfg.n_scaling = trial.suggest_float("n_scaling", 1e-9, 1, log=True)
-        cfg.n_gamma = trial.suggest_float("n_gamma", 1e-9, 1, log=True)
-        # cfg.n_delta = trial.suggest_float("n_delta", 1e-9, 1, log=True)
-        
-        cfg.m_pos = trial.suggest_float("m_pos", 1, 10, log=True)
-        cfg.m_vel = trial.suggest_float("m_vel", 1, 10, log=True)
-        cfg.m_acc = trial.suggest_float("m_acc", 1, 10, log=True)
-        cfg.m_scaling = trial.suggest_float("m_scaling", 1, 10, log=True)
-        cfg.m_gamma = trial.suggest_float("m_gamma", 1, 10, log=True)
-        # cfg.m_delta = trial.suggest_float("m_delta", 1, 10, log=True)
+            cfg.n_pos = trial.suggest_float("n_pos", 1e-9, 1, log=True)
+            cfg.n_vel= trial.suggest_float("n_vel", 1e-9, 1, log=True)
+            cfg.n_acc = trial.suggest_float("n_acc", 1e-9, 1, log=True)
+            cfg.n_scaling = trial.suggest_float("n_scaling", 1e-9, 1, log=True)
+            cfg.n_gamma = trial.suggest_float("n_gamma", 1e-9, 1, log=True)
+            # cfg.n_delta = trial.suggest_float("n_delta", 1e-9, 1, log=True)
 
-        cfg.w_pos = trial.suggest_float("w_pos", 1e-9, 1, log = True)
-        cfg.w_vel = trial.suggest_float("w_vel", 1e-9, 1, log = True)
-        cfg.w_acc = trial.suggest_float("w_acc", 1e-9, 1, log = True)
-        cfg.w_scaling = trial.suggest_float("w_scaling", 1e-9, 1, log = True)
-        cfg.w_gamma = trial.suggest_float("w_gamma", 1e-9, 1, log = True)
-        # cfg.w_delta = trial.suggest_float("w_delta", 1e-9, 1, log = True)
+            cfg.m_pos = trial.suggest_float("m_pos", 1, 10, log=True)
+            cfg.m_vel = trial.suggest_float("m_vel", 1, 10, log=True)
+            cfg.m_acc = trial.suggest_float("m_acc", 1, 10, log=True)
+            cfg.m_scaling = trial.suggest_float("m_scaling", 1, 10, log=True)
+            cfg.m_gamma = trial.suggest_float("m_gamma", 1, 10, log=True)
+            # cfg.m_delta = trial.suggest_float("m_delta", 1, 10, log=True)
+
+            cfg.w_pos = trial.suggest_float("w_pos", 1e-9, 1, log = True)
+            cfg.w_vel = trial.suggest_float("w_vel", 1e-9, 1, log = True)
+            cfg.w_acc = trial.suggest_float("w_acc", 1e-9, 1, log = True)
+            cfg.w_scaling = trial.suggest_float("w_scaling", 1e-9, 1, log = True)
+            cfg.w_gamma = trial.suggest_float("w_gamma", 1e-9, 1, log = True)
+            # cfg.w_delta = trial.suggest_float("w_delta", 1e-9, 1, log = True)
+        else:
+            df = pd.read_csv(params_filename)
+
+            cfg.lambda_0_pos = float(df.loc[df["ID"] == set_ID, "lambda_0_pos"].values[0])
+            cfg.lambda_0_vel = float(df.loc[df["ID"] == set_ID, "lambda_0_vel"].values[0])
+            cfg.lambda_0_acc = float(df.loc[df["ID"] == set_ID, "lambda_0_acc"].values[0])
+            cfg.lambda_0_scaling = float(df.loc[df["ID"] == set_ID, "lambda_0_scaling"].values[0])
+            cfg.gamma_0 = float(df.loc[df["ID"] == set_ID, "gamma_0"].values[0])
+            # cfg.delta_0 = float(df.loc[df["ID"] == set_ID, "delta_0_deg"].values[0])
+
+            cfg.lambda_f_pos = float(df.loc[df["ID"] == set_ID, "lambda_f_pos"].values[0])
+            cfg.lambda_f_vel = float(df.loc[df["ID"] == set_ID, "lambda_f_vel"].values[0])
+            cfg.lambda_f_acc = float(df.loc[df["ID"] == set_ID, "lambda_f_acc"].values[0])
+            cfg.lambda_f_scaling = float(df.loc[df["ID"] == set_ID, "lambda_f_scaling"].values[0])
+            cfg.gamma_f = float(df.loc[df["ID"] == set_ID, "gamma_f"].values[0])
+            # cfg.delta_f = float(df.loc[df["ID"] == set_ID, "delta_f_deg"].values[0])
+
+            cfg.n_pos = float(df.loc[df["ID"] == set_ID, "n_pos"].values[0])
+            cfg.n_vel = float(df.loc[df["ID"] == set_ID, "n_vel"].values[0])
+            cfg.n_acc = float(df.loc[df["ID"] == set_ID, "n_acc"].values[0])
+            cfg.n_scaling = float(df.loc[df["ID"] == set_ID, "n_scaling"].values[0])
+            cfg.n_gamma = float(df.loc[df["ID"] == set_ID, "n_gamma"].values[0])
+            # cfg.n_delta = float(df.loc[df["ID"] == set_ID, "n_delta"].values[0])
+
+            cfg.m_pos = float(df.loc[df["ID"] == set_ID, "m_pos"].values[0])
+            cfg.m_vel = float(df.loc[df["ID"] == set_ID, "m_vel"].values[0])
+            cfg.m_acc = float(df.loc[df["ID"] == set_ID, "m_acc"].values[0])
+            cfg.m_scaling = float(df.loc[df["ID"] == set_ID, "m_scaling"].values[0])
+            cfg.m_gamma = float(df.loc[df["ID"] == set_ID, "m_gamma"].values[0])
+            # cfg.m_delta = float(df.loc[df["ID"] == set_ID, "m_delta"].values[0])
+
+            cfg.w_pos = float(df.loc[df["ID"] == set_ID, "w_pos"].values[0])
+            cfg.w_vel = float(df.loc[df["ID"] == set_ID, "w_vel"].values[0])
+            cfg.w_acc = float(df.loc[df["ID"] == set_ID, "w_acc"].values[0])
+            cfg.w_scaling = float(df.loc[df["ID"] == set_ID, "w_scaling"].values[0])
+            cfg.w_gamma = float(df.loc[df["ID"] == set_ID, "w_gamma"].values[0])
+            # cfg.w_delta = float(df.loc[df["ID"] == set_ID, "w_delta"].values[0])
 
         cfg.lambda_pos = cfg.lambda_0_pos
         cfg.lambda_vel = cfg.lambda_0_vel
@@ -65,7 +108,14 @@ def make_objective():
         cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)
         cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*2
         cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*4
-        
+
+        if OPTIMIZE_STOCHASTIC:
+            cfg.n = trial.suggest_int("n", 10, 500)
+            cfg.cv_tol = trial.suggest_float(
+                "cv_tol", 0.01, 1, log = True)
+            cfg.k_min = trial.suggest_float(
+                "k_min", 1e-9, 1e-1, log = True)
+            cfg.p = trial.suggest_float("p", 1, 10, log = True)
 
         try:
             viol_rate, mean_scale, mean_traj_err, low_scale_rate = run_episode_with_timeout(
@@ -179,8 +229,10 @@ def run_episode(Tc=2e-3, duration=500.0, cfg = PolynomialControllerConfig() ):
 
     cfg.Dq_max = cfg.Dq_max*0.25
     cfg.DDq_max = cfg.DDq_max*0.2
-
-    ctrl = PolynomialOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
+    if OPTIMIZE_STOCHASTIC:
+        ctrl = StocasticalOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
+    else:
+        ctrl = PolynomialOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
    
     
     bridge = FakeCommandBridge(

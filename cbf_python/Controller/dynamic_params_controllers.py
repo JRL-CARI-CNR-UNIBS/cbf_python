@@ -1,7 +1,12 @@
 from Controller.optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
 from dataclasses import dataclass, field
 import numpy as np
-def compute_generic_lambda(h, ht, lambda_0, lambda_f, n, m, w):
+def compute_generic_lambda(h, ht, params):
+    lambda_0 = params[0]
+    lambda_f = params[1]
+    n = params[2]
+    m = params[3]
+    w = params[4]
     if h < 0.0:
         return lambda_0
     elif h >= ht:
@@ -47,37 +52,81 @@ class PolynomialControllerConfig(ControllerConfig):
     w_delta : float = 0.0
 
     h_t : float = 0.0
-    categories = ["pos", "vel", "acc", "scaling", "gamma", "delta"]
+    polynomial_dict = {"pos": [], "vel": [], "acc": [], "scaling": [], "gamma": []}
 
+    def generate_poly_dict(self):
+        self.polynomial_dict["pos"] = [self.lambda_0_pos, self.lambda_f_pos, self.n_pos, self.m_pos, self.w_pos]
+        self.polynomial_dict["vel"] = [self.lambda_0_vel, self.lambda_f_vel, self.n_vel, self.m_vel, self.w_vel]
+        self.polynomial_dict["acc"] = [self.lambda_0_acc, self.lambda_f_acc, self.n_acc, self.m_acc, self.w_acc]
+        self.polynomial_dict["scaling"] = [self.lambda_0_scaling, self.lambda_f_scaling, self.n_scaling, self.m_scaling, self.w_scaling]
+        self.polynomial_dict["gamma"] = [self.gamma_0, self.gamma_f, self.n_gamma, self.m_gamma, self.w_gamma]
+
+@dataclass
+class StocasticalControllerConfig(PolynomialControllerConfig):
+
+    n: int = 50
+    cv_tol: float = 0.25
+    p : float = 2
+    k_min: float = 1e-04
+    k_max: float = 1.0
 
 
 class PolynomialOptimalController(BCFOptimalController):
 
-    def __init__(self, model_wrapper, cfg: PolynomialControllerConfig, useCbf):
-        super().__init__(model_wrapper, cfg, useCbf)
+    def __init__(self, model_wrapper, cfg: PolynomialControllerConfig, useCbf, keypoint_to_log = 7):
+        super().__init__(model_wrapper, cfg, useCbf, keypoint_to_log)
         self.cfg = cfg
+        self.cfg.generate_poly_dict()
         
 
     def update_parameters(self, h):
 
-        self.cfg.lambda_pos = compute_generic_lambda(h, self.cfg.h_t, self.cfg.lambda_0_pos, 
-                                                     self.cfg.lambda_f_pos, self.cfg.n_pos,
-                                                     self.cfg.m_pos, self.cfg.w_pos)
-        self.cfg.lambda_vel = compute_generic_lambda(h, self.cfg.h_t, self.cfg.lambda_0_vel,
-                                                     self.cfg.lambda_f_vel, self.cfg.n_vel,
-                                                     self.cfg.m_vel, self.cfg.w_vel)
-        self.cfg.lambda_acc = compute_generic_lambda(h, self.cfg.h_t, self.cfg.lambda_0_acc,
-                                                     self.cfg.lambda_f_acc, self.cfg.n_acc,
-                                                     self.cfg.m_acc, self.cfg.w_acc)
-        self.cfg.lambda_scaling = compute_generic_lambda(h, self.cfg.h_t, self.cfg.lambda_0_scaling,
-                                                     self.cfg.lambda_f_scaling, self.cfg.n_scaling,
-                                                     self.cfg.m_scaling, self.cfg.w_scaling)
-        self.cfg.gamma = compute_generic_lambda(h, self.cfg.h_t, self.cfg.gamma_0,
-                                                     self.cfg.gamma_f, self.cfg.n_gamma,
-                                                     self.cfg.m_gamma, self.cfg.w_gamma)
-        # new_delta = compute_generic_lambda(h, self.cfg.h_t, self.cfg.delta_0,
-        #                                              self.cfg.delta_f, self.cfg.n_delta,
-        #                                              self.cfg.m_delta, self.cfg.w_delta)
-        # self.cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * new_delta)
-        # self.cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * new_delta)*2
-        # self.cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * new_delta)*4
+        self.cfg.lambda_pos = compute_generic_lambda(h, self.cfg.h_t, self.cfg.polynomial_dict["pos"])
+        self.cfg.lambda_vel = compute_generic_lambda(h, self.cfg.h_t, self.cfg.polynomial_dict["vel"])
+        self.cfg.lambda_acc = compute_generic_lambda(h, self.cfg.h_t, self.cfg.polynomial_dict["acc"])
+        self.cfg.lambda_scaling = compute_generic_lambda(h, self.cfg.h_t, self.cfg.polynomial_dict["scaling"])
+        self.cfg.gamma = compute_generic_lambda(h, self.cfg.h_t, self.cfg.polynomial_dict["gamma"])
+
+class StocasticalOptimalController(BCFOptimalController):
+    def __init__(self, model_wrapper, cfg: StocasticalControllerConfig, useCbf, keypoint_to_log = 7):
+        super().__init__(model_wrapper, cfg, useCbf, keypoint_to_log)
+        self.cfg = cfg
+        self.cycles = 0
+        self.h_vec = np.zeros(self.cfg.n)
+        self.h_mean = 0.0
+        self.h_std = 0.0
+        self.cfg.generate_poly_dict()
+
+    def update_mean_and_std(self, h):
+        self.h_vec = np.roll(self.h_vec, -1)
+        self.h_vec[-1] = h
+        if self.cycles < self.cfg.n:
+            self.h_mean = np.mean(self.h_vec[-self.cycles:])
+            self.h_std = np.std(self.h_vec[-self.cycles:])
+            self.cycles += 1
+        else:
+            self.h_mean = np.mean(self.h_vec)
+            self.h_std = np.std(self.h_vec)
+
+    def update_parameters(self, h):
+        self.update_mean_and_std(h)
+        epsilon = 1e-06
+        cv_squared =  self.h_std / (self.h_mean ** 2 + epsilon)
+        cv_tol_squared = self.cfg.cv_tol ** 2
+        argument = 0.5 * (cv_squared / cv_tol_squared) ** self.cfg.p
+        k_gain = self.cfg.k_min + (self.cfg.k_max - self.cfg.k_min) * np.exp(-argument)
+
+        lambda_pos_ref = compute_generic_lambda(h, self.cfg.h_t, self.cfg.polynomial_dict["pos"])
+        self.cfg.lambda_pos = self.cfg.lambda_pos + k_gain * (lambda_pos_ref - self.cfg.lambda_pos)
+
+        lambda_vel_ref = compute_generic_lambda(h, self.cfg.h_t, self.cfg.polynomial_dict["vel"])
+        self.cfg.lambda_vel = self.cfg.lambda_vel + k_gain * (lambda_vel_ref - self.cfg.lambda_vel)
+
+        lambda_acc_ref = compute_generic_lambda(h, self.cfg.h_t, self.cfg.polynomial_dict["acc"])
+        self.cfg.lambda_acc = self.cfg.lambda_acc + k_gain * (lambda_acc_ref - self.cfg.lambda_acc)
+
+        lambda_scaling_ref = compute_generic_lambda(h, self.cfg.h_t, self.cfg.polynomial_dict["scaling"])
+        self.cfg.lambda_scaling = self.cfg.lambda_scaling + k_gain * (lambda_scaling_ref - self.cfg.lambda_scaling)
+
+        lambda_gamma_ref = compute_generic_lambda(h, self.cfg.h_t, self.cfg.polynomial_dict["gamma"])
+        self.cfg.gamma = self.cfg.gamma + k_gain * (lambda_gamma_ref - self.cfg.gamma)

@@ -45,7 +45,7 @@ class BCFOptimalController:
     Minimal controller: only robot model, state, and QP assembly/solve.
     External code must provide obstacle states and nominal trajectory at each step.
     """
-    def __init__(self, model_wrapper, cfg: ControllerConfig, useCbf):
+    def __init__(self, model_wrapper, cfg: ControllerConfig, useCbf, keypoint_to_log = 7):
         self.cfg = cfg
         self.model_wrapper = model_wrapper
         self.model = self.model_wrapper.model
@@ -55,7 +55,7 @@ class BCFOptimalController:
         # frames (IDs)
         self.tool_frame_id = self.model.getFrameId(cfg.prefix + cfg.tool_frame)
         self.elbow_frame_id = self.model.getFrameId(cfg.prefix + cfg.elbow_frame)
-        self.frames_ids = [ self.tool_frame_id]
+        self.frames_ids = [ self.tool_frame_id, self.elbow_frame_id]
 
         # NUMBA-prebuilt blocks
         self.FreePos, self.ForcedPos, self.FreeVel, self.ForcedVel = \
@@ -100,6 +100,9 @@ class BCFOptimalController:
         self.qp_scaling = self.ref_scaling
         # print(f"DELTA_Q_MAX: {self.delta_q_max}")
         self.check_delta = False
+
+        # keypoint to log
+        self.keypoint_to_log = keypoint_to_log
 
     def set_ref_scaling(self, scaling):
         if scaling >= 1.0 :
@@ -192,7 +195,8 @@ class BCFOptimalController:
             self.Dtrajectory_time, Tc,
             cfg.Dq_max, cfg.DDq_max, self.delta_q_max,
             frames_p, frames_v, Jlins, dJlins, obs_pos, obs_vel, obs_acc,
-            cfg.Tr, cfg.a_s, cfg.C, cfg.gamma,cfg.DDtrajectory_time_max, 1e-12, self.qp_scaling, self.useCbf
+            cfg.Tr, cfg.a_s, cfg.C, cfg.gamma,cfg.DDtrajectory_time_max, 1e-12, self.qp_scaling, self.useCbf,
+            self.keypoint_to_log
         )
 
         # print(f"h_min: {htest}, on keypoint no: {i_h}")
