@@ -15,7 +15,7 @@ from pathlib import Path
 import pandas as pd
 # Database connection (for dashboard)
 POSTGRES_URL = "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
-OPTIMIZE_POLY = False
+OPTIMIZE_POLY = True
 OPTIMIZE_STOCHASTIC = True
 params_filename = "../parameters_set.csv"
 set_ID = "3083_no_delta"
@@ -41,28 +41,56 @@ def make_objective():
             cfg.gamma_f = trial.suggest_float("gamma_f", 0.1, 20, log=True)
             # cfg.delta_f = trial.suggest_float("delta_f_deg", 0.1, 20, log=True)
 
-            cfg.n_pos = trial.suggest_float("n_pos", 1e-9, 1, log=True)
-            cfg.n_vel= trial.suggest_float("n_vel", 1e-9, 1, log=True)
-            cfg.n_acc = trial.suggest_float("n_acc", 1e-9, 1, log=True)
-            cfg.n_scaling = trial.suggest_float("n_scaling", 1e-9, 1, log=True)
-            cfg.n_gamma = trial.suggest_float("n_gamma", 1e-9, 1, log=True)
+            # cfg.n_pos = trial.suggest_float("n_pos", 1e-4, 1, log=True)
+            # cfg.n_vel= trial.suggest_float("n_vel", 1e-4, 1, log=True)
+            # cfg.n_acc = trial.suggest_float("n_acc", 1e-4, 1, log=True)
+            # cfg.n_scaling = trial.suggest_float("n_scaling", 1e-4, 1, log=True)
+            # cfg.n_gamma = trial.suggest_float("n_gamma", 1e-4, 1, log=True)
             # cfg.n_delta = trial.suggest_float("n_delta", 1e-9, 1, log=True)
 
-            cfg.m_pos = trial.suggest_float("m_pos", 1, 10, log=True)
-            cfg.m_vel = trial.suggest_float("m_vel", 1, 10, log=True)
-            cfg.m_acc = trial.suggest_float("m_acc", 1, 10, log=True)
-            cfg.m_scaling = trial.suggest_float("m_scaling", 1, 10, log=True)
-            cfg.m_gamma = trial.suggest_float("m_gamma", 1, 10, log=True)
+            cfg.n_pos = 0.0
+            cfg.n_vel= 0.0
+            cfg.n_acc = 0.0
+            cfg.n_scaling = 0.0
+            cfg.n_gamma = 0.0
+
+            # cfg.m_pos = trial.suggest_float("m_pos", 1, 10, log=True)
+            # cfg.m_vel = trial.suggest_float("m_vel", 1, 10, log=True)
+            # cfg.m_acc = trial.suggest_float("m_acc", 1, 10, log=True)
+            # cfg.m_scaling = trial.suggest_float("m_scaling", 1, 10, log=True)
+            # cfg.m_gamma = trial.suggest_float("m_gamma", 1, 10, log=True)
             # cfg.m_delta = trial.suggest_float("m_delta", 1, 10, log=True)
 
-            cfg.w_pos = trial.suggest_float("w_pos", 1e-9, 1, log = True)
-            cfg.w_vel = trial.suggest_float("w_vel", 1e-9, 1, log = True)
-            cfg.w_acc = trial.suggest_float("w_acc", 1e-9, 1, log = True)
-            cfg.w_scaling = trial.suggest_float("w_scaling", 1e-9, 1, log = True)
-            cfg.w_gamma = trial.suggest_float("w_gamma", 1e-9, 1, log = True)
+            cfg.m_pos = 1.0
+            cfg.m_vel = 1.0
+            cfg.m_acc = 1.0
+            cfg.m_scaling = 1.0
+            cfg.m_gamma = 1.0
+
+
+            # cfg.w_pos = trial.suggest_float("w_pos", 1e-9, 1, log = True)
+            # cfg.w_vel = trial.suggest_float("w_vel", 1e-9, 1, log = True)
+            # cfg.w_acc = trial.suggest_float("w_acc", 1e-9, 1, log = True)
+            # cfg.w_scaling = trial.suggest_float("w_scaling", 1e-9, 1, log = True)
+            # cfg.w_gamma = trial.suggest_float("w_gamma", 1e-9, 1, log = True)
             # cfg.w_delta = trial.suggest_float("w_delta", 1e-9, 1, log = True)
+        
+            cfg.w_pos = 0.0
+            cfg.w_vel = 0.0
+            cfg.w_acc = 0.0
+            cfg.w_scaling = 0.0
+            cfg.w_gamma = 0.0
+        
+        
         else:
-            df = pd.read_csv(params_filename)
+            # 1. Get the absolute path of the directory where THIS script is located
+            from pathlib import Path
+            script_dir = Path(__file__).parent.resolve()
+
+            # 2. Build the absolute path to the CSV file relative to the script
+            # This goes up one level (..) and looks for "parameters_set.csv"
+            params_path = (script_dir / ".." / "parameters_set.csv").resolve()
+            df = pd.read_csv(params_path)
 
             cfg.lambda_0_pos = float(df.loc[df["ID"] == set_ID, "lambda_0_pos"].values[0])
             cfg.lambda_0_vel = float(df.loc[df["ID"] == set_ID, "lambda_0_vel"].values[0])
@@ -368,7 +396,10 @@ study = optuna.create_study(
     sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
     storage=storage,
     #load_if_exists=True,
-    study_name=f"dynamic_params_polynomial_{time.strftime('%Y%m%d-%H%M%S')}",
+    #study_name=f"dynamic_params_polynomial_{time.strftime('%Y%m%d-%H%M%S')}",
+    study_name=f"dynamic_params_polynomial_20260216-094358",
+    load_if_exists=True,
+
 )
 study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "low_scale_rate"])
 study.optimize(make_objective(), n_trials=5000, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
