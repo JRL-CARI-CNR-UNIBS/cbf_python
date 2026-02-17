@@ -210,7 +210,7 @@ class BCFOptimalController:
             self.c[row:].fill(-1.0)
 
             
-        self.update_parameters(h_min)
+        self.update_parameters(h_min, d_min, vr_min)
 
         # print (f"UPDATED LAMBDAS: POS: {self.cfg.lambda_pos}, VEL: {self.cfg.lambda_vel}, SCALING: {self.cfg.lambda_scaling}, ACC: {self.cfg.lambda_acc}, GAMMA: {self.cfg.gamma}, DELTA_Q_MAX: {self.cfg.delta_q_max}")
         # Dense QP matrices/vectors
@@ -311,5 +311,5 @@ class BCFOptimalController:
             "unfeasible_cnt": self.unfeasible_cnt,
         }
 
-    def update_parameters(self, h):
+    def update_parameters(self, h, d, v_rel):
         pass

@@ -2,30 +2,49 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 class StocasticalCBFVisualizer:
-    def __init__(self):
-        self.n = 50
+    def __init__(self, n=50):
+        self.n = n
         self.cycles = 0
-        self.h_window = np.zeros(50)
-        self.h_mean_vec= []
+        self.h_window = np.zeros(n)
+        self.h_vec= []
+        self.d_vec= []
+        self.v_vec=[]
+        self.time_vec=[]
 
-        self.h_dev_vec= []
-        self.t_vec = []
-        self.lambda_det_vec = []
-        self.lambda_stoc_vec = []
-        self.h_vec = []
+        self.lambda_vec = []
 
 
-    def update_vectors(self, h, t, cycles):
-        self.h_window = np.roll(self.h_window, -1)
-        self.h_window[-1] = h
+    def update_vectors(self, h, d, v_rel, t, cycles):
         self.h_vec.append(h)
-        if cycles < self.n:
-            self.h_mean_vec.append(np.mean(self.h_window[-cycles:]))
-            self.h_dev_vec.append(np.std(self.h_window[-cycles:]))
-        else:
-            self.h_mean_vec.append(np.mean(self.h_window))
-            self.h_dev_vec.append(np.std(self.h_window))
-        self.t_vec.append(t)
+        self.d_vec.append(d)
+        self.v_vec.append(v_rel)
+        self.time_vec.append(t)
+
+
+
+    def compute_mean_cov(self):
+
+        # 2. Impacchettare i dati in una singola matrice
+        # np.vstack impila le liste una sull'altra.
+        # Otteniamo una matrice dove ogni RIGA è una variabile (h, d, v) e ogni COLONNA è un campione.
+        data_matrix = np.vstack((self.h_vec, self.d_vec, self.v_vec))
+
+        # 3. Calcolare l'intera Matrice di Covarianza (3x3)
+        # NumPy calcola automaticamente sia le varianze (sulla diagonale) che le covarianze
+        cov_matrix = np.cov(data_matrix)
+
+        # 4. (Opzionale) Calcolare le varianze singole per verifica
+        # ddof=1 indica che stiamo lavorando su un *campione* statistico, non sull'intera popolazione
+        var_h = np.var(self.h_vec, ddof=1)
+        var_d = np.var(self.d_vec, ddof=1)
+        var_v = np.var(self.v_vec, ddof=1)
+
+        print("--- Matrice di Covarianza (Σ) ---")
+        print(np.round(cov_matrix, 4))
+        print("\n--- Verifica Varianze Singole ---")
+        print(f"Varianza di h: {var_h:.4f}")
+        print(f"Varianza di d: {var_d:.4f}")
+        print(f"Varianza di v: {var_v:.4f}")
 
 
     def plot_mean_std(self, lambda_0, lambda_f):
