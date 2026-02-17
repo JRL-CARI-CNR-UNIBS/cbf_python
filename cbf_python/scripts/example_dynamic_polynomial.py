@@ -55,17 +55,17 @@ stop_event = threading.Event()
 
 params_filename = "../parameters_set.csv"
 set_ID = "3083_no_delta"
-duration = 150.0
+duration = 15000.0
 
 USE_BRIDGE = False
-LOG_DATA = True
+LOG_DATA = False
 
-SHOW_DATA = True
-SAVE_DATA = False
-test_type = "0"
+SHOW_DATA = False
+SAVE_DATA = True
+test_type = "O"
 
 PLOT_MEAN = False
-USE_STOCASTIC = False
+USE_STOCASTIC = True
 def _on_sigint_with_bridge(bridge, signum, frame):
     stop_event.set()
     try:
@@ -143,10 +143,11 @@ def main():
     # cfg.w_delta = float(df.loc[df["ID"] == set_ID, "w_delta"].values[0])
 
     if USE_STOCASTIC:
-        cfg.n = 50
-        cfg.cv_tol = 0.5
-        cfg.k_min = 1e-4
-        cfg.p = 2
+        cfg.n = int(df.loc[df["ID"] == set_ID, "n_samples"].values[0])
+        cfg.cv_tol = float(df.loc[df["ID"] == set_ID, "cv_tol"].values[0])
+        cfg.k_min = float(df.loc[df["ID"] == set_ID, "k_min"].values[0])
+        cfg.p = float(df.loc[df["ID"] == set_ID, "p"].values[0])
+        cfg.sigma_tol = 0.001
 
     cfg.lambda_pos = cfg.lambda_0_pos
     cfg.lambda_vel = cfg.lambda_0_vel

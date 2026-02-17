@@ -69,7 +69,7 @@ class StocasticalControllerConfig(PolynomialControllerConfig):
     p : float = 2
     k_min: float = 1e-04
     k_max: float = 1.0
-
+    sigma_tol = 0.0
 
 class PolynomialOptimalController(BCFOptimalController):
 
@@ -114,6 +114,9 @@ class StocasticalOptimalController(BCFOptimalController):
         cv_squared =  self.h_std / (self.h_mean ** 2 + epsilon)
         cv_tol_squared = self.cfg.cv_tol ** 2
         argument = 0.5 * (cv_squared / cv_tol_squared) ** self.cfg.p
+        # sigma_squared =  self.h_std ** 2
+        # sigma_tol_squared = self.cfg.sigma_tol ** 2
+        # argument = 0.5 * (sigma_squared / sigma_tol_squared) ** self.cfg.p
         k_gain = self.cfg.k_min + (self.cfg.k_max - self.cfg.k_min) * np.exp(-argument)
 
         lambda_pos_ref = compute_generic_lambda(h, self.cfg.h_t, self.cfg.polynomial_dict["pos"])
