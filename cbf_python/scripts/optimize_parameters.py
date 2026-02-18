@@ -13,16 +13,68 @@ from Controller.dynamic_params_controllers import (PolynomialControllerConfig, P
                                                    StocasticalControllerConfig, StocasticalOptimalController)
 from pathlib import Path
 import pandas as pd
-
+import os
+from datetime import datetime
+from optuna.samplers import CmaEsSampler 
 # Database connection (for dashboard)
 POSTGRES_URL = "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
 
+def save_data(study):
+    # ---------------------------------------------------------
+    # 1. Estrazione e Pulizia dei Dati
+    # ---------------------------------------------------------
+
+    # Ottieni il dataframe dallo studio
+    df = study.trials_dataframe()
+
+    # Filtra solo i trial completati con successo e ordinali
+    # (ascending=False perché stiamo MASSIMIZZANDO la cost function)
+    df_success = df[df["state"] == "COMPLETE"].sort_values(by="value", ascending=False)
+
+    # Prendi i primi 5
+    top_5 = df_success.head(5).copy()
+
+    # Aggiungi un timestamp per sapere QUANDO hai salvato questi risultati
+    # (Utile visto che aggiungerai righe in coda nel tempo)
+    top_5.insert(0, 'timestamp', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    top_5.insert(1, 'study_name', study.study_name) # Opzionale: per tracciare lo studio
+
+    # Seleziona solo le colonne utili (valore, parametri, user_attributes)
+    # Rimuove colonne interne di Optuna come 'datetime_start', 'duration', ecc.
+    cols_to_keep = ['timestamp', 'study_name', 'number', 'value'] + \
+                [c for c in top_5.columns if c.startswith('params_')] + \
+                [c for c in top_5.columns if c.startswith('user_attrs_')]
+
+    top_5_clean = top_5[cols_to_keep]
+
+    # ---------------------------------------------------------
+    # 2. Salvataggio in Append (Coda)
+    # ---------------------------------------------------------
+
+    filename = "log_best_trials.csv"
+
+    # Verifica se il file esiste
+    file_exists = os.path.isfile(filename)
+
+    # Salva:
+    # mode='a' -> Append (aggiunge in coda)
+    # header=not file_exists -> Scrive l'intestazione solo se il file è nuovo
+    top_5_clean.to_csv(filename, mode='a', header=not file_exists, index=False)
+
+    print(f"I 5 migliori trial sono stati aggiunti a: {filename}")
 
 
 def make_objective():
     def objective(trial):
 
         cfg = ControllerConfig(Tc=2e-3)
+        
+        cfg.lambda_pos = trial.suggest_float("lambda_pos", 100, 1e5, log=True)
+        cfg.lambda_vel = trial.suggest_float("lambda_vel", 1e-3, 1e3, log=True)
+        cfg.lambda_acc = trial.suggest_float("lambda_acc", 1e-15, 1e-4, log=True)
+        cfg.lambda_scaling = trial.suggest_float("lambda_scaling", 10, 1e3, log=True)
+        cfg.gamma = trial.suggest_float("gamma", 0.1, 20, log=True)
+
         delta = 4.5
 
         cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta)
@@ -32,7 +84,7 @@ def make_objective():
 
         try:
             cost, viol_rate, mean_scale, mean_traj_err = run_episode_with_timeout(
-                cfg=cfg, Tc=2e-3, duration=1000.0,
+                cfg=cfg, Tc=2e-3, duration=150,
                 timeout=6000
             )
             trial.set_user_attr("mean_scale", mean_scale)
@@ -274,18 +326,18 @@ storage = optuna.storages.RDBStorage(
 )
 
 study = optuna.create_study(
-    directions=["maximize"],
-    sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
+    direction="maximize",
     storage=storage,
     # load_if_exists=True,
-    # study_name=f"dynamic_params_polynomial_{time.strftime('%Y%m%d-%H%M%S')}",
-    study_name=f"dynamic_params_polynomial_20260216-094358",
+    sampler=CmaEsSampler(restart_strategy="ipop"), # 'ipop' riavvia se si blocca in un minimo locale
+    study_name=f"params_test_{time.strftime('%Y%m%d-%H%M%S')}",
+    # study_name=f"dynamic_params_polynomial_20260216-094358",
     load_if_exists=True,
 
 )
 study.set_metric_names(["cost function"])
-study.optimize(make_objective(), n_trials=1000, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
-
+study.optimize(make_objective(), n_trials=3000, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
+save_data(study)
 # print (run_episode(1e3,1e3,1e3,1e-3,5,1))
 
 

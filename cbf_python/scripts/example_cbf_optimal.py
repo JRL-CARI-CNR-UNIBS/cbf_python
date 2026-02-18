@@ -49,12 +49,12 @@ from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
 import pandas as pd
 
 
-params_filename = "../parameters_set.csv"
+params_filename = "parameters_set.csv"
 set_ID = "0"
 duration = 5000.0
 
-SHOW_DATA = False
-USE_BRIDGE = False
+SHOW_DATA = True
+USE_BRIDGE = True
 LOG_DATA = False
 SAVE_DATA = False
 
@@ -227,7 +227,7 @@ def main():
 
     cfg.Dq_max = cfg.Dq_max*0.25
     cfg.DDq_max = cfg.DDq_max*0.2
-    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.25, DDq_max=cfg.DDq_max*0.25)
+    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.15, DDq_max=cfg.DDq_max*0.15)
     print("Computing trajectory...")
     # BRING THE ROBOT AT HOME BEFORE STARTING THE TEST
     if USE_BRIDGE:

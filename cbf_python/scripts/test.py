@@ -1,16 +1,16 @@
-import os
-from pathlib import Path
+# Script di pulizia per marcare come FAIL i trial vecchi bloccati
+import optuna
+from optuna.trial import TrialState
+from datetime import datetime, timedelta
+POSTGRES_URL = "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
 
-# 1. Get the absolute path of the directory where THIS script is located
-script_dir = Path(__file__).parent.resolve()
+study = optuna.load_study(study_name="...", storage=POSTGRES_URL)
 
-# 2. Navigate relative to the script's location
-# Using / operator with Path objects is the cleanest way to join paths
-params_path = (script_dir / ".." / "parameters_set.csv").resolve()
-
-# 3. Change the working directory to the folder containing the target file
-os.chdir(params_path.parent)
-
-print(f"Script directory: {script_dir}")
-print(f"Target file path: {params_path}")
-print(f"New working directory: {os.getcwd()}")
+print("Controllo trial bloccati...")
+for trial in study.trials:
+    # Se è Running da più di 10 minuti, probabilmente è uno zombie
+    if trial.state == TrialState.RUNNING:
+        # Controllo rozzo basato sull'orario di inizio (se disponibile)
+        if trial.datetime_start and (datetime.now() - trial.datetime_start) > timedelta(minutes=10):
+            print(f"Marcando trial {trial.number} come FAIL (Zombie)")
+            study.tell(trial.number, state=TrialState.FAIL)

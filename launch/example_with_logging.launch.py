@@ -71,7 +71,7 @@ def generate_launch_description():
     )
     # ---- 3) python example_cbf_optimal.py ----
     cbf_process = ExecuteProcess(
-        cmd=['python3', '/home/nyquist/projects/python/cbf_python_ws/src/cbf_python/cbf_python/example_cbf_optimal.py'],
+        cmd=['python3', '/home/nyquist/projects/python/cbf_python_ws/src/cbf_python/cbf_python/scripts/example_cbf_optimal.py'],
         output='screen',
     )
 
