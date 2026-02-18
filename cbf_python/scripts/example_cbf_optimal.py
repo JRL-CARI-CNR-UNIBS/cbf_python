@@ -31,8 +31,9 @@ from scripts.util.joint_interpolator import SegmentedJointTrap
 from scripts.util.visualization_daemon import VisualizationDaemon
 from sharework import loadSharework
 
-from scripts.util.bcf_utils import make_summary_figure, print_stats_table
-
+from scripts.util.test_utils import generate_obs_state, generate_velocity, compute_ee_pose, create_base_cfg, \
+    bring_robot_home, plan_path, compute_cartesian_poses
+from scripts.util.mean_visualizer import StochasticCBFVisualizer
 import functools
 
 from Controller.optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
@@ -50,31 +51,17 @@ import pandas as pd
 
 params_filename = "../parameters_set.csv"
 set_ID = "0"
-duration = 15000.0
+duration = 5000.0
 
 SHOW_DATA = False
 USE_BRIDGE = False
 LOG_DATA = False
-SAVE_DATA = True
+SAVE_DATA = False
 
-parameters_type = "f"
+parameters_type = "0"
 
 stop_event = threading.Event()
 
-def compute_ee_pose(q, model, data, ee_frame_id):
-    """
-    Compute forward kinematics of the end-effector for joint config q.
-    Returns (position, rotation_matrix, SE3).
-    """
-    # Forward kinematics for all joints
-    pin.forwardKinematics(model, data, q)
-    # Update frame placements
-    pin.updateFramePlacements(model, data)
-
-    T_ee = data.oMf[ee_frame_id]  # SE3 from world (o) to frame (f=tool0)
-    p = T_ee.translation          # 3D position
-    R = T_ee.rotation             # 3x3 rotation matrix
-    return p, R, T_ee
 
 def _on_sigint_with_bridge(bridge, signum, frame):
     stop_event.set()
@@ -108,26 +95,7 @@ def main():
 
     # ------------------------ CONTROLLER SETUP -----------------------------------
     Tc =2e-3
-    cfg = ControllerConfig(Tc=Tc)
-    # PAPER PARAMETERS
-    # cfg.lambda_pos =  1083.9977322239226
-    # cfg.lambda_vel = 0.019463569108586626
-    # cfg.lambda_scaling =   88.92080107598409
-    # cfg.lambda_acc =  9.684370933446392e-08
-    # delta = 4.427823857718463
-    # cfg.gamma =   9.651586852673113
-    df = pd.read_csv(params_filename)
-
-    cfg.lambda_pos = float(df.loc[df["ID"] == set_ID, f"lambda_0_pos"].values[0])
-    cfg.lambda_vel = float(df.loc[df["ID"] == set_ID, f"lambda_0_vel"].values[0])
-    cfg.lambda_acc = float(df.loc[df["ID"] == set_ID, f"lambda_0_acc"].values[0])
-    cfg.lambda_scaling = float(df.loc[df["ID"] == set_ID, f"lambda_0_scaling"].values[0])
-    cfg.gamma = float(df.loc[df["ID"] == set_ID, f"gamma_0"].values[0])
-    delta = float(df.loc[df["ID"] == set_ID, f"delta_0_deg"].values[0])
-
-    cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)
-    cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*2
-    cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*4
+    cfg = create_base_cfg(set_ID, Tc, params_filename)
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
 
     target_name = "ur10e_wrist_3_joint"
@@ -255,96 +223,20 @@ def main():
     q = first_joint_position.copy()
 
     # ---------------------------TEST WAYPOINTS ------------------------------
-    q10 = np.array([ 31.0, -78.0, 115.0, -127.0, 86.0, -32.0])*np.pi/180.0
-    q20 =  np.array([ 31.0, -83.0, 98.0, -110.0, 86.0, -32.0])*np.pi/180.0
-    q22 =  np.array([ 40.0, -126.0, 141.0, -100.0, 86.0, 45.0])*np.pi/180.0
-    q25 =  np.array([ 130.0, -100.0, 125.0, -115.0, 94.0, -20.0])*np.pi/180.0
-    q30 =  np.array([ 136.0, -60.0, 90.0, -122.0, 90.0, 45.0])*np.pi/180.0
-    q40 =  np.array([ 134.0, -65.0, 70.0, -90.0, 90.0, 45.0])*np.pi/180.0
+    q = first_joint_position.copy()
+
     cfg.Dq_max = cfg.Dq_max*0.25
     cfg.DDq_max = cfg.DDq_max*0.2
     planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.25, DDq_max=cfg.DDq_max*0.25)
     print("Computing trajectory...")
     # BRING THE ROBOT AT HOME BEFORE STARTING THE TEST
     if USE_BRIDGE:
-        start_planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.25, DDq_max=cfg.DDq_max*0.25)
-        print(f"Bringing robot to home position from {q.T} to {home.T}")
-        start_planner.addWayPoint(q)
-        start_planner.addWayPoint(home)
-        t_initial = 0.0
-
-        trajectory_time_initial = 0.0
-        start_time = start_planner.computeTime()
-        print(f"Bringing robot to home position, total time: {start_time}")
-        time.sleep(1.0)
-        ctrl.reset_state(q)
-        # test_start = True
-        while np.linalg.norm(home-bridge.getPositions()) > 0.01:
-            loop_start = time.perf_counter()
-            obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
-
-            nominal_q, nominal_Dq, nominal_DDq = start_planner.getMotionLaw(trajectory_time_initial)
-            
-            out = ctrl.step(
-                obs_pos=obstacle_positions,
-                obs_vel=obstacle_velocities,
-                obs_acc=obstacle_accelerations,
-                nominal_q=nominal_q,
-                nominal_Dq=nominal_Dq, 
-                nominal_DDq=nominal_DDq
-            )
-            q = out["q"]
-            bridge.sendCommand(q)
-
-            # --------------------------- INTEGRATION ----------------------------
-            t_initial += Tc
-            trajectory_time_initial = out["trajectory_time"]
-
-            elapsed = time.perf_counter() - loop_start
-            
-            rest = Tc - elapsed
-            if rest > 0:
-                rest = max(0.0,Tc - elapsed)
-                time.sleep(rest)
-
+        bring_robot_home(cfg, q, home, bridge, ctrl)
         q = home.copy()
     # 2 · add way‑points -------------------------------------------
-
-    planner.addWayPoint(q)
-    planner.addWayPoint(q10)
-    # planner.addWayPoint(q20)
-    # planner.addWayPoint(q10)
-    planner.addWayPoint(q22)
-    planner.addWayPoint(q25)
-    planner.addWayPoint(q30)
-    # planner.addWayPoint(q40)
-    # planner.addWayPoint(q30)
-    planner.addWayPoint(q)
+    plan_path(planner,q)
     n_wp = 6
-    configs = {
-        "q": q,
-        "q10": q10,
-        "q20": q20,
-        "q22": q22,
-        "q25": q25,
-        "q30": q30,
-        "q40": q40,
-    }
-    cartesian_configs = {
-        "q": 0.0,
-        "q10": 0.0,
-        "q20": 0.0,
-        "q22": 0.0,
-        "q25": 0.0,
-        "q30": 0.0,
-        "q40": 0.0,
-    }
-    tool_frame_name = "ur10e_wrist_3_joint"
-    tool_frame_id = model.getFrameId(tool_frame_name)
-    data = model.createData()
-    for name in cartesian_configs:
-        p, R, T_ee = compute_ee_pose(configs[name], model, data, tool_frame_id)
-        cartesian_configs[name] = p.tolist()
+    cartesian_configs = compute_cartesian_poses(q, model)
 
     T_total = planner.computeTime()
     print(f"Total time: {T_total}")
@@ -372,6 +264,7 @@ def main():
         low_scale_count = 0
         scaling_threshold = 0.5
         # test_start = True
+        visualizer = StochasticCBFVisualizer()
         while t < duration and not stop_event.is_set():
             # if t%T_total == 0:
             #     test_start = False
@@ -474,19 +367,19 @@ def main():
             # print("Min dist: ", np.min(dist))
             if np.min(dist) > 0.0:
                 min_dist.append(np.min(dist))
-            elapsed = time.perf_counter() - loop_start
-            if cycles>1:
-                ct.append(elapsed)
-                scaling_log.append(Dtrajectory_time)
-                h_log.append(out["h_min"])
-                trj_error_log.append(out["trajectory_error"])
-
             if out["h_min"] < 0 and out["vr_min"] < -1e-3:
                 violations += 1
             sum_scale += out["Dtrajectory_time"]
             trajectory_error_sum += out["trajectory_error"]
             if (Dtrajectory_time) < scaling_threshold:
                 low_scale_count += 1
+            visualizer.update_vectors(out["h_min"], out["d_min"], out["vr_min"]-out["vh_min"], t, cycles)
+            elapsed = time.perf_counter() - loop_start
+            if cycles>1:
+                ct.append(elapsed)
+                scaling_log.append(Dtrajectory_time)
+                h_log.append(out["h_min"])
+                trj_error_log.append(out["trajectory_error"])
             rest = Tc - elapsed
             # print(ctrl.cfg.delta_q_max)
             if rest > 0:
@@ -559,14 +452,7 @@ def main():
     print(f"MEAN SCALING: {mean_scale}")
     print(f"MEAN TRAJECTORY ERROR: {mean_trajectory_error}")
     print(f"LOW SCALE RATE: {low_scale_rate*100}")
-    # print_stats_table(stats)
-    # _ = make_summary_figure(
-    #     computation_times,
-    #     h_log,
-    #     trj_error_log,
-    #     scaling_log,
-    # )
-    folder_name = ""
+    visualizer.compute_mean_cov()
     # CREATING CARTESIAN REFERENCE CSV FILE
     if LOG_DATA:
         if USE_BRIDGE:

@@ -12,7 +12,7 @@ from queue import Empty
 # Database connection (for dashboard)
 POSTGRES_URL = "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
 
-def make_objective(h_min, h_max):
+def make_objective():
     def objective(trial):
         lambda_pos = trial.suggest_float("lambda_pos", 5e2, 5e4, log=True)
         lambda_vel = trial.suggest_float("lambda_vel", 1e-3, 1e3, log=True)
@@ -22,15 +22,15 @@ def make_objective(h_min, h_max):
         delta = trial.suggest_float("delta_deg", 0.1, 5, log=True)
 
         try:
-            viol_rate, mean_scale, mean_traj_err, low_scale_rate = run_episode_with_timeout(
+           c_f = run_episode_with_timeout(
                 lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=500.0,
-                h_min = h_min, h_max = h_max, timeout=600
+                timeout=600
             )
         except TimeoutError:
             # For directions: [minimize, maximize, minimize, minimize]
-            return (1e9, -1e9, 1e9, 1e9)
+            return 0
 
-        return (viol_rate, mean_scale, mean_traj_err, low_scale_rate)
+        return c_f
     return objective
 
 # ----------------- STATIC INITIALIZATION (only once) -----------------
@@ -126,7 +126,7 @@ for name in cartesian_configs:
 
 scaling_threshold = 0.5  
 #-------------------- EVALUATION FUNCTION --------------------
-def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=500.0, h_min = -1000.0, h_max = 1000.0):
+def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=500.0):
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
@@ -202,14 +202,13 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
             return 1.0, -1.0, 1000.0, 1.0
         t += Tc
         
-        if h_min <= out["h_min"] <= h_max:
-            if out["h_min"] < 0 and out["vr_min"] < -1e-3:
-                violations += 1
-            sum_scale += out["Dtrajectory_time"]
-            nsteps += 1
-            trajectory_error_sum += out["trajectory_error"]
-            if out["Dtrajectory_time"] < scaling_threshold:
-                low_scale_count += 1
+        if out["h_min"] < 0 and out["vr_min"] < -1e-3:
+            violations += 1
+        sum_scale += out["Dtrajectory_time"]
+        nsteps += 1
+        trajectory_error_sum += out["trajectory_error"]
+        if out["Dtrajectory_time"] < scaling_threshold:
+            low_scale_count += 1
         trajectory_time = out["trajectory_time"]
         
 
@@ -223,7 +222,7 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
     mean_scale = sum_scale / max(1, nsteps)
     mean_trajectory_error = trajectory_error_sum / max(1, nsteps)
     low_scale_rate = low_scale_count / max(1, nsteps)
-    return viol_rate, mean_scale, mean_trajectory_error, low_scale_rate
+    return mean_scale - 10.0 * viol_rate -mean_trajectory_error
 
 
 def _run_episode_worker(args, kwargs, q):
@@ -277,23 +276,23 @@ storage = optuna.storages.RDBStorage(
     # failed_trial_callback=RetryFailedTrialCallback(max_retry=1),
 )
 
-h_dic = {
-    "h_negative": [-1000.0, 0.0],
-    "h_q1": [0.0, 0.25],
-    "h_q2": [0.25, 0.5],
-    "h_q3": [0.5, 0.75],
-    "h_positive": [0.75, 1000.0],
-}
-for h_key, (h_min, h_max) in h_dic.items():
+# h_dic = {
+#     "h_negative": [-1000.0, 0.0],
+#     "h_q1": [0.0, 0.25],
+#     "h_q2": [0.25, 0.5],
+#     "h_q3": [0.5, 0.75],
+#     "h_positive": [0.75, 1000.0],
+# }
+# for h_key, (h_min, h_max) in h_dic.items():
 
-    study = optuna.create_study(
-        directions=["minimize", "maximize","minimize", "minimize"],
-        sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
-        storage=storage,
-        #load_if_exists=True,
-        study_name=f"dynamic_params_{h_key}_{time.strftime('%Y%m%d-%H%M%S')}",
-    )
-    study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "low_scale_rate"])
-    study.optimize(make_objective(h_min, h_max), n_trials=2500, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
+study = optuna.create_study(
+    directions=["maximize"],
+    sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
+    storage=storage,
+    #load_if_exists=True,
+    study_name=f"params_test_{time.strftime('%Y%m%d-%H%M%S')}",
+)
+study.set_metric_names(["cost_function"])
+study.optimize(make_objective(), n_trials=2500, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
 
     # print (run_episode(1e3,1e3,1e3,1e-3,5,1))

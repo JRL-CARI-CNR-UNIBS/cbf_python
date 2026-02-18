@@ -1,21 +1,8 @@
 # =============================================================================
 # UR10 Kinematic Simulation with Pinocchio and Meshcat (threaded visual updates)
 # =============================================================================
-#
-# This version spawns a background **daemon** thread that handles every visual
-# operation (robot pose, moving obstacles, goal box, and HUD text).  The main
-# 1 kHz control loop therefore never touches Meshcat directly, so its real‑time
-# budget is preserved even on modest hardware.
-#
-# -----------------------------------------------------------------------------
-#                      ***  CHANGES IN THIS REVISION  ***
-# -----------------------------------------------------------------------------
-# • `flush_visuals()` acquires `render_lock` **non‑blocking**; if the previous
-#   visual push is still running we skip this frame instead of waiting.  This
-#   prevents the control thread from stalling.
-# • Completed the main loop, including the CBF/QP branch, joint‑space
-#   integration, shared‑state publication, and fixed‑period sleep.
-# • Added graceful keyboard‑interrupt handling: Ctrl‑C shuts down cleanly.
+# This version implements gaussian methods for dynamic parameters variation.
+# TODO Gaussan process implementation
 # -----------------------------------------------------------------------------
 import os
 import csv
@@ -31,11 +18,7 @@ from scripts.util.joint_interpolator import SegmentedJointTrap
 from scripts.util.visualization_daemon import VisualizationDaemon
 from sharework import loadSharework
 
-from scripts.util.bcf_utils import make_summary_figure, print_stats_table
-
 import functools
-
-from Controller.optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
 
 import math
 from datetime import datetime
@@ -45,16 +28,16 @@ import signal
 import threading
 from scripts.util import csv_publishers, test_publish_utils as pub_utils
 from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
-from Controller.dynamic_params_controllers import (PolynomialControllerConfig, PolynomialOptimalController,
-                                                   StocasticalControllerConfig, StocasticalOptimalController, compute_generic_lambda)
-from scripts.util.test_utils import generate_obs_state, generate_velocity, compute_ee_pose
+from Controller.gaussian_controller import GaussianController, GaussianControllerConfig, GaussianSet
+from scripts.util.test_utils import generate_obs_state, generate_velocity, compute_ee_pose, create_gaussian_config, \
+    bring_robot_home, plan_path, compute_cartesian_poses
 import pandas as pd
 from scripts.util.mean_visualizer import StochasticCBFVisualizer
 
 stop_event = threading.Event()
 
 params_filename = "../parameters_set.csv"
-set_ID = "3083_no_delta"
+set_IDs = ["3083_no_delta"]
 duration = 15000.0
 
 USE_BRIDGE = False
@@ -64,8 +47,8 @@ SHOW_DATA = False
 SAVE_DATA = True
 test_type = "O"
 
-PLOT_MEAN = False
-USE_STOCASTIC = True
+PLOT_GAUSSIANS = False
+
 def _on_sigint_with_bridge(bridge, signum, frame):
     stop_event.set()
     try:
@@ -79,10 +62,6 @@ def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
 
     log_path = "../resullts/simulation/scaling"
-    # rclpy.init()
-
-
-
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
     UR10E_JOINTS = [
@@ -99,72 +78,13 @@ def main():
 
     # ------------------------ CONTROLLER SETUP -----------------------------------
     Tc =2e-3
-    cfg = StocasticalControllerConfig(Tc=Tc)
+    delta = 4.5
     # PAPER PARAMETERS
-
-    cfg.h_t = 2.0
-
     df = pd.read_csv(params_filename)
 
+    cfg = create_gaussian_config(set_IDs, df, Tc, delta)
 
-    cfg.lambda_0_pos = float(df.loc[df["ID"] == set_ID, "lambda_0_pos"].values[0])
-    cfg.lambda_0_vel = float(df.loc[df["ID"] == set_ID, "lambda_0_vel"].values[0]) 
-    cfg.lambda_0_acc =  float(df.loc[df["ID"] == set_ID, "lambda_0_acc"].values[0])
-    cfg.lambda_0_scaling = float(df.loc[df["ID"] == set_ID, "lambda_0_scaling"].values[0])
-    cfg.gamma_0 = float(df.loc[df["ID"] == set_ID, "gamma_0"].values[0])
-    # cfg.delta_0 = float(df.loc[df["ID"] == set_ID, "delta_0_deg"].values[0])
-
-    cfg.lambda_f_pos = float(df.loc[df["ID"] == set_ID, "lambda_f_pos"].values[0])
-    cfg.lambda_f_vel = float(df.loc[df["ID"] == set_ID, "lambda_f_vel"].values[0])
-    cfg.lambda_f_acc = float(df.loc[df["ID"] == set_ID, "lambda_f_acc"].values[0])
-    cfg.lambda_f_scaling = float(df.loc[df["ID"] == set_ID, "lambda_f_scaling"].values[0])
-    cfg.gamma_f = float(df.loc[df["ID"] == set_ID, "gamma_f"].values[0])
-    # cfg.delta_f = float(df.loc[df["ID"] == set_ID, "delta_f_deg"].values[0])
-
-    cfg.n_pos = float(df.loc[df["ID"] == set_ID, "n_pos"].values[0])
-    cfg.n_vel = float(df.loc[df["ID"] == set_ID, "n_vel"].values[0])
-    cfg.n_acc = float(df.loc[df["ID"] == set_ID, "n_acc"].values[0])
-    cfg.n_scaling = float(df.loc[df["ID"] == set_ID, "n_scaling"].values[0])
-    cfg.n_gamma = float(df.loc[df["ID"] == set_ID, "n_gamma"].values[0])
-    # cfg.n_delta = float(df.loc[df["ID"] == set_ID, "n_delta"].values[0])
-
-    cfg.m_pos = float(df.loc[df["ID"] == set_ID, "m_pos"].values[0])
-    cfg.m_vel = float(df.loc[df["ID"] == set_ID, "m_vel"].values[0])
-    cfg.m_acc = float(df.loc[df["ID"] == set_ID, "m_acc"].values[0])
-    cfg.m_scaling = float(df.loc[df["ID"] == set_ID, "m_scaling"].values[0])
-    cfg.m_gamma = float(df.loc[df["ID"] == set_ID, "m_gamma"].values[0])
-    # cfg.m_delta = float(df.loc[df["ID"] == set_ID, "m_delta"].values[0])
-
-    cfg.w_pos = float(df.loc[df["ID"] == set_ID, "w_pos"].values[0])
-    cfg.w_vel =  float(df.loc[df["ID"] == set_ID, "w_vel"].values[0])
-    cfg.w_acc = float(df.loc[df["ID"] == set_ID, "w_acc"].values[0])
-    cfg.w_scaling = float(df.loc[df["ID"] == set_ID, "w_scaling"].values[0])
-    cfg.w_gamma = float(df.loc[df["ID"] == set_ID, "w_gamma"].values[0])
-    # cfg.w_delta = float(df.loc[df["ID"] == set_ID, "w_delta"].values[0])
-
-    if USE_STOCASTIC:
-        cfg.n = int(df.loc[df["ID"] == set_ID, "n_samples"].values[0])
-        cfg.cv_tol = float(df.loc[df["ID"] == set_ID, "cv_tol"].values[0])
-        cfg.k_min = float(df.loc[df["ID"] == set_ID, "k_min"].values[0])
-        cfg.p = float(df.loc[df["ID"] == set_ID, "p"].values[0])
-        cfg.sigma_tol = 0.001
-
-    cfg.lambda_pos = cfg.lambda_0_pos
-    cfg.lambda_vel = cfg.lambda_0_vel
-    cfg.lambda_scaling = cfg.lambda_0_scaling
-    cfg.lambda_acc = cfg.lambda_0_acc
-    cfg.gamma = cfg.gamma_0
-    delta = cfg.delta_0
-    delta = 4.5
-
-    cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta)
-    cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
-    cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
-
-    if USE_STOCASTIC:
-        ctrl = StocasticalOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
-    else:
-        ctrl = PolynomialOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
+    ctrl = GaussianController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1,n_samples=len(cfg.gaussian_sets))
 
     target_name = "ur10e_wrist_3_joint"
     idx = UR10E_JOINTS.index(target_name)
@@ -183,7 +103,7 @@ def main():
         bridge.switch_to_forward_position_controller_service()
     else:
         from Command_bridge.fake_command_bridge import FakeCommandBridge
-        # Build camera pose from your INITI snippet
+        # Build camera pose from your INIT snippet
         quat = pin.Quaternion(0.83, 0.185, 0.513, 0.12)
         quat.normalize()
 
@@ -257,7 +177,6 @@ def main():
                 column_names="time,human_keypoint_0_x,human_keypoint_0_y,human_keypoint_0_z,human_keypoint_1_x,human_keypoint_1_y,human_keypoint_1_z,human_keypoint_2_x,human_keypoint_2_y,human_keypoint_2_z,human_keypoint_3_x,human_keypoint_3_y,human_keypoint_3_z,human_keypoint_4_x,human_keypoint_4_y,human_keypoint_4_z,human_keypoint_5_x,human_keypoint_5_y,human_keypoint_5_z,human_keypoint_6_x,human_keypoint_6_y,human_keypoint_6_z,human_keypoint_7_x,human_keypoint_7_y,human_keypoint_7_z,human_keypoint_8_x,human_keypoint_8_y,human_keypoint_8_z,human_keypoint_9_x,human_keypoint_9_y,human_keypoint_9_z,human_keypoint_10_x,human_keypoint_10_y,human_keypoint_10_z,human_keypoint_11_x,human_keypoint_11_y,human_keypoint_11_z,human_keypoint_12_x,human_keypoint_12_y,human_keypoint_12_z,human_keypoint_13_x,human_keypoint_13_y,human_keypoint_13_z,human_keypoint_14_x,human_keypoint_14_y,human_keypoint_14_z,human_keypoint_15_x,human_keypoint_15_y,human_keypoint_15_z,human_keypoint_16_x,human_keypoint_16_y,human_keypoint_16_z,human_keypoint_17_x,human_keypoint_17_y,human_keypoint_17_z"
             )
 
-
     model = model_wrapper.model
     viz = MeshcatVisualizer(model, model_wrapper.collision_model, model_wrapper.visual_model)
     viz.initViewer(open=True)
@@ -290,100 +209,20 @@ def main():
 
     # --------------------------- CONTROL INITIALISATION --------------------------
     q = first_joint_position.copy()
-
-    # ---------------------------TEST WAYPOINTS ------------------------------
-    q10 = np.array([ 31.0, -78.0, 115.0, -127.0, 86.0, -32.0])*np.pi/180.0
-    q20 =  np.array([ 31.0, -83.0, 98.0, -110.0, 86.0, -32.0])*np.pi/180.0
-    q22 =  np.array([ 40.0, -126.0, 141.0, -100.0, 86.0, 45.0])*np.pi/180.0
-    q25 =  np.array([ 130.0, -100.0, 125.0, -115.0, 94.0, -20.0])*np.pi/180.0
-    q30 =  np.array([ 136.0, -60.0, 90.0, -122.0, 90.0, 45.0])*np.pi/180.0
-    q40 =  np.array([ 134.0, -65.0, 70.0, -90.0, 90.0, 45.0])*np.pi/180.0
     cfg.Dq_max = cfg.Dq_max*0.25
     cfg.DDq_max = cfg.DDq_max*0.2
     planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.25, DDq_max=cfg.DDq_max*0.25)
     print("Computing trajectory...")
     # BRING THE ROBOT AT HOME BEFORE STARTING THE TEST
     if USE_BRIDGE:
-        start_planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.25, DDq_max=cfg.DDq_max*0.25)
-        print(f"Bringing robot to home position from {q.T} to {home.T}")
-        start_planner.addWayPoint(q)
-        start_planner.addWayPoint(home)
-        t_initial = 0.0
-
-        trajectory_time_initial = 0.0
-        start_time = start_planner.computeTime()
-        print(f"Bringing robot to home position, total time: {start_time}")
-        time.sleep(1.0)
-        ctrl.reset_state(q)
-        # test_start = True
-        while np.linalg.norm(home-bridge.getPositions()) > 0.01:
-            loop_start = time.perf_counter()
-
-            obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
-
-            nominal_q, nominal_Dq, nominal_DDq = start_planner.getMotionLaw(trajectory_time_initial)
-            
-            out = ctrl.step(
-                obs_pos=obstacle_positions,
-                obs_vel=obstacle_velocities,
-                obs_acc=obstacle_accelerations,
-                nominal_q=nominal_q,
-                nominal_Dq=nominal_Dq, 
-                nominal_DDq=nominal_DDq
-            )
-            q = out["q"]
-            bridge.sendCommand(q)
-
-            # --------------------------- INTEGRATION ----------------------------
-            t_initial += Tc
-            trajectory_time_initial = out["trajectory_time"]
-
-            elapsed = time.perf_counter() - loop_start
-            
-            rest = Tc - elapsed
-            if rest > 0:
-                rest = max(0.0,Tc - elapsed)
-                time.sleep(rest)
-
+        bring_robot_home(cfg, q, home, bridge, ctrl)
         q = home.copy()
+
     # 2 · add way‑points -------------------------------------------
-
-    planner.addWayPoint(q)
-    planner.addWayPoint(q10)
-    # planner.addWayPoint(q20)
-    # planner.addWayPoint(q10)
-    planner.addWayPoint(q22)
-    planner.addWayPoint(q25)
-    planner.addWayPoint(q30)
-    # planner.addWayPoint(q40)
-    # planner.addWayPoint(q30)
-    planner.addWayPoint(q)
+    plan_path(planner,q)
     n_wp = 6
-    configs = {
-        "q": q,
-        "q10": q10,
-        "q20": q20,
-        "q22": q22,
-        "q25": q25,
-        "q30": q30,
-        "q40": q40,
-    }
-    cartesian_configs = {
-        "q": 0.0,
-        "q10": 0.0,
-        "q20": 0.0,
-        "q22": 0.0,
-        "q25": 0.0,
-        "q30": 0.0,
-        "q40": 0.0,
-    }
-    tool_frame_name = "ur10e_wrist_3_joint"
-    tool_frame_id = model.getFrameId(tool_frame_name)
-    data = model.createData()
-    for name in cartesian_configs:
-        p, R, T_ee = compute_ee_pose(configs[name], model, data, tool_frame_id)
-        cartesian_configs[name] = p.tolist()
 
+    cartesian_configs = compute_cartesian_poses(q, model)
     T_total = planner.computeTime()
     print(f"Total time: {T_total}")
     min_dist = []
@@ -402,13 +241,15 @@ def main():
     low_scale_count = 0
     scaling_threshold = 0.5
     visualizer = StochasticCBFVisualizer()
-    try:
 
+    tool_frame_name = "ur10e_wrist_3_joint"
+    tool_frame_id = model.getFrameId(tool_frame_name)
+    data = model.createData()
+    try:
         t = 0.0
         trajectory_time = 0.0
         timeout_cycles = cycles = 0
         violations = sum_scale = trajectory_error_sum = 0
-
         count_move = 0
         end_eff_pos = np.zeros(3)
         Dtrajectory_time = 1.0
@@ -422,7 +263,6 @@ def main():
             obstacle_accelerations = np.zeros(3)
             obstacle_accelerations = obstacle_accelerations.reshape(1, 3)
         while t < duration and not stop_event.is_set():
-
             loop_start = time.perf_counter()
 
             if USE_BRIDGE:
@@ -534,11 +374,6 @@ def main():
             trajectory_error_sum += out["trajectory_error"]
             if out["Dtrajectory_time"] < scaling_threshold:
                 low_scale_count += 1
-
-            if PLOT_MEAN:
-                visualizer.update_vectors(out["h_min"], t, cycles)
-                visualizer.lambda_stoc_vec.append(ctrl.cfg.lambda_pos)
-                visualizer.lambda_det_vec.append(compute_generic_lambda(out["h_min"], ctrl.cfg.h_t,ctrl.cfg.polynomial_dict["pos"]))
             rest = Tc - elapsed
             if rest > 0:
                 if SHOW_DATA:
@@ -609,14 +444,6 @@ def main():
     print(f"VIOLATION RATE: {viol_rate}")
     print(f"MEAN SCALING: {mean_scale}")
     print(f"MEAN TRAJECTORY ERROR: {mean_trajectory_error}")
-    # print_stats_table(stats)
-    # _ = make_summary_figure(
-    #     computation_times,
-    #     h_log,
-    #     trj_error_log,
-    #     scaling_log,
-    # )
-    folder_name = ""
     # CREATING CARTESIAN REFERENCE CSV FILE
     if LOG_DATA:
         if USE_BRIDGE:
@@ -624,8 +451,7 @@ def main():
         else:
             folder_name = test_path
         generate_cartesian_trajectory(folder_name+"/")
-    if PLOT_MEAN:
-        visualizer.plot_mean_std(ctrl.cfg.lambda_0_pos, ctrl.cfg.lambda_f_pos)
+
     # SAVING RESULTS
     if SAVE_DATA:
         file_path = '../resullts/simulation_data.csv'
@@ -650,7 +476,7 @@ def main():
 
         # I dati da salvare (calcolati come nel tuo esempio)
         row_data = {
-            "test_type": f"TEST_POLYNOMIAL_ID_{set_ID}",
+            "test_type": f"TEST_SIMPLE_GAUSSIAN",
             "lambda_pos": cfg.lambda_pos,
             "lambda_vel": cfg.lambda_vel,
             "lambda_scaling": cfg.lambda_scaling,

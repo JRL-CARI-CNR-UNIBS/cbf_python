@@ -1,5 +1,17 @@
 import pinocchio as pin
 import numpy as np
+import pandas as pd
+from Controller.gaussian_controller import GaussianController, GaussianControllerConfig, GaussianSet
+import time
+from scripts.util.joint_interpolator import SegmentedJointTrap
+from Controller.optimal_cbf_task_controller import ControllerConfig
+# ---------------------------TEST WAYPOINTS ------------------------------
+q10 = np.array([31.0, -78.0, 115.0, -127.0, 86.0, -32.0]) * np.pi / 180.0
+q20 = np.array([31.0, -83.0, 98.0, -110.0, 86.0, -32.0]) * np.pi / 180.0
+q22 = np.array([40.0, -126.0, 141.0, -100.0, 86.0, 45.0]) * np.pi / 180.0
+q25 = np.array([130.0, -100.0, 125.0, -115.0, 94.0, -20.0]) * np.pi / 180.0
+q30 = np.array([136.0, -60.0, 90.0, -122.0, 90.0, 45.0]) * np.pi / 180.0
+q40 = np.array([134.0, -65.0, 70.0, -90.0, 90.0, 45.0]) * np.pi / 180.0
 
 
 def generate_velocity(start_point, end_point, magnitude):
@@ -80,3 +92,135 @@ def generate_obs_state(obstacle_positions, obstacle_velocities, cycles, enable_s
         enable_spawm = True
 
     return obstacle_positions, obstacle_velocities, enable_spawm, count_move
+
+def create_base_cfg(set_ID, Tc, filename):
+    cfg = ControllerConfig(Tc=Tc)
+
+    df = pd.read_csv(filename)
+
+    cfg.lambda_pos = float(df.loc[df["ID"] == set_ID, f"lambda_0_pos"].values[0])
+    cfg.lambda_vel = float(df.loc[df["ID"] == set_ID, f"lambda_0_vel"].values[0])
+    cfg.lambda_acc = float(df.loc[df["ID"] == set_ID, f"lambda_0_acc"].values[0])
+    cfg.lambda_scaling = float(df.loc[df["ID"] == set_ID, f"lambda_0_scaling"].values[0])
+    cfg.gamma = float(df.loc[df["ID"] == set_ID, f"gamma_0"].values[0])
+    delta = float(df.loc[df["ID"] == set_ID, f"delta_0_deg"].values[0])
+
+    cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta)
+    cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
+    cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
+    return cfg
+
+def create_gaussian_config(set_IDs : list, df: pd.DataFrame, Tc, delta):
+    cfg = GaussianControllerConfig(Tc = Tc)
+    for set_ID in set_IDs:
+        cfg.lambda_pos = float(df.loc[df["ID"] == set_ID, "lambda_0_pos"].values[0])
+        cfg.lambda_vel = float(df.loc[df["ID"] == set_ID, "lambda_0_vel"].values[0])
+        cfg.lambda_acc = float(df.loc[df["ID"] == set_ID, "lambda_0_acc"].values[0])
+        cfg.lambda_scaling = float(df.loc[df["ID"] == set_ID, "lambda_0_scaling"].values[0])
+        cfg.gamma = float(df.loc[df["ID"] == set_ID, "gamma_0"].values[0])
+
+        h_mean = float(df.loc[df["ID"] == set_ID, "h_mean"].values[0])
+        d_mean = float(df.loc[df["ID"] == set_ID, "d_mean"].values[0])
+        v_rel_mean = float(df.loc[df["ID"] == set_ID, "v_rel_mean"].values[0])
+
+        cov_values = df.loc[0, "cov_00":"cov_22"].values
+        cov_matrix = cov_values.astype(float).reshape((3, 3))
+        gaussian_set = GaussianSet()
+        gaussian_set.covariance = cov_matrix
+        gaussian_set.means["h"] = h_mean
+        gaussian_set.means["d"] = d_mean
+        gaussian_set.means["v"] = v_rel_mean
+
+        gaussian_set.lambda_ref["pos"] = cfg.lambda_pos
+        gaussian_set.lambda_ref["vel"] = cfg.lambda_vel
+        gaussian_set.lambda_ref["acc"] = cfg.lambda_acc
+        gaussian_set.lambda_ref["scaling"] = cfg.lambda_scaling
+        gaussian_set.lambda_ref["gamma"] = cfg.gamma
+        cfg.gaussian_sets.append(gaussian_set)
+
+    cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta)
+    cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
+    cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
+
+    cfg.precompute_gaussian_parameters()
+    return cfg
+
+def bring_robot_home(cfg, q, home, bridge, ctrl):
+    start_planner = SegmentedJointTrap(Dq_max=cfg.Dq_max * 0.25, DDq_max=cfg.DDq_max * 0.25)
+    print(f"Bringing robot to home position from {q.T} to {home.T}")
+    start_planner.addWayPoint(q)
+    start_planner.addWayPoint(home)
+    t_initial = 0.0
+    Tc = cfg.Tc
+    trajectory_time_initial = 0.0
+    start_time = start_planner.computeTime()
+    print(f"Bringing robot to home position, total time: {start_time}")
+    time.sleep(1.0)
+    ctrl.reset_state(q)
+    # test_start = True
+    while np.linalg.norm(home - bridge.getPositions()) > 0.01:
+        loop_start = time.perf_counter()
+
+        obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
+
+        nominal_q, nominal_Dq, nominal_DDq = start_planner.getMotionLaw(trajectory_time_initial)
+
+        out = ctrl.step(
+            obs_pos=obstacle_positions,
+            obs_vel=obstacle_velocities,
+            obs_acc=obstacle_accelerations,
+            nominal_q=nominal_q,
+            nominal_Dq=nominal_Dq,
+            nominal_DDq=nominal_DDq
+        )
+        q = out["q"]
+        bridge.sendCommand(q)
+
+        # --------------------------- INTEGRATION ----------------------------
+        t_initial += Tc
+        trajectory_time_initial = out["trajectory_time"]
+
+        elapsed = time.perf_counter() - loop_start
+
+        rest = Tc - elapsed
+        if rest > 0:
+            rest = max(0.0, Tc - elapsed)
+            time.sleep(rest)
+def plan_path(planner, q):
+    planner.addWayPoint(q)
+    planner.addWayPoint(q10)
+    # planner.addWayPoint(q20)
+    # planner.addWayPoint(q10)
+    planner.addWayPoint(q22)
+    planner.addWayPoint(q25)
+    planner.addWayPoint(q30)
+    # planner.addWayPoint(q40)
+    # planner.addWayPoint(q30)
+    planner.addWayPoint(q)
+
+def compute_cartesian_poses(q, model):
+    configs = {
+        "q": q,
+        "q10": q10,
+        "q20": q20,
+        "q22": q22,
+        "q25": q25,
+        "q30": q30,
+        "q40": q40,
+    }
+    cartesian_configs = {
+        "q": 0.0,
+        "q10": 0.0,
+        "q20": 0.0,
+        "q22": 0.0,
+        "q25": 0.0,
+        "q30": 0.0,
+        "q40": 0.0,
+    }
+    tool_frame_name = "ur10e_wrist_3_joint"
+    tool_frame_id = model.getFrameId(tool_frame_name)
+    data = model.createData()
+    for name in cartesian_configs:
+        p, R, T_ee = compute_ee_pose(configs[name], model, data, tool_frame_id)
+        cartesian_configs[name] = p.tolist()
+    return cartesian_configs

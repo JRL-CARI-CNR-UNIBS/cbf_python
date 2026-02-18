@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-class StocasticalCBFVisualizer:
+class StochasticCBFVisualizer:
     def __init__(self, n=50):
         self.n = n
         self.cycles = 0
@@ -39,7 +39,12 @@ class StocasticalCBFVisualizer:
         var_d = np.var(self.d_vec, ddof=1)
         var_v = np.var(self.v_vec, ddof=1)
 
-        print("--- Matrice di Covarianza (Σ) ---")
+        print(f"--- Medie dati ---")
+        print(f"h: {np.mean(self.h_vec):.4f}")
+        print(f"d: {np.mean(self.d_vec):.4f}")
+        print(f"v: {np.mean(self.v_vec):.4f}")
+
+        print("\n--- Matrice di Covarianza (Σ) ---")
         print(np.round(cov_matrix, 4))
         print("\n--- Verifica Varianze Singole ---")
         print(f"Varianza di h: {var_h:.4f}")
