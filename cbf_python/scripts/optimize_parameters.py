@@ -58,7 +58,7 @@ quat = pin.Quaternion(0.83, 0.185, 0.513, 0.12)
 quat.normalize()
 R = quat.toRotationMatrix()
 
-T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
+T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
 
 home = np.array([90, -140, 140, -90, 90, 0]) * np.pi / 180.0
 UR10E_JOINTS = [
