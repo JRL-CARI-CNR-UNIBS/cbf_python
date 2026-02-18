@@ -3,6 +3,10 @@ import matplotlib.pyplot as plt
 
 class StochasticCBFVisualizer:
     def __init__(self, n=50):
+        self.v_mean = None
+        self.d_mean = None
+        self.h_mean = None
+        self.cov_matrix = None
         self.n = n
         self.cycles = 0
         self.h_window = np.zeros(n)
@@ -22,7 +26,7 @@ class StochasticCBFVisualizer:
 
 
 
-    def compute_mean_cov(self):
+    def compute_mean_cov(self, print_val:bool=False):
 
         # 2. Impacchettare i dati in una singola matrice
         # np.vstack impila le liste una sull'altra.
@@ -31,25 +35,27 @@ class StochasticCBFVisualizer:
 
         # 3. Calcolare l'intera Matrice di Covarianza (3x3)
         # NumPy calcola automaticamente sia le varianze (sulla diagonale) che le covarianze
-        cov_matrix = np.cov(data_matrix)
-
+        self.cov_matrix = np.cov(data_matrix)
+        self.h_mean =  np.mean(self.h_vec, axis=0)
+        self.d_mean = np.mean(self.d_vec, axis=0)
+        self.v_mean = np.mean(self.v_vec, axis=0)
         # 4. (Opzionale) Calcolare le varianze singole per verifica
         # ddof=1 indica che stiamo lavorando su un *campione* statistico, non sull'intera popolazione
         var_h = np.var(self.h_vec, ddof=1)
         var_d = np.var(self.d_vec, ddof=1)
         var_v = np.var(self.v_vec, ddof=1)
-
-        print(f"--- Medie dati ---")
-        print(f"h: {np.mean(self.h_vec):.4f}")
-        print(f"d: {np.mean(self.d_vec):.4f}")
-        print(f"v: {np.mean(self.v_vec):.4f}")
-
-        print("\n--- Matrice di Covarianza (Σ) ---")
-        print(np.round(cov_matrix, 4))
-        print("\n--- Verifica Varianze Singole ---")
-        print(f"Varianza di h: {var_h:.4f}")
-        print(f"Varianza di d: {var_d:.4f}")
-        print(f"Varianza di v: {var_v:.4f}")
+        if print_val:
+            print(f"--- Medie dati ---")
+            print(f"h: {np.mean(self.h_vec):.4f}")
+            print(f"d: {np.mean(self.d_vec):.4f}")
+            print(f"v: {np.mean(self.v_vec):.4f}")
+    
+            print("\n--- Matrice di Covarianza (Σ) ---")
+            print(np.round(self.cov_matrix, 4))
+            print("\n--- Verifica Varianze Singole ---")
+            print(f"Varianza di h: {var_h:.4f}")
+            print(f"Varianza di d: {var_d:.4f}")
+            print(f"Varianza di v: {var_v:.4f}")
 
 
     def plot_mean_std(self, lambda_0, lambda_f):
