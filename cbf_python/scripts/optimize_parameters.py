@@ -22,14 +22,16 @@ def make_objective():
         delta = trial.suggest_float("delta_deg", 0.1, 5, log=True)
 
         try:
-           c_f = run_episode_with_timeout(
+           c_f, mean_scale, viol_rate, mean_trajectory_error = run_episode_with_timeout(
                 lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta, Tc=2e-3, duration=500.0,
                 timeout=600
             )
         except TimeoutError:
             # For directions: [minimize, maximize, minimize, minimize]
             return 0
-
+        trial.set_user_attr("mean_scale", mean_scale)
+        trial.set_user_attr("viol_rate", viol_rate)
+        trial.set_user_attr("trajectory_error", mean_trajectory_error)
         return c_f
     return objective
 
@@ -222,7 +224,7 @@ def run_episode(lambda_pos, lambda_vel, lambda_scaling, lambda_acc, gamma, delta
     mean_scale = sum_scale / max(1, nsteps)
     mean_trajectory_error = trajectory_error_sum / max(1, nsteps)
     low_scale_rate = low_scale_count / max(1, nsteps)
-    return mean_scale - 10.0 * viol_rate -mean_trajectory_error
+    return mean_scale - 10.0 * viol_rate -mean_trajectory_error, mean_scale, viol_rate, low_scale_rate
 
 
 def _run_episode_worker(args, kwargs, q):
