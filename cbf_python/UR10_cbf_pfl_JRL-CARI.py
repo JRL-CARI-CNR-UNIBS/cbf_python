@@ -28,7 +28,7 @@ DDq_MAX = np.pi**2*5
 
 
 eps_track = 0.03 # 3cm
-
+rho = 20.0 #parametro softmin e softmax
 
 CSV_UPDATE_TIME = 0.034
 
@@ -64,6 +64,72 @@ def jacobian_h(d, v, v_max, v_pfl, Tr, a_s):
         dh_dv = -Tr
     return np.array([[dh_dd, dh_dv]])
 
+def compute_h_softmin_and_grad(d,v_rel, Tr, a_s, v_pfl, v_max, rho):
+    term_reaz =-(v_rel +v_pfl) * Tr
+    term_fren = (v_rel**2-v_pfl**2) / (2.0 * abs(a_s))
+    h_br = d - (term_reaz + term_fren)
+    grad_br = np.array([1, Tr - (v_rel / abs(a_s))])
+
+    h_vmax = (v_max - abs(v_rel)) * Tr
+    grad_vmax = np.array([0.0, -1.0 * Tr * np.sign(v_rel)])
+
+    candidates = np.array([h_br, h_vmax])
+    grads = np.array([grad_br, grad_vmax])
+
+    exp_terms = np.exp(-rho * (candidates))
+    sum_exp = np.sum(exp_terms)
+    
+    
+    h_soft =  - (1.0 / rho) * np.log(sum_exp) 
+
+    weights = exp_terms / sum_exp
+    dh_dx = np.zeros(2)
+    for i in range(len(weights)):
+        dh_dx += weights[i] * grads[i]
+
+    return h_soft, dh_dx, h_br
+
+def compute_h_nested_and_grad(d, v_rel, Tr, a_s, v_pfl, v_max, rho):
+    h_br = d - (-v_rel*Tr + (v_rel**2) / (2.0 * abs(a_s)))
+    grad_br = np.array([1.0,Tr -v_rel / abs(a_s)])
+    
+    h_pfl = (v_pfl + v_rel) * Tr
+    grad_pfl = np.array([0.0, Tr])
+    
+    h_vmax = (v_max - abs(v_rel)) * Tr
+    grad_vmax = np.array([0.0, -Tr * np.sign(v_rel)])
+    
+    max_inner = max(h_br, h_pfl)
+    
+    exp_br = np.exp(rho * (h_br - max_inner))
+    exp_pfl = np.exp(rho * (h_pfl - max_inner))
+    sum_inner = exp_br + exp_pfl
+    
+    h_inner = max_inner + (1.0 / rho) * np.log(sum_inner)
+    
+    # Pesi Interni
+    omega_br = exp_br / sum_inner
+    omega_pfl = exp_pfl / sum_inner
+    
+    grad_inner = omega_br * grad_br + omega_pfl * grad_pfl
+
+    min_outer =min(h_vmax, h_inner)
+    exp_vmax_neg = np.exp(-rho * (h_vmax - min_outer))
+    exp_inner_neg = np.exp(-rho * (h_inner - min_outer))
+    sum_outer = exp_vmax_neg + exp_inner_neg
+    
+    h_final = min_outer - (1.0 / rho) * np.log(sum_outer)
+    
+    # Pesi Esterni (Omegas)
+    omega_vmax = exp_vmax_neg / sum_outer
+    omega_inner = exp_inner_neg / sum_outer
+    
+    
+    grad_final = omega_vmax * grad_vmax + omega_inner * grad_inner
+    
+    return h_final, grad_final
+
+
 def range_state_derivative(v_lin, v_human):
     zero3 = np.zeros(3)
     f = np.concatenate([v_lin, v_human, zero3, zero3])
@@ -93,8 +159,7 @@ def pose_eul(z, y, x, xyz):
     R = pin.utils.rotate('z', z) @ pin.utils.rotate('y', y) @ pin.utils.rotate('x', x)
     return SE3(R, np.array(xyz))
 
-
-def compute_ds_scaling(h, error):
+def compute_ds_scaling_h(h, error):
     # Fattore Sicurezza (Sigmoide)
     h_threshold = 0.9
     slope_h = 30.0
@@ -104,6 +169,23 @@ def compute_ds_scaling(h, error):
     sigma_error = eps_track #m di tolleranza
     term_error = np.exp(- (error**2) / (2 * sigma_error**2))
     
+    ds = min(term_safety, term_error)
+    return ds
+
+def compute_ds_scaling_d(distance, error):
+    d_activation = 0.2
+    slope_d = 100.0
+    term_safety = 1.0 / (1.0 + np.exp(-slope_d * (distance - d_activation)))
+
+
+    
+    limit_err = eps_track * 1.5  
+    n_power = 10.0               
+
+    term_error = np.exp(- (abs(error) / limit_err)**n_power)
+
+    # print(f"Err: {error:.4f}, Scaling: {term_error:.4f}")
+
     ds = min(term_safety, term_error)
     return ds
 
@@ -229,6 +311,7 @@ def main():
     v_max = 0.3;
     v_pfl = 0.25;
     
+    
     print(f"Starting Simulation. Duration: 150s.")
 
     # # --- INIZIALIZZAZIONE VARIABILI PER SINCRONIZZAZIONE CSV ---
@@ -278,8 +361,12 @@ def main():
             x_curr = Tbt.translation
             tracking_error = np.linalg.norm(goal_pose.translation - x_curr)
                 
-            # Time Scaling
-            Ds_target = compute_ds_scaling(h_prev, tracking_error)
+            # Time Scaling ds(h, err)
+            #Ds_target = np.clip(compute_ds_scaling_h(h_prev, tracking_error), 0, 1)
+            
+            # Time Scaling ds(h, err)
+            Ds_target = np.clip(compute_ds_scaling_d(current_dist_min, tracking_error), 0, 1)
+            
             DDtrajectory_time = 5.0 * (Ds_target - Dtrajectory_time)
                 
             twist_goal = nom_twist * Dtrajectory_time
@@ -349,16 +436,24 @@ def main():
                         current_dist_min = dist
                         current_vrel_at_min = v_rel
 
-                    # CBF Evaluation
+                    ## CBF Evaluation [DEFINIZIONE A TRATTI]
                     h_val = compute_h_PFL(dist, v_rel, v_max, v_pfl, Tr_param, as_param)
+                    dh_dx = jacobian_h(dist, v_rel, v_max, v_pfl, Tr_param, as_param)
+                    
+                    ## CBF Evaluation [SOFTMIN - SOFTMAX METHOD]
+                    #h, dh_dx = compute_h_nested_and_grad(dist, v_rel, Tr_param, as_param, v_pfl, v_max, rho)
+                    
+                    ## CBF Evaluation [SOFTMIN PURA]
+                    #h, dh_dx = compute_h_softmin_and_grad(dist, v_rel, Tr_param, as_param , v_pfl, v_max, rho)
+                    
                     if h_val < h_min_curr: h_min_curr = h_val
                     
                     f_st, g_st = range_state_derivative(twist_curr.linear, v_o)
-                    Jh_psi = jacobian_h(dist, v_rel, v_max, v_pfl, Tr_param, as_param)
+                    
                     Jpsi_chi = jacobian_psi(x_curr, p_o, twist_curr.linear, v_o)
                     
-                    Lfh = Jh_psi @ Jpsi_chi @ f_st
-                    Lgh = Jh_psi @ Jpsi_chi @ g_st
+                    Lfh = dh_dx @ Jpsi_chi @ f_st
+                    Lgh = dh_dx @ Jpsi_chi @ g_st
                     
                     constraint_matrix = np.concatenate((constraint_matrix, np.hstack([(Lgh @ Jlin).reshape(1, -1), np.zeros((1, 1))])), axis=0)
                     constraint_vector = np.concatenate((constraint_vector, (-Lgh @ dJlin @ dq - Lfh - gamma_param * h_val).reshape(1, -1)), axis=0)
