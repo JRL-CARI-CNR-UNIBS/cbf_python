@@ -22,7 +22,7 @@ USE_BRIDGE = False
 C_param = 0.25
 Tr_param = 0.15
 as_param = 2.5
-gamma_param = 10.0
+gamma_param = 30.0
 Tc = 2e-3
 DDq_MAX = np.pi**2*5
 
@@ -30,7 +30,6 @@ DDq_MAX = np.pi**2*5
 eps_track = 0.03 # 3cm
 rho = 20.0 #parametro softmin e softmax
 
-CSV_UPDATE_TIME = 0.034
 
 # MATH & KINEMATICS
 # =============================================================================
@@ -70,15 +69,22 @@ def compute_h_softmin_and_grad(d,v_rel, Tr, a_s, v_pfl, v_max, rho):
     h_br = d - (term_reaz + term_fren)
     grad_br = np.array([1, Tr - (v_rel / abs(a_s))])
 
-    h_vmax = (v_max - abs(v_rel)) * Tr
-    grad_vmax = np.array([0.0, -1.0 * Tr * np.sign(v_rel)])
+
+    #MODIFICA: durante la simulazione, se l'ostacolo di allontana troppo velocemente allora h_max fornisce un valore negativo
+    #Torno alla definizione precedente in cui si controlla solamente la velocità di avvicinamento.
+    #Posticipo analisi per condizioni di allontanamento
+    #h_vmax = (v_max - abs(v_rel)) * Tr, grad_vmax = np.array([0.0, -1.0 * Tr * np.sign(v_rel)])
+    h_vmax = (v_max + v_rel) * Tr
+    grad_vmax = np.array([0.0, Tr])
+    h_vmax = 100
+    grad_vmax = np.array([0.0, 0.0])
+
 
     candidates = np.array([h_br, h_vmax])
     grads = np.array([grad_br, grad_vmax])
 
     exp_terms = np.exp(-rho * (candidates))
     sum_exp = np.sum(exp_terms)
-    
     
     h_soft =  - (1.0 / rho) * np.log(sum_exp) 
 
@@ -87,7 +93,7 @@ def compute_h_softmin_and_grad(d,v_rel, Tr, a_s, v_pfl, v_max, rho):
     for i in range(len(weights)):
         dh_dx += weights[i] * grads[i]
 
-    return h_soft, dh_dx, h_br
+    return h_soft, dh_dx
 
 def compute_h_nested_and_grad(d, v_rel, Tr, a_s, v_pfl, v_max, rho):
     h_br = d - (-v_rel*Tr + (v_rel**2) / (2.0 * abs(a_s)))
@@ -96,9 +102,13 @@ def compute_h_nested_and_grad(d, v_rel, Tr, a_s, v_pfl, v_max, rho):
     h_pfl = (v_pfl + v_rel) * Tr
     grad_pfl = np.array([0.0, Tr])
     
-    h_vmax = (v_max - abs(v_rel)) * Tr
-    grad_vmax = np.array([0.0, -Tr * np.sign(v_rel)])
-    
+    #h_vmax = (v_max - abs(v_rel)) * Tr
+    #grad_vmax = np.array([0.0, -Tr * np.sign(v_rel)])
+    h_vmax = (v_max + v_rel) * Tr
+    grad_vmax = np.array([0.0, Tr])
+    h_vmax = 100
+    grad_vmax = np.array([0.0, 0.0])
+
     max_inner = max(h_br, h_pfl)
     
     exp_br = np.exp(rho * (h_br - max_inner))
@@ -229,9 +239,9 @@ def main():
         quat.normalize()
         R = quat.toRotationMatrix()
 
-        T_wc = pin.SE3(R, np.array([0.108, -0.883, 2.351]))
-        # csv_path = "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_22.csv"
-        csv_path = "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv"
+        T_wc = pin.SE3(R, np.array([0.208, -0.883, 2.351]))
+        csv_path = "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_22.csv"
+        #csv_path = "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv"
         # csv_path = "C:/Users/Pietro/OneDrive/Desktop/cbf_python/skeleton_vectors_22.csv"
         #csv_path = "C:/Users/Pietro/OneDrive/Desktop/cbf_python/UR10_obst.csv"
         bridge = FakeCommandBridge(UR10E_JOINTS, csv_path=csv_path, Tworld_to_cam=T_wc, slowdown_factor=1.0, t0=0.0)
@@ -314,28 +324,11 @@ def main():
     
     print(f"Starting Simulation. Duration: 150s.")
 
-    # # --- INIZIALIZZAZIONE VARIABILI PER SINCRONIZZAZIONE CSV ---
-    # next_csv_update_time = 0.0  # Tempo per fare l'update
-    
-    # # Inizializzo ostacoli
-    # all_obs_pos, all_obs_vel, _ = bridge.getObstacles()
-    # hand_indices = [4, 7]
-    # obs_pos = [all_obs_pos[i] for i in hand_indices if i < len(all_obs_pos)]
-    # obs_vel = [all_obs_vel[i] for i in hand_indices if i < len(all_obs_vel)]
-    # -----------------------------------------------------------
 
     try:
-        while t < 150.0:
+        while t < 15.0:
             loop_start = time.perf_counter()
 
-            # # --- OBS SYNCRONIZATION ---
-            # if t >= next_csv_update_time:
-            #     new_all_obs, new_all_vel, _ = bridge.getObstacles()
-                
-            #     obs_pos = [new_all_obs[i] for i in hand_indices if i < len(new_all_obs)]
-            #     obs_vel = [new_all_vel[i] for i in hand_indices if i < len(new_all_vel)]
-
-            #     next_csv_update_time += CSV_UPDATE_TIME
             if USE_BRIDGE:
                 obs_pos, obs_vel, obs_acc = bridge.getObstacles()
             else:
@@ -441,10 +434,10 @@ def main():
                     dh_dx = jacobian_h(dist, v_rel, v_max, v_pfl, Tr_param, as_param)
                     
                     ## CBF Evaluation [SOFTMIN - SOFTMAX METHOD]
-                    #h, dh_dx = compute_h_nested_and_grad(dist, v_rel, Tr_param, as_param, v_pfl, v_max, rho)
+                    #h_val, dh_dx = compute_h_nested_and_grad(dist, v_rel, Tr_param, as_param, v_pfl, v_max, rho)
                     
                     ## CBF Evaluation [SOFTMIN PURA]
-                    #h, dh_dx = compute_h_softmin_and_grad(dist, v_rel, Tr_param, as_param , v_pfl, v_max, rho)
+                    #h_val, dh_dx = compute_h_softmin_and_grad(dist, v_rel, Tr_param, as_param , v_pfl, v_max, rho)
                     
                     if h_val < h_min_curr: h_min_curr = h_val
                     
