@@ -124,9 +124,9 @@ def compute_h_softmax_and_grad(d, v_rel, Tr, a_s, v_pfl, rho):
     
     return h_softmax, grad_hsoftmax
 
-def compute_h_vmax_and_grad(v_max, vr_act)
+def compute_h_vmax_and_grad(v_max, vr_act):
     h_vmax_pos = -(v_max - vr_act)**2 
-    grad_vmax = np.array([0.0, 0.0, v_max - vr_act])
+    grad_vmax = np.array([0.0, 0.0, 2*(v_max - vr_act)])
     
     return h_vmax_pos, grad_vmax
 
@@ -413,12 +413,6 @@ def main():
             constraint_delta_vec = np.zeros((1, 1))
 
             
-# =============================================================================
-#             constraint_matrix = np.empty((0, model.nq))
-#             constraint_vector = np.empty((0, 1))
-#             constraint_acc_mat = np.eye(model.nq)
-#             constraint_acc_vec = np.ones((model.nq, 1)) * DDq_MAX
-# =============================================================================
                 
             h_min_curr = 100.0
                 
@@ -429,33 +423,52 @@ def main():
                     dist = max(np.linalg.norm(r), 1e-6)
                     u_hr = r / dist
                     v_rel = np.dot(twist_curr.linear - v_o, u_hr)
+                    vr_act = np.dot(twist_curr.linear, u_hr)
                     
                     # For Logging
                     if dist < current_dist_min:
                         current_dist_min = dist
                         current_vrel_at_min = v_rel
 
-                    ## CBF Evaluation [DEFINIZIONE A TRATTI]
+                    ## PFL CBF Evaluation [DEFINIZIONE A TRATTI]
                     #h_val = compute_h_PFL(dist, v_rel, v_max, v_pfl, Tr_param, as_param)
                     #dh_dx = jacobian_h(dist, v_rel, v_max, v_pfl, Tr_param, as_param)
                     
-                    ## CBF Evaluation [SOFTMAX METHOD]
-                    h_val, dh_dx = compute_h_softmax_and_grad(dist, v_rel, Tr_param, as_param, v_pfl, rho)
+                    ## PFL CBF Evaluation [SOFTMAX METHOD]
+                    h_softmax_val, dh_softmax_dx = compute_h_softmax_and_grad(dist, v_rel, Tr_param, as_param, v_pfl, rho)
                     
                     
-                    if h_val < h_min_curr: h_min_curr = h_val
+                    ## Vmax CBF Evalutation
+                    h_vmax_val, dh_vmax_dx = compute_h_vmax_and_grad(v_max, vr_act)
+                    
+                    if h_softmax_val < h_min_curr: h_min_curr = h_softmax_val
                     
                     f_st, g_st = range_state_derivative(twist_curr.linear, v_o)
                     
                     Jpsi_chi = jacobian_psi(x_curr, p_o, twist_curr.linear, v_o)
                     
-                    Lfh = dh_dx @ Jpsi_chi @ f_st
-                    Lgh = dh_dx @ Jpsi_chi @ g_st
+                    #Realizzazione vincoli QP per PFL
+                    Lfh_softmax = dh_softmax_dx @ Jpsi_chi @ f_st
+                    Lgh_softmax = dh_softmax_dx @ Jpsi_chi @ g_st
+                    Apfl = np.hstack([(Lgh_softmax @ Jlin).reshape(1, -1), np.zeros((1, 1))])
+                    Bpfl = (-Lgh_softmax @ dJlin @ dq - Lfh_softmax - gamma_param * h_softmax_val).reshape(1, -1)
                     
-                    constraint_matrix = np.concatenate((constraint_matrix, np.hstack([(Lgh @ Jlin).reshape(1, -1), np.zeros((1, 1))])), axis=0)
-                    constraint_vector = np.concatenate((constraint_vector, (-Lgh @ dJlin @ dq - Lfh - gamma_param * h_val).reshape(1, -1)), axis=0)
-                    #constraint_matrix = np.concatenate((constraint_matrix, (Lgh @ Jlin).reshape(1, -1)), axis=0)
-                    #constraint_vector = np.concatenate((constraint_vector, (-Lgh @ dJlin @ dq - Lfh - gamma_param * h_val).reshape(1, -1)), axis=0)
+                    
+                    #Realizzazione vincoli QP per Vmax
+                    Lfh_vmax = dh_vmax_dx @ Jpsi_chi @ f_st
+                    Lgh_vmax = dh_vmax_dx @ Jpsi_chi @ g_st
+                    Avmax = np.hstack([(Lgh_vmax @ Jlin).reshape(1, -1), np.zeros((1, 1))])
+                    Bvmax = (-Lgh_vmax @ dJlin @ dq - Lfh_vmax - gamma_param * h_vmax_val).reshape(1, -1)
+                    
+                    constraint_matrix = np.concatenate((constraint_matrix,
+                                                        Apfl,
+                                                        Avmax),
+                                                        axis=0)
+                    constraint_vector = np.concatenate((constraint_vector,
+                                                        Bpfl,
+                                                        Bvmax ),
+                                                        axis=0)
+                    
 
             # Add Joint Acceleration Limits And Tracking constraints
             constraint_matrix = np.concatenate((constraint_matrix,
