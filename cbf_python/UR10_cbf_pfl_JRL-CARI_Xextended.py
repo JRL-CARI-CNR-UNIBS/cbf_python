@@ -39,71 +39,9 @@ rho = 20.0 #parametro softmin e softmax
 
 # MATH & KINEMATICS
 # =============================================================================
-def compute_dcrit(v_pfl, Tr, a_s):
-    d_reazione = -(-v_pfl) * Tr
-    d_frenata = (-v_pfl)**2 / (2.0 * a_s)
-    return d_reazione + d_frenata
-
-def compute_h_PFL(d, v, v_max, v_pfl, Tr, a_s):
-    d_crit = compute_dcrit(v_pfl, Tr, a_s)
-    if v < 0.0:
-        if d >= d_crit:
-            h = d - (-v*Tr + (v**2)/(2*a_s))
-            return h
-        else:
-            return (v + v_pfl)*Tr
-    else:
-        return (v_max - v)*Tr
-
-def jacobian_h(d, v, v_max, v_pfl, Tr, a_s):
-    d_crit = compute_dcrit(v_pfl, Tr, a_s)
-    if v < 0.0:
-        if d >= d_crit:
-            dh_dd = 1.0
-            dh_dv = Tr - v/a_s
-        else:
-            dh_dd = 0.0
-            dh_dv = Tr
-    else:
-        dh_dd = 0.0
-        dh_dv = -Tr
-    return np.array([[dh_dd, dh_dv]])
-
-def compute_h_softmin_and_grad(d,v_rel, Tr, a_s, v_pfl, v_max, rho):
-    term_reaz =-(v_rel +v_pfl) * Tr
-    term_fren = (v_rel**2-v_pfl**2) / (2.0 * abs(a_s))
-    h_br = d - (term_reaz + term_fren)
-    grad_br = np.array([1, Tr - (v_rel / abs(a_s))])
-
-
-    #MODIFICA: durante la simulazione, se l'ostacolo di allontana troppo velocemente allora h_max fornisce un valore negativo
-    #Torno alla definizione precedente in cui si controlla solamente la velocità di avvicinamento.
-    #Posticipo analisi per condizioni di allontanamento
-    #h_vmax = (v_max - abs(v_rel)) * Tr, grad_vmax = np.array([0.0, -1.0 * Tr * np.sign(v_rel)])
-    h_vmax = (v_max + v_rel) * Tr
-    grad_vmax = np.array([0.0, Tr])
-    h_vmax = 100
-    grad_vmax = np.array([0.0, 0.0])
-
-
-    candidates = np.array([h_br, h_vmax])
-    grads = np.array([grad_br, grad_vmax])
-
-    exp_terms = np.exp(-rho * (candidates))
-    sum_exp = np.sum(exp_terms)
-    
-    h_soft =  - (1.0 / rho) * np.log(sum_exp) 
-
-    weights = exp_terms / sum_exp
-    dh_dx = np.zeros(2)
-    for i in range(len(weights)):
-        dh_dx += weights[i] * grads[i]
-
-    return h_soft, dh_dx
-
 def compute_h_softmax_and_grad(d, v_rel, Tr, a_s, v_pfl, rho):
     h_br = d - (-v_rel*Tr + (v_rel**2) / (2.0 * abs(a_s)))
-    grad_br = np.array([1.0,Tr -v_rel / a_s, 0.0, 0.0])
+    grad_br = np.array([1.0,Tr -v_rel / a_s, 0.0])
     
     h_pfl = (v_pfl + v_rel) * Tr
     grad_pfl = np.array([0.0, Tr, 0.0])
@@ -125,8 +63,8 @@ def compute_h_softmax_and_grad(d, v_rel, Tr, a_s, v_pfl, rho):
     return h_softmax, grad_hsoftmax
 
 def compute_h_vmax_and_grad(v_max, vr_act):
-    h_vmax_pos = -(v_max - vr_act)**2 
-    grad_vmax = np.array([0.0, 0.0, 2*(v_max - vr_act)])
+    h_vmax_pos = (v_max - vr_act)*(v_max + vr_act)
+    grad_vmax = np.array([0.0, 0.0, -2.0 * vr_act ])
     
     return h_vmax_pos, grad_vmax
 
@@ -192,9 +130,8 @@ def compute_ds_scaling_d(distance, error):
     d_activation = 0.2
     slope_d = 100.0
     term_safety = 1.0 / (1.0 + np.exp(-slope_d * (distance - d_activation)))
+    #print(f"Distance: {distance:.4f}, Scaling-safety-term: {term_safety:.4f}")
 
-
-    
     limit_err = eps_track * 1.5  
     n_power = 10.0               
 
@@ -327,12 +264,17 @@ def main():
     v_max = 0.3;
     v_pfl = 0.25;
     
+
+    # --- Variables for Logging ---
+    pos_nominal = np.zeros(3)
+    current_dist_min = 100.0
+    current_vrel_at_min = 0.0
     
     print(f"Starting Simulation. Duration: 150s.")
 
 
     try:
-        while t < 15.0:
+        while t < 150.0:
             loop_start = time.perf_counter()
 
             if USE_BRIDGE:
@@ -343,10 +285,7 @@ def main():
             
             
 
-            # --- Variables for Logging ---
-            pos_nominal = np.zeros(3)
-            current_dist_min = 100.0
-            current_vrel_at_min = 0.0
+
 
             # Task Space Trajectory
             goal_pose, nom_twist, nom_d_twist = planner_cart.getMotionLaw(trajectory_time % T_total)
@@ -420,7 +359,7 @@ def main():
                     p_o = obs_pos[i]
                     v_o = obs_vel[i]
                     r = x_curr - p_o
-                    dist = max(np.linalg.norm(r), 1e-6)
+                    dist = max(np.linalg.norm(r), 1e-6) #, print(f"Err: {error:.4f}, Scaling: {term_error:.4f}")
                     u_hr = r / dist
                     v_rel = np.dot(twist_curr.linear - v_o, u_hr)
                     vr_act = np.dot(twist_curr.linear, u_hr)
