@@ -274,8 +274,8 @@ def main():
     Kp_rot = np.array([1, 1, 1]) * wn ** 2
     Kd_rot = np.array([1, 1, 1]) * 2.0 * xi * wn
     
-    planner_cart = SegmentedSE3Trap(vlin_max=0.06, vang_max=0.12, alin_max=1.8, aang_max=2.0)
-    
+    #planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=0.12, alin_max=1.8, aang_max=2.0)
+    planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=0.20, alin_max=1.8, aang_max=2.0)
     q_start = first_joint_position.copy()
     q10 = np.array([31.0, -78.0, 115.0, -127.0, 86.0, -32.0]) * np.pi / 180.0
     q20 = np.array([31.0, -83.0, 98.0, -110.0, 86.0, -32.0]) * np.pi / 180.0

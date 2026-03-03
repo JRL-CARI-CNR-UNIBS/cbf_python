@@ -62,8 +62,8 @@ def compute_h_softmax_and_grad(d, v_rel, Tr, a_s, v_pfl, rho):
     
     return h_softmax, grad_hsoftmax
 
-def compute_h_vmax_and_grad(v_max, vr_act):
-    h_vmax_pos = (v_max - vr_act)*(v_max + vr_act)
+def compute_h_vmax_and_grad(v_rel_max, vr_act):
+    h_vmax_pos = (v_rel_max - vr_act)*(v_rel_max + vr_act)
     grad_vmax = np.array([0.0, 0.0, -2.0 * vr_act ])
     
     return h_vmax_pos, grad_vmax
@@ -217,7 +217,8 @@ def main():
     Kp_rot = np.array([1, 1, 1]) * wn ** 2
     Kd_rot = np.array([1, 1, 1]) * 2.0 * xi * wn
     
-    planner_cart = SegmentedSE3Trap(vlin_max=0.06, vang_max=0.12, alin_max=1.8, aang_max=2.0)
+    #planner_cart = SegmentedSE3Trap(vlin_max=0.06, vang_max=0.12, alin_max=1.8, aang_max=2.0)
+    planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=1.2, alin_max=1.8, aang_max=2.0)
     
     q_start = first_joint_position.copy()
     q10 = np.array([31.0, -78.0, 115.0, -127.0, 86.0, -32.0]) * np.pi / 180.0
@@ -261,16 +262,15 @@ def main():
     h_prev = 100.0
     h_min = 100.0
     
-    v_max = 0.3;
-    v_pfl = 0.25;
+    v_rel_max = 2.5;
+    v_pfl = 0.0;
     
 
     # --- Variables for Logging ---
     pos_nominal = np.zeros(3)
     current_dist_min = 100.0
     current_vrel_at_min = 0.0
-    distance_vector = []
-    vrel_vector = []
+    
     
     
     print(f"Starting Simulation. Duration: 150s.")
@@ -357,6 +357,8 @@ def main():
             
                 
             h_min_curr = 100.0
+            distance_vector = []
+            vrel_vector = []
                 
             for i in range(len(obs_pos)):
                     p_o = obs_pos[i]
@@ -368,18 +370,18 @@ def main():
                     vr_act = np.dot(twist_curr.linear, u_hr)
                     
             
-                    distance_vector = np.concatenate(distance_vector, dist)
-                    vrel_vector = np.concatenate(vrel_vector, v_rel)
+                    distance_vector.append(dist)
+                    vrel_vector.append(v_rel)
                     ## PFL CBF Evaluation [DEFINIZIONE A TRATTI]
-                    #h_val = compute_h_PFL(dist, v_rel, v_max, v_pfl, Tr_param, as_param)
-                    #dh_dx = jacobian_h(dist, v_rel, v_max, v_pfl, Tr_param, as_param)
+                    #h_val = compute_h_PFL(dist, v_rel, v_rel_max, v_pfl, Tr_param, as_param)
+                    #dh_dx = jacobian_h(dist, v_rel, v_rel_max, v_pfl, Tr_param, as_param)
                     
                     ## PFL CBF Evaluation [SOFTMAX METHOD]
                     h_softmax_val, dh_softmax_dx = compute_h_softmax_and_grad(dist, v_rel, Tr_param, as_param, v_pfl, rho)
                     
                     
                     ## Vmax CBF Evalutation
-                    h_vmax_val, dh_vmax_dx = compute_h_vmax_and_grad(v_max, vr_act)
+                    h_vmax_val, dh_vmax_dx = compute_h_vmax_and_grad(v_rel_max, vr_act)
                     
                     if h_softmax_val < h_min_curr: h_min_curr = h_softmax_val
                     
