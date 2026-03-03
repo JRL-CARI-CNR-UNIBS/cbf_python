@@ -269,6 +269,9 @@ def main():
     pos_nominal = np.zeros(3)
     current_dist_min = 100.0
     current_vrel_at_min = 0.0
+    distance_vector = []
+    vrel_vector = []
+    
     
     print(f"Starting Simulation. Duration: 150s.")
 
@@ -364,11 +367,9 @@ def main():
                     v_rel = np.dot(twist_curr.linear - v_o, u_hr)
                     vr_act = np.dot(twist_curr.linear, u_hr)
                     
-                    # For Logging
-                    if dist < current_dist_min:
-                        current_dist_min = dist
-                        current_vrel_at_min = v_rel
-
+            
+                    distance_vector = np.concatenate(distance_vector, dist)
+                    vrel_vector = np.concatenate(vrel_vector, v_rel)
                     ## PFL CBF Evaluation [DEFINIZIONE A TRATTI]
                     #h_val = compute_h_PFL(dist, v_rel, v_max, v_pfl, Tr_param, as_param)
                     #dh_dx = jacobian_h(dist, v_rel, v_max, v_pfl, Tr_param, as_param)
@@ -429,7 +430,9 @@ def main():
             
                 
             h_prev = h_min_curr
-                
+            dist_min_index = np.argmin(distance_vector)
+            current_dist_min = distance_vector[dist_min_index]
+            current_vrel_at_min = vrel_vector[dist_min_index]
             # Solve QP
             # Matrici per problema QP sull'accelerazione
             P_acc = J.T @ J + 1e-6 * np.eye(model.nq)
