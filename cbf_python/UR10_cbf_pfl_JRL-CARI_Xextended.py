@@ -22,7 +22,7 @@ from joint_interpolator import SegmentedJointTrap
 from pinocchio import SE3
 
 # CONFIGURATION
-USE_BRIDGE = False
+USE_BRIDGE = True
 
 # Safety Parameters
 C_param = 0.25
@@ -218,7 +218,8 @@ def main():
     Kd_rot = np.array([1, 1, 1]) * 2.0 * xi * wn
     
     #planner_cart = SegmentedSE3Trap(vlin_max=0.06, vang_max=0.12, alin_max=1.8, aang_max=2.0)
-    planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=1.2, alin_max=1.8, aang_max=2.0)
+    #planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=1.2, alin_max=1.8, aang_max=2.0)
+    planner_cart = SegmentedSE3Trap(vlin_max=0.1, vang_max=0.3, alin_max=0.8, aang_max=0.5)
     
     q_start = first_joint_position.copy()
     q10 = np.array([31.0, -78.0, 115.0, -127.0, 86.0, -32.0]) * np.pi / 180.0
@@ -273,11 +274,11 @@ def main():
     
     
     
-    print(f"Starting Simulation. Duration: 150s.")
+    print(f"Starting Simulation. Duration: 300.")
 
 
     try:
-        while t < 150.0:
+        while t < 300.0:
             loop_start = time.perf_counter()
 
             if USE_BRIDGE:
@@ -285,7 +286,11 @@ def main():
             else:
                 obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=t)
 
-            
+            if len(obs_pos) == 0:
+                # add a dummy obstacle far away to avoid empty lists
+                obs_pos = [np.array([10.0, 10.0, 10.0])]
+                obs_vel = [np.zeros(3)]
+                obs_acc = [np.zeros(3)]
             
 
 
@@ -481,7 +486,9 @@ def main():
             # Integration
             q += dq * Tc + 0.5 * ddq * Tc**2
             dq += ddq * Tc
-            
+
+            dq.clip(-1.0, 1.0, out=dq)
+            ddq.clip(-DDq_MAX, DDq_MAX, out=ddq)
                 
             trajectory_time += Dtrajectory_time * Tc + 0.5 * DDtrajectory_time * Tc ** 2.0
             Dtrajectory_time += DDtrajectory_time * Tc
