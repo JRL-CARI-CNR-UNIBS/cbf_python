@@ -49,12 +49,12 @@ from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
 import pandas as pd
 
 
-params_filename = "parameters_set.csv"
-set_ID = "0"
-duration = 5000.0
+params_filename = "../parameters_set.csv"
+set_ID = "1"
+duration = 150.0
 
-SHOW_DATA = True
-USE_BRIDGE = True
+SHOW_DATA = False
+USE_BRIDGE = False
 LOG_DATA = False
 SAVE_DATA = False
 
@@ -227,7 +227,7 @@ def main():
 
     cfg.Dq_max = cfg.Dq_max*0.25
     cfg.DDq_max = cfg.DDq_max*0.2
-    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.15, DDq_max=cfg.DDq_max*0.15)
+    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.25, DDq_max=cfg.DDq_max*0.25)
     print("Computing trajectory...")
     # BRING THE ROBOT AT HOME BEFORE STARTING THE TEST
     if USE_BRIDGE:
@@ -448,11 +448,11 @@ def main():
     print(f"LAP COUNT: {lap_count}")
     print("on target count: ", on_target_count)
     print(f"WAYPOINTS REACHING PERCENTAGE: {on_target_rate*100.0} %")
-    print(f"VIOLATION RATE: {viol_rate*100}")
+    print(f"VIOLATION RATE: {viol_rate*100} %")
     print(f"MEAN SCALING: {mean_scale}")
     print(f"MEAN TRAJECTORY ERROR: {mean_trajectory_error}")
     print(f"LOW SCALE RATE: {low_scale_rate*100}")
-    visualizer.compute_mean_cov()
+    visualizer.compute_mean_cov(True)
     # CREATING CARTESIAN REFERENCE CSV FILE
     if LOG_DATA:
         if USE_BRIDGE:

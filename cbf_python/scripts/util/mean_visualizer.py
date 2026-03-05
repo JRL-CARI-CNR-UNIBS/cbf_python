@@ -18,7 +18,7 @@ class StochasticCBFVisualizer:
         self.lambda_vec = []
 
 
-    def update_vectors(self, h, d, v_rel, t, cycles):
+    def update_vectors(self, h, d, v_rel, t):
         self.h_vec.append(h)
         self.d_vec.append(d)
         self.v_vec.append(v_rel)
@@ -41,9 +41,9 @@ class StochasticCBFVisualizer:
         self.v_mean = np.mean(self.v_vec, axis=0)
         # 4. (Opzionale) Calcolare le varianze singole per verifica
         # ddof=1 indica che stiamo lavorando su un *campione* statistico, non sull'intera popolazione
-        var_h = np.var(self.h_vec, ddof=1)
-        var_d = np.var(self.d_vec, ddof=1)
-        var_v = np.var(self.v_vec, ddof=1)
+        var_h = np.std(self.h_vec, ddof=1)
+        var_d = np.std(self.d_vec, ddof=1)
+        var_v = np.std(self.v_vec, ddof=1)
         if print_val:
             print(f"--- Medie dati ---")
             print(f"h: {np.mean(self.h_vec):.4f}")
@@ -52,10 +52,10 @@ class StochasticCBFVisualizer:
     
             print("\n--- Matrice di Covarianza (Σ) ---")
             print(np.round(self.cov_matrix, 4))
-            print("\n--- Verifica Varianze Singole ---")
-            print(f"Varianza di h: {var_h:.4f}")
-            print(f"Varianza di d: {var_d:.4f}")
-            print(f"Varianza di v: {var_v:.4f}")
+            print("\n--- Deviazioni Standard Singole ---")
+            print(f"Deviazione standard di h: {var_h:.4f}")
+            print(f"Deviazione standard di d: {var_d:.4f}")
+            print(f"Deviazione standard di v: {var_v:.4f}")
 
 
     def plot_mean_std(self, lambda_0, lambda_f):

@@ -18,6 +18,7 @@
 # • Added graceful keyboard‑interrupt handling: Ctrl‑C shuts down cleanly.
 # -----------------------------------------------------------------------------
 import os
+import random
 import time
 
 import meshcat.geometry as mgeom
@@ -43,17 +44,24 @@ from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
 from scripts.util.test_utils import generate_obs_state, compute_ee_pose, generate_velocity
 import  pandas as pd
 import csv
-
+from scripts.util.gaussian_process_util import generate_d_value, generate_obs_state_h_fixed, compute_required_d, generate_target_h
+from scripts.util.mean_visualizer import StochasticCBFVisualizer
 params_filename = "../parameters_set.csv"
 set_ID = "0"
-duration = 15000.0
+duration = 150.0
 
-SHOW_DATA = False
+SHOW_DATA = True
 LOG_DATA = False
-SAVE_DATA = True
+SAVE_DATA = False
 parameters_type = "0"
 stop_event = threading.Event()
 
+h_mean_ref = -0.01
+v_ref = 0.8
+spawn_freq = 10
+h_std_dev = 0.1
+# d_objective = 0.1
+d_objective = generate_d_value(h_mean_ref, 0.1)
 def _on_sigint_with_bridge():
     stop_event.set()
 
@@ -66,7 +74,7 @@ def main():
     log_path = "../resullts/simulation/scaling"
     # rclpy.init()
 
-
+    visualizer = StochasticCBFVisualizer()
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
     UR10E_JOINTS = [
@@ -139,7 +147,7 @@ def main():
         # dim = 10)
         human_pos_publisher = csv_publishers.DoubleArrayCsvPublisher(
             csv_path=test_path + "/human_positions.csv",
-            column_names="time,human_keypoint_0_x,human_keypoint_0_y,human_keypoint_0_z,human_keypoint_1_x,human_keypoint_1_y,human_keypoint_1_z,human_keypoint_2_x,human_keypoint_2_y,human_keypoint_2_z,human_keypoint_3_x,human_keypoint_3_y,human_keypoint_3_z,human_keypoint_4_x,human_keypoint_4_y,human_keypoint_4_z,human_keypoint_5_x,human_keypoint_5_y,human_keypoint_5_z,human_keypoint_6_x,human_keypoint_6_y,human_keypoint_6_z,human_keypoint_7_x,human_keypoint_7_y,human_keypoint_7_z,human_keypoint_8_x,human_keypoint_8_y,human_keypoint_8_z,human_keypoint_9_x,human_keypoint_9_y,human_keypoint_9_z,human_keypoint_10_x,human_keypoint_10_y,human_keypoint_10_z,human_keypoint_11_x,human_keypoint_11_y,human_keypoint_11_z,human_keypoint_12_x,human_keypoint_12_y,human_keypoint_12_z,human_keypoint_13_x,human_keypoint_13_y,human_keypoint_13_z,human_keypoint_14_x,human_keypoint_14_y,human_keypoint_14_z,human_keypoint_15_x,human_keypoint_15_y,human_keypoint_15_z,human_keypoint_16_x,human_keypoint_16_y,human_keypoint_16_z,human_keypoint_17_x,human_keypoint_17_y,human_keypoint_17_z"
+            column_names="time,human_keypoint_0_x,human_keypoint_0_y,human_keypoint_0_z"
         )
 
     model = model_wrapper.model
@@ -151,7 +159,6 @@ def main():
     obstacle_positions = [tmp.copy() for _ in range(18 * 5)]
     tmp = np.array([0, 0., 0.])
     obstacle_velocities = [tmp.copy() for _ in range(18 * 5)]
-    obstacle_accelerations = obstacle_velocities.copy()
 
     for i, pos in enumerate(obstacle_positions):
         if i == 7:
@@ -246,8 +253,9 @@ def main():
         # test_start = True
         obstacle_positions = np.zeros(3)
         obstacle_velocities = np.zeros(3)
-        obstacle_accelerations = np.zeros(3)
+        obstacle_accelerations = np.array([20.0,20.0,20.0])*0.0
         ee_pos = np.zeros(3)
+        ee_vel = np.zeros(3)
         count_move = 0
         Dtrajectory_time = 1.0
         low_scale_count = 0
@@ -255,16 +263,24 @@ def main():
         consecutive_low_scale_cycles = 0
         enable_spawn = True
         obstacle_accelerations = obstacle_accelerations.reshape(1, 3)
+        vr_min = -0.1
+        v_h_min = 0.1
+        # ctrl.frames_ids = [ctrl.tool_frame_id]
         while t < duration and not stop_event.is_set():
             loop_start = time.perf_counter()
-            obstacle_positions, obstacle_velocities, enable_spawn, count_move = generate_obs_state(obstacle_positions, obstacle_velocities, cycles, enable_spawn, planner, trajectory_time, T_total, model, data, tool_frame_id, ee_pos, Dtrajectory_time, count_move)
+            nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
 
-            # print(obstacle_positions)
-                # print(f"TYPE OF OBSTACLE POSITIONS: {type(obstacle_positions)}")
+            # obstacle_positions, obstacle_velocities, enable_spawn, count_move = generate_obs_state(obstacle_positions, obstacle_velocities, cycles, enable_spawn, planner, trajectory_time, T_total, model, data, tool_frame_id, ee_pos, Dtrajectory_time, count_move)
+            h_objective = generate_target_h(h_mean_ref, h_std_dev)
+            d_objective = compute_required_d(h_objective, vr_min, v_ref, np.linalg.norm(obstacle_accelerations) )
+            obstacle_positions, obstacle_velocities, enable_spawn, count_move = generate_obs_state_h_fixed(obstacle_positions, obstacle_velocities, cycles, enable_spawn, ctrl.model, ctrl.data, tool_frame_id, ee_pos, Dtrajectory_time, count_move, d_objective, v_ref, spawn_freq, ee_vel)#nominal_q, nominal_Dq, nominal_DDq)
+            #     # print(obstacle_positions)
+            #     print(f"TYPE OF OBSTACLE POSITIONS: {type(obstacle_positions)}")
+            #     print(f"TYPE OF OBSTACLE Velocities: {type(obstacle_velocities)}")
+
                 # print(f"SIZE OF OBS POSITIONS: {obstacle_positions.shape}")
             cycles += 1
 
-            nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
 
             out = ctrl.step(
                 obs_pos=obstacle_positions,
@@ -275,6 +291,8 @@ def main():
                 nominal_DDq=nominal_DDq
             )
             ee_pos = out["end_effector_pos"]
+            ee_vel = out["end_effector_vel"]
+            # print(np.linalg.norm(ee_vel))
             unfeasible_string = out["unfeasible_cnt"]
             q = out["q"]
 
@@ -299,13 +317,14 @@ def main():
             t += Tc
             end_eff_pos = out["end_effector_pos"]
             # print(t)
+            vr_min = out["vr_min"]
+
             if not stop_event.is_set() and LOG_DATA:
                 joint_target_publisher.publish_once(t, nominal_q, nominal_Dq, nominal_DDq)  # pyright: ignore[reportPossiblyUnboundVariable]
                 hmin = out["h_min"]
                 dmin = out["d_min"]
                 trj_error = out["trajectory_error"]
                 end_eff_vel = out["end_effector_vel"]
-                vr_min = out["vr_min"]
                 vh_min = out["vh_min"]
                 scaling = out["Dtrajectory_time"]
                 cbf_out_publisher.publish_once(
@@ -339,7 +358,6 @@ def main():
                     break
             if np.min(dist) > 0.0:
                 min_dist.append(np.min(dist))
-            elapsed = time.perf_counter() - loop_start
             if cycles > 1:
                 ct.append(elapsed)
                 scaling_log.append(Dtrajectory_time)
@@ -353,13 +371,16 @@ def main():
 
             if out["Dtrajectory_time"] < scaling_threshold:
                 low_scale_count += 1
+            if out["h_min"] <  (h_objective+0.1):
+                visualizer.update_vectors(out["h_min"], out["d_min"], out["vr_min"] - out["vh_min"], t,)
+            elapsed = time.perf_counter() - loop_start
 
             rest = Tc - elapsed
             if rest > 0:
                 if SHOW_DATA:
                     vizualization_string = f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f} ctrl_state:{unfeasible_string}"
 
-                    renderer.push_state(out["q"], out["Tbt_nominal"], obstacle_positions, vizualization_string)
+                    renderer.push_state(out["q"], out["Tbt_nominal"], obstacle_positions, obstacle_velocities,vizualization_string)
                     elapsed = time.perf_counter() - loop_start
                     rest = max(0.0,Tc - elapsed)
                     time.sleep(rest)
@@ -413,6 +434,11 @@ def main():
     print(f"MEAN SCALING: {mean_scale}")
     print(f"MEAN TRAJECTORY ERROR: {mean_trajectory_error}")
     print(f"LOW SCALE RATE: {low_scale_rate}")
+    print(f"D OBJECTIVE: {d_objective}")
+    print((f"V REF: {v_ref}"))
+    print(f"Cicli contati: {len(visualizer.h_vec)}, cicli totali: {cycles}")
+    print(f"PErcentuale cicli utii: {len(visualizer.h_vec)/cycles}")
+    visualizer.compute_mean_cov(True)
     # print_stats_table(stats)
     # _ = make_summary_figure(
     #     computation_times,
