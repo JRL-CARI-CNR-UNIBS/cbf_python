@@ -18,6 +18,7 @@ import pandas as pd
 import os
 from datetime import datetime
 from optuna.samplers import CmaEsSampler
+from optuna.samplers import NSGAIIISampler
 
 # Database connection (for dashboard)
 POSTGRES_URL = "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
@@ -96,7 +97,7 @@ def make_objective():
         cfg.lambda_vel = trial.suggest_float("lambda_vel", 1e-3, 1e3, log=True)
         cfg.lambda_acc = trial.suggest_float("lambda_acc", 1e-15, 1e-4, log=True)
         cfg.lambda_scaling = trial.suggest_float("lambda_scaling", 10, 1e3, log=True)
-        cfg.gamma = trial.suggest_float("gamma", 0.1, 20, log=True)
+        cfg.gamma = trial.suggest_float("gamma", 0.1, 10, log=True)
 
         delta = 4.5
 
@@ -105,7 +106,7 @@ def make_objective():
         cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
 
         try:
-            viol_rate, mean_scale, mean_traj_err, h_mean, d_mean, v_mean, cov_matrix = run_episode_with_timeout(
+            viol_rate, mean_scale, mean_traj_err, low_scale_rate, lap_count, h_mean, d_mean, v_mean, cov_matrix = run_episode_with_timeout(
                 cfg=cfg, Tc=2e-3, duration=150,
                 timeout=6000
             )
@@ -116,9 +117,9 @@ def make_objective():
 
         except TimeoutError:
             # For directions: [minimize, maximize, minimize, minimize]
-            return 0.0
+            return 1.0, 0.0, 1.0, 1.0, 0.0
 
-        return  viol_rate, mean_scale, mean_traj_err
+        return  viol_rate, mean_scale, mean_traj_err, low_scale_rate, lap_count
 
     return objective
 
@@ -174,20 +175,17 @@ planner = SegmentedJointTrap(Dq_max=gen_cfg.Dq_max * 0.25, DDq_max=gen_cfg.DDq_m
 # CONFIG 1
 planner.addWayPoint(q)
 planner.addWayPoint(q10)
-planner.addWayPoint(q20)
-planner.addWayPoint(q10)
 planner.addWayPoint(q22)
 planner.addWayPoint(q25)
 planner.addWayPoint(q30)
-planner.addWayPoint(q40)
-planner.addWayPoint(q30)
 planner.addWayPoint(q)
+
 
 T_total = planner.computeTime()
 model_wrapper = loadSharework(UR10E_JOINTS)
 model = model_wrapper.model
 data = model.createData()
-n_wp = 9
+n_wp = 6
 configs = {
     "q": q,
     "q10": q10,
@@ -217,7 +215,7 @@ scaling_threshold = 0.5
 
 
 # -------------------- EVALUATION FUNCTION --------------------
-def run_episode(Tc=2e-3, duration=500.0, cfg=PolynomialControllerConfig()):
+def run_episode(Tc=2e-3, duration=500.0, cfg=ControllerConfig()):
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
     cfg.Dq_max = cfg.Dq_max * 0.25
@@ -277,8 +275,7 @@ def run_episode(Tc=2e-3, duration=500.0, cfg=PolynomialControllerConfig()):
             print("QP failed")
             return 1.0, -1.0, 10.0, 1.0
         t += Tc
-        visualizer.update_vectors(out["h_min"], out["d_min"], out["vr_min"] - out["vh_min"], t, nsteps)
-
+        
         if out["h_min"] < 0 and out["vr_min"] < -1e-3:
             violations += 1
         sum_scale += out["Dtrajectory_time"]
@@ -287,6 +284,7 @@ def run_episode(Tc=2e-3, duration=500.0, cfg=PolynomialControllerConfig()):
         if out["Dtrajectory_time"] < scaling_threshold:
             low_scale_count += 1
         trajectory_time = out["trajectory_time"]
+        visualizer.update_vectors(out["h_min"], out["d_min"], out["vr_min"] - out["vh_min"], t, nsteps)
 
         time.sleep(1e-4)  # To avoid locking issues in multiprocessing
 
@@ -299,7 +297,8 @@ def run_episode(Tc=2e-3, duration=500.0, cfg=PolynomialControllerConfig()):
 
     visualizer.compute_mean_cov()
 
-    return viol_rate, mean_scale, mean_trajectory_error, visualizer.h_mean, visualizer.d_mean, visualizer.v_mean, visualizer.cov_matrix
+    # on_target_rate = on_target_count/(n_wp * ((lap_count)+ ((trajectory_time % T_total)/T_total)))
+    return viol_rate, mean_scale, mean_trajectory_error, low_scale_rate, lap_count, visualizer.h_mean, visualizer.d_mean, visualizer.v_mean, visualizer.cov_matrix
 
 
 def _run_episode_worker(args, kwargs, q):
@@ -354,17 +353,27 @@ storage = optuna.storages.RDBStorage(
     # failed_trial_callback=RetryFailedTrialCallback(max_retry=1),
 )
 
+sampler = NSGAIIISampler(
+    population_size=50,      # Aumenta la popolazione
+    mutation_prob=0.2,       # Aumenta la mutazione (default è basso)
+    crossover_prob=0.95,     # Alto crossover
+)
+
+
+
 study = optuna.create_study(
-    directions=["minimize", "maximize","minimize"],
+    directions=["minimize", "maximize","minimize","minimize","maximize"],
     storage=storage,
     # load_if_exists=True,
-    sampler=CmaEsSampler(restart_strategy="ipop"),  # 'ipop' riavvia se si blocca in un minimo locale
-    study_name=f"params_test_{time.strftime('%Y%m%d-%H%M%S')}",
+    # sampler=sampler,
+    sampler =optunahub.load_module("samplers/auto_sampler").AutoSampler(),
+    study_name=f"params_GPR_test_{time.strftime('%Y%m%d-%H%M%S')}",
+    # study_name=f"params_test_{time.strftime('%Y%m%d-%H%M%S')}",
     # study_name=f"dynamic_params_polynomial_20260216-094358",
     load_if_exists=True,
 
 )
-study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error"])
+study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "low_scale_rate", "lap count"])
 study.optimize(make_objective(), n_trials=3000, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
 save_data_multiobj(study)
 # print (run_episode(1e3,1e3,1e3,1e-3,5,1))

@@ -51,7 +51,7 @@ import pandas as pd
 
 params_filename = "parameters_set.csv"
 set_ID = "0"
-duration = 5000.0
+duration = 150.0
 
 SHOW_DATA = True
 USE_BRIDGE = True
@@ -96,7 +96,9 @@ def main():
     # ------------------------ CONTROLLER SETUP -----------------------------------
     Tc =2e-3
     cfg = create_base_cfg(set_ID, Tc, params_filename)
-    ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
+    cfg.Dq_max = cfg.Dq_max*0.15
+    cfg.DDq_max = cfg.DDq_max*0.1
+    ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log = -1)
 
     target_name = "ur10e_wrist_3_joint"
     idx = UR10E_JOINTS.index(target_name)
@@ -125,7 +127,7 @@ def main():
         else:
             T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
 
-        csv_path= "../skeleton_vectors/skeleton_vectors_14_NORMAL_TEST1.csv"
+        csv_path= "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv"
         #csv_publishers.swap_csv(csv_in_path, csv_out_path, 7, 17)
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
@@ -225,8 +227,7 @@ def main():
     # ---------------------------TEST WAYPOINTS ------------------------------
     q = first_joint_position.copy()
 
-    cfg.Dq_max = cfg.Dq_max*0.25
-    cfg.DDq_max = cfg.DDq_max*0.2
+
     planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.15, DDq_max=cfg.DDq_max*0.15)
     print("Computing trajectory...")
     # BRING THE ROBOT AT HOME BEFORE STARTING THE TEST
@@ -452,7 +453,7 @@ def main():
     print(f"MEAN SCALING: {mean_scale}")
     print(f"MEAN TRAJECTORY ERROR: {mean_trajectory_error}")
     print(f"LOW SCALE RATE: {low_scale_rate*100}")
-    visualizer.compute_mean_cov()
+    visualizer.compute_mean_cov(True)
     # CREATING CARTESIAN REFERENCE CSV FILE
     if LOG_DATA:
         if USE_BRIDGE:
