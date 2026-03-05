@@ -56,7 +56,6 @@ class BCFOptimalController:
         self.tool_frame_id = self.model.getFrameId(cfg.prefix + cfg.tool_frame)
         self.elbow_frame_id = self.model.getFrameId(cfg.prefix + cfg.elbow_frame)
         self.frames_ids = [ self.tool_frame_id, self.elbow_frame_id]
-
         # NUMBA-prebuilt blocks
         self.FreePos, self.ForcedPos, self.FreeVel, self.ForcedVel = \
             build_free_forced_one_step(self.cfg.Tc, self.model.nq)
@@ -103,7 +102,7 @@ class BCFOptimalController:
 
         # keypoint to log
         self.keypoint_to_log = keypoint_to_log
-
+        self.og_lamda_pos = self.cfg.lambda_pos
     def set_ref_scaling(self, scaling):
         if scaling >= 1.0 :
             self.ref_scaling = 1.0
@@ -248,6 +247,7 @@ class BCFOptimalController:
                 test_unfeasible = 1
                 self.unfeasible_cnt = "UNFEASIBLE"
                 self.qp_scaling = 0.0
+                self.cfg.lambda_pos = self.og_lamda_pos *  1000.0
                 self.check_delta = True
             else:
                 raise
@@ -285,6 +285,7 @@ class BCFOptimalController:
                     # print(f"COUNT_DEV: {count_dev}, i: {i}")
             if count_dev == nq:
                 self.check_delta = False
+                self.cfg.lambda_pos =  self.og_lamda_pos
                # self.qp_scaling = self.ref_scaling
                #  print("RESUMING MAIN PROBLEM")
                 self.unfeasible_cnt = "FEASIBLE"

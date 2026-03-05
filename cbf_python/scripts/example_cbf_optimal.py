@@ -53,8 +53,8 @@ params_filename = "parameters_set.csv"
 set_ID = "0"
 duration = 150.0
 
-SHOW_DATA = True
-USE_BRIDGE = True
+SHOW_DATA = False
+USE_BRIDGE = False
 LOG_DATA = False
 SAVE_DATA = False
 
@@ -449,7 +449,7 @@ def main():
     print(f"LAP COUNT: {lap_count}")
     print("on target count: ", on_target_count)
     print(f"WAYPOINTS REACHING PERCENTAGE: {on_target_rate*100.0} %")
-    print(f"VIOLATION RATE: {viol_rate*100}")
+    print(f"VIOLATION RATE: {viol_rate*100} %")
     print(f"MEAN SCALING: {mean_scale}")
     print(f"MEAN TRAJECTORY ERROR: {mean_trajectory_error}")
     print(f"LOW SCALE RATE: {low_scale_rate*100}")
