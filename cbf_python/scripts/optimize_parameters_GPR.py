@@ -386,22 +386,24 @@ sampler = NSGAIIISampler(
 )
 
 
-
-study = optuna.create_study(
+ref_std_dev = 0.1
+ref_h_mean_vec   = [x / 10.0 for x in range(-1, 11)]
+for h_mean in ref_h_mean_vec:
+    study = optuna.create_study(
     directions=["minimize", "maximize","minimize","minimize","maximize"],
     storage=storage,
     # load_if_exists=True,
     # sampler=sampler,
     sampler =optunahub.load_module("samplers/auto_sampler").AutoSampler(),
-    study_name=f"params_GPR_test_{time.strftime('%Y%m%d-%H%M%S')}",
+    study_name=f"params_GPR_test_h_mean_{h_mean}_{time.strftime('%Y%m%d-%H%M%S')}",
     # study_name=f"params_test_{time.strftime('%Y%m%d-%H%M%S')}",
     # study_name=f"dynamic_params_polynomial_20260216-094358",
     load_if_exists=True,
 
-)
-study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "low_scale_rate", "lap count"])
-study.optimize(make_objective(0.18, 0.15), n_trials=3000, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
-save_data_multiobj(study)
+    )
+    study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "low_scale_rate", "lap count"])
+    study.optimize(make_objective(0.18, 0.15), n_trials=3000, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
+    save_data_multiobj(study)
 # print (run_episode())
 
 
