@@ -6,8 +6,6 @@ import pinocchio as pin
 from optuna import visualization
 
 from scripts.util.joint_interpolator import SegmentedJointTrap
-from scripts.util.gaussian_process_util import generate_d_value, generate_obs_state_h_fixed, compute_required_d, generate_target_h
-
 from sharework import loadSharework
 from Command_bridge.fake_command_bridge import FakeCommandBridge
 from Controller.optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
@@ -30,9 +28,6 @@ import os
 from datetime import datetime
 from scripts.util.mean_visualizer import StochasticCBFVisualizer
 
-
-v_ref = 1.0
-spawn_freq = 1
 
 def save_data_multiobj(study, filename="log_best_trials.csv"):
     """
@@ -93,8 +88,8 @@ def save_data_multiobj(study, filename="log_best_trials.csv"):
 # --- ESEMPIO DI UTILIZZO ---
 # save_data_complete(study)
 
-def make_objective( h_mean_ref=0.1, ref_std_dev=0.1):
-    def objective(trial,):
+def make_objective():
+    def objective(trial):
 
         cfg = ControllerConfig(Tc=2e-3)
 
@@ -112,8 +107,8 @@ def make_objective( h_mean_ref=0.1, ref_std_dev=0.1):
 
         try:
             viol_rate, mean_scale, mean_traj_err, low_scale_rate, lap_count, h_mean, d_mean, v_mean, cov_matrix = run_episode_with_timeout(
-                cfg=cfg, Tc=2e-3, duration=1000.0,
-                timeout=6000, h_mean_ref=h_mean_ref, ref_std_dev=ref_std_dev
+                cfg=cfg, Tc=2e-3, duration=1000,
+                timeout=6000
             )
             trial.set_user_attr("covariance_matrix", cov_matrix.tolist())
             trial.set_user_attr("h_mean", h_mean)
@@ -220,7 +215,7 @@ scaling_threshold = 0.5
 
 
 # -------------------- EVALUATION FUNCTION --------------------
-def run_episode(Tc=2e-3, duration=500.0, cfg=ControllerConfig(), h_mean_ref=0.1, ref_std_dev=0.1):
+def run_episode(Tc=2e-3, duration=500.0, cfg=ControllerConfig()):
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
     cfg.Dq_max = cfg.Dq_max * 0.25
@@ -247,41 +242,21 @@ def run_episode(Tc=2e-3, duration=500.0, cfg=ControllerConfig(), h_mean_ref=0.1,
     enable_lap_count = True
 
     low_scale_count = 0
-    obstacle_positions = np.zeros(3)
-    obstacle_velocities = np.zeros(3)
-    obstacle_accelerations = np.array([20.0,20.0,20.0])*0.0
-    obstacle_accelerations = obstacle_accelerations.reshape(1, 3)
-    enable_spawn = True
-    vr_min = -0.1
-    ee_pos = np.zeros(3)
-    ee_vel = np.zeros(3)
-    count_move = 0
-    Dtrajectory_time = 1.0
 
     visualizer = StochasticCBFVisualizer()
     while t < duration:
-        # obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=t)
+        obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=t)
         nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
-
-            # obstacle_positions, obstacle_velocities, enable_spawn, count_move = generate_obs_state(obstacle_positions, obstacle_velocities, cycles, enable_spawn, planner, trajectory_time, T_total, model, data, tool_frame_id, ee_pos, Dtrajectory_time, count_move)
-        h_objective = generate_target_h(h_mean_ref, ref_std_dev)
-        d_objective = compute_required_d(h_objective, vr_min, v_ref, np.linalg.norm(obstacle_accelerations) )
-        obstacle_positions, obstacle_velocities, enable_spawn, count_move = generate_obs_state_h_fixed(obstacle_positions, obstacle_velocities, nsteps, enable_spawn, ctrl.model, ctrl.data, tool_frame_id, ee_pos, Dtrajectory_time, count_move, d_objective, v_ref, spawn_freq, ee_vel)#nominal_q, nominal_Dq, nominal_DDq)
         try:
             out = ctrl.step(
-                obs_pos=obstacle_positions,
-                obs_vel=obstacle_velocities,
-                obs_acc=obstacle_accelerations,
+                obs_pos=obs_pos,
+                obs_vel=obs_vel,
+                obs_acc=obs_acc,
                 nominal_q=nominal_q,
                 nominal_Dq=nominal_Dq,
                 nominal_DDq=nominal_DDq,
             )
-            vr_min = out["vr_min"]
             end_eff_pos = out["end_effector_pos"]
-            ee_pos = out["end_effector_pos"]
-            ee_vel = out["end_effector_vel"]
-            Dtrajectory_time = out["Dtrajectory_time"]
-
             if (trajectory_time % T_total) < Tc:
                 if enable_lap_count:
                     lap_count += 1
@@ -300,26 +275,25 @@ def run_episode(Tc=2e-3, duration=500.0, cfg=ControllerConfig(), h_mean_ref=0.1,
             print("QP failed")
             return 1.0, -1.0, 10.0, 1.0
         t += Tc
+        
+        if out["h_min"] < 0 and out["vr_min"] < -1e-3:
+            violations += 1
+        sum_scale += out["Dtrajectory_time"]
         nsteps += 1
-        if out["h_min"] <  (h_objective+1.5*ref_std_dev) and out["h_min"] >  (h_objective-1.5*ref_std_dev):
-
-            if out["h_min"] < 0 and out["vr_min"] < -1e-3:
-                violations += 1
-            sum_scale += out["Dtrajectory_time"]
-            trajectory_error_sum += out["trajectory_error"]
-            if out["Dtrajectory_time"] < scaling_threshold:
-                low_scale_count += 1
-            trajectory_time = out["trajectory_time"]
-            visualizer.update_vectors(out["h_min"], out["d_min"], out["vr_min"] - out["vh_min"], t)
+        trajectory_error_sum += out["trajectory_error"]
+        if out["Dtrajectory_time"] < scaling_threshold:
+            low_scale_count += 1
+        trajectory_time = out["trajectory_time"]
+        visualizer.update_vectors(out["h_min"], out["d_min"], out["vr_min"] - out["vh_min"], t, )
 
         time.sleep(1e-4)  # To avoid locking issues in multiprocessing
 
     # on_target_rate = on_target_count/(n_wp * ((lap_count)+ ((trajectory_time % T_total)/T_total)))
     lap_count = lap_count + ((trajectory_time % T_total) / T_total)
-    viol_rate = violations / max(1, len(visualizer.h_vec))
-    mean_scale = sum_scale / max(1, len(visualizer.h_vec))
-    mean_trajectory_error = trajectory_error_sum / max(1, len(visualizer.h_vec))
-    low_scale_rate = low_scale_count / max(1, len(visualizer.h_vec))
+    viol_rate = violations / max(1, nsteps)
+    mean_scale = sum_scale / max(1, nsteps)
+    mean_trajectory_error = trajectory_error_sum / max(1, nsteps)
+    low_scale_rate = low_scale_count / max(1, nsteps)
 
     visualizer.compute_mean_cov()
 
@@ -400,9 +374,9 @@ study = optuna.create_study(
 
 )
 study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "low_scale_rate", "lap count"])
-study.optimize(make_objective(0.18, 0.15), n_trials=3000, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
+study.optimize(make_objective(), n_trials=3000, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
 save_data_multiobj(study)
-# print (run_episode())
+# print (run_episode(1e3,1e3,1e3,1e-3,5,1))
 
 
 ''' 
