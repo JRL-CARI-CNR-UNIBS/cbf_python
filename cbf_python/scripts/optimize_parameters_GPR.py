@@ -31,9 +31,11 @@ from datetime import datetime
 from scripts.util.mean_visualizer import StochasticCBFVisualizer
 
 
-v_ref = 1.0
-spawn_freq = 1
+v_ref = 0.8
 
+spawn_freq = 25
+trial_duration = 1000.0
+n_trials = 3000
 def save_data_multiobj(study, filename="log_best_trials.csv"):
     """
     Salva i top 5 trial ordinati secondo la funzione di costo personalizzata.
@@ -54,8 +56,9 @@ def save_data_multiobj(study, filename="log_best_trials.csv"):
     try:
         df_success["calculated_cost"] = (
                 df_success["values_mean_scaling"] -
-                10.0 * df_success["values_violation_rate"] -
-                df_success["values_mean_trajectory_error"]
+               5* df_success["values_violation_rate"] -
+                df_success["values_mean_trajectory_error"] +
+                df_success["values_lap count"] / 200
         )
     except KeyError:
         print("ERRORE: Colonne non trovate. Verifica i nomi con study.trials_dataframe().columns")
@@ -102,7 +105,7 @@ def make_objective( h_mean_ref=0.1, ref_std_dev=0.1):
         cfg.lambda_vel = trial.suggest_float("lambda_vel", 1e-3, 1e3, log=True)
         cfg.lambda_acc = trial.suggest_float("lambda_acc", 1e-15, 1e-4, log=True)
         cfg.lambda_scaling = trial.suggest_float("lambda_scaling", 10, 1e3, log=True)
-        cfg.gamma = trial.suggest_float("gamma", 0.1, 10, log=True)
+        cfg.gamma = trial.suggest_float("gamma", 2, 10, log=True)
 
         delta = 4.5
 
@@ -112,7 +115,7 @@ def make_objective( h_mean_ref=0.1, ref_std_dev=0.1):
 
         try:
             viol_rate, mean_scale, mean_traj_err, low_scale_rate, lap_count, h_mean, d_mean, v_mean, cov_matrix = run_episode_with_timeout(
-                cfg=cfg, Tc=2e-3, duration=1000.0,
+                cfg=cfg, Tc=2e-3, duration=trial_duration,
                 timeout=6000, h_mean_ref=h_mean_ref, ref_std_dev=ref_std_dev
             )
             trial.set_user_attr("covariance_matrix", cov_matrix.tolist())
