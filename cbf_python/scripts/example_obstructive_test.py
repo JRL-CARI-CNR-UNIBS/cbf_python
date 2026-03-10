@@ -56,10 +56,10 @@ SAVE_DATA = False
 parameters_type = "0"
 stop_event = threading.Event()
 
-h_mean_ref = -0.01
-v_ref = 0.8
-spawn_freq = 10
-h_std_dev = 0.1
+h_mean_ref = 0.1
+v_ref = 1.0
+spawn_freq = 1
+h_std_dev = 0.15
 # d_objective = 0.1
 d_objective = generate_d_value(h_mean_ref, 0.1)
 def _on_sigint_with_bridge():
@@ -264,7 +264,6 @@ def main():
         enable_spawn = True
         obstacle_accelerations = obstacle_accelerations.reshape(1, 3)
         vr_min = -0.1
-        v_h_min = 0.1
         # ctrl.frames_ids = [ctrl.tool_frame_id]
         while t < duration and not stop_event.is_set():
             loop_start = time.perf_counter()
@@ -371,7 +370,7 @@ def main():
 
             if out["Dtrajectory_time"] < scaling_threshold:
                 low_scale_count += 1
-            if out["h_min"] <  (h_objective+0.1):
+            if out["h_min"] <  (h_objective+1.5*h_std_dev) and out["h_min"] >  (h_objective-1.5*h_std_dev):
                 visualizer.update_vectors(out["h_min"], out["d_min"], out["vr_min"] - out["vh_min"], t,)
             elapsed = time.perf_counter() - loop_start
 
