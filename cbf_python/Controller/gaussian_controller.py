@@ -32,10 +32,48 @@ class GaussianSet:
         }
     )
 
+    def __str__(self) -> str:
+        """Formats a single GaussianSet, making 2D matrices easy to read."""
 
+        def fmt_arr(arr: np.ndarray) -> str:
+            # Formats matrices nicely with consistent spacing and indentation
+            formatted = np.array2string(arr, precision=4, suppress_small=True, separator=', ')
+            return formatted.replace('\n', '\n      ')
+
+        means_str = ", ".join([f"'{k}': {v:.4g}" for k, v in self.means.items()])
+        lambdas_str = ", ".join([f"'{k}': {v:.4g}" for k, v in self.lambda_ref.items()])
+
+        return (
+            f"    means         : {{ {means_str} }}\n"
+            f"    norm_const    : {self.norm_const:.4g}\n"
+            f"    lambda_ref    : {{ {lambdas_str} }}\n"
+            f"    covariance    :\n      {fmt_arr(self.covariance)}\n"
+            f"    inv_covariance:\n      {fmt_arr(self.inv_covariance)}"
+        )
+
+@dataclass
 class GaussianControllerConfig(ControllerConfig):
     gaussian_sets: list[GaussianSet] = field(default_factory=list)
     n_gaussian_sets: int = 0
+
+    def __str__(self) -> str:
+        # 1. Get the base configuration string from the parent class
+        base_str = super().__str__()
+
+        # 2. Optionally, update the title to reflect the child class
+        base_str = base_str.replace("ControllerConfig:", "GaussianControllerConfig:")
+
+        # 3. Build the Gaussian-specific string
+        gauss_str = f"\n\n  -- Gaussian Sets (Total: {self.n_gaussian_sets}) --"
+
+        if not self.gaussian_sets:
+            gauss_str += "\n  [No Gaussian Sets Defined]"
+        else:
+            for i, g_set in enumerate(self.gaussian_sets):
+                gauss_str += f"\n  Set {i + 1}:\n"
+                gauss_str += str(g_set)
+
+        return base_str + gauss_str
 
     def precompute_gaussian_parameters(self):
         """

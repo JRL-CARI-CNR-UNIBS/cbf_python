@@ -44,21 +44,21 @@ from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
 from scripts.util.test_utils import generate_obs_state, compute_ee_pose, generate_velocity
 import  pandas as pd
 import csv
-from scripts.util.gaussian_process_util import generate_d_value, generate_obs_state_h_fixed, compute_required_d, generate_target_h
+from scripts.util.gaussian_process_util import generate_d_value, generate_obs_state_h_fixed, compute_required_d, generate_target_h, read_config_data_from_csv
 from scripts.util.mean_visualizer import StochasticCBFVisualizer
 params_filename = "../parameters_set.csv"
 set_ID = "0"
 duration = 150.0
 
-SHOW_DATA = True
+SHOW_DATA = False
 LOG_DATA = False
 SAVE_DATA = False
 parameters_type = "0"
 stop_event = threading.Event()
 
-h_mean_ref = 0.1
-v_ref = 1.0
-spawn_freq = 1
+h_mean_ref = 1
+v_ref = -0.1
+spawn_freq = 10
 h_std_dev = 0.15
 # d_objective = 0.1
 d_objective = generate_d_value(h_mean_ref, 0.1)
@@ -99,21 +99,23 @@ def main():
     # delta = 4.427823857718463
     # cfg.gamma =   9.651586852673113
 
-    df = pd.read_csv(params_filename)
+    # df = pd.read_csv(params_filename)
+    #
+    # cfg.lambda_pos = float(df.loc[df["ID"] == set_ID, f"lambda_{parameters_type}_pos"].values[0])
+    # cfg.lambda_vel = float(df.loc[df["ID"] == set_ID, f"lambda_{parameters_type}_vel"].values[0])
+    # cfg.lambda_acc = float(df.loc[df["ID"] == set_ID, f"lambda_{parameters_type}_acc"].values[0])
+    # cfg.lambda_scaling = float(df.loc[df["ID"] == set_ID, f"lambda_{parameters_type}_scaling"].values[0])
+    # cfg.gamma = float(df.loc[df["ID"] == set_ID, f"gamma_{parameters_type}"].values[0])
+    # delta = float(df.loc[df["ID"] == set_ID, f"delta_{parameters_type}_deg"].values[0])
 
-    cfg.lambda_pos = float(df.loc[df["ID"] == set_ID, f"lambda_{parameters_type}_pos"].values[0])
-    cfg.lambda_vel = float(df.loc[df["ID"] == set_ID, f"lambda_{parameters_type}_vel"].values[0])
-    cfg.lambda_acc = float(df.loc[df["ID"] == set_ID, f"lambda_{parameters_type}_acc"].values[0])
-    cfg.lambda_scaling = float(df.loc[df["ID"] == set_ID, f"lambda_{parameters_type}_scaling"].values[0])
-    cfg.gamma = float(df.loc[df["ID"] == set_ID, f"gamma_{parameters_type}"].values[0])
-    delta = float(df.loc[df["ID"] == set_ID, f"delta_{parameters_type}_deg"].values[0])
+    delta = 4.5
 
-
+    read_config_data_from_csv(cfg, study_name="params_GPR_test_20260305-165027_1", filename="../log_best_trials.csv")
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta)
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
-
+    print(cfg)
     target_name = "ur10e_wrist_3_joint"
     idx = UR10E_JOINTS.index(target_name)
 

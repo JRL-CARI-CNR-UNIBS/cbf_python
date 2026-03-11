@@ -40,6 +40,39 @@ class ControllerConfig:
     tool_frame: str = "tool0"
     elbow_frame: str = "forearm_link"
 
+    def __str__(self) -> str:
+        """Returns a nicely formatted string representation of the configuration."""
+
+        # Helper to format numpy arrays cleanly (4 decimal places, suppress scientific notation for near-zero)
+        def fmt_arr(arr: np.ndarray) -> str:
+            return np.array2string(arr, precision=4, suppress_small=True, separator=', ')
+
+        return (
+            "ControllerConfig:\n"
+            "  -- Core Parameters --\n"
+            f"  Tc              : {self.Tc}\n"
+            f"  C               : {self.C}\n"
+            f"  Tr              : {self.Tr}\n"
+            f"  a_s             : {self.a_s}\n"
+            f"  max_obstacles   : {self.max_obstacles}\n\n"
+            "  -- Kinematic Limits --\n"
+            f"  delta_q_max     : {fmt_arr(self.delta_q_max)}\n"
+            f"  Dq_max          : {fmt_arr(self.Dq_max)}\n"
+            f"  DDq_max         : {fmt_arr(self.DDq_max)}\n"
+            f"  delta_unfeasible: {fmt_arr(self.delta_unfeasible)}\n\n"
+            "  -- Weights & Trajectory --\n"
+            f"  lambda_pos      : {self.lambda_pos}\n"
+            f"  lambda_vel      : {self.lambda_vel}\n"
+            f"  lambda_scaling  : {self.lambda_scaling}\n"
+            f"  lambda_acc      : {self.lambda_acc}\n"
+            f"  gamma           : {self.gamma}\n"
+            f"  DDtraj_time_max : {self.DDtrajectory_time_max}\n\n"
+            "  -- Robot Frames --\n"
+            f"  prefix          : '{self.prefix}'\n"
+            f"  tool_frame      : '{self.tool_frame}'\n"
+            f"  elbow_frame     : '{self.elbow_frame}'"
+        )
+
 class BCFOptimalController:
     """
     Minimal controller: only robot model, state, and QP assembly/solve.

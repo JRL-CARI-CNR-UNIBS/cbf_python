@@ -33,7 +33,7 @@ from scripts.util.test_utils import generate_obs_state, generate_velocity, compu
     bring_robot_home, plan_path, compute_cartesian_poses
 import pandas as pd
 from scripts.util.mean_visualizer import StochasticCBFVisualizer
-
+from scripts.util.gaussian_process_util import read_config_data_from_csv
 stop_event = threading.Event()
 
 params_filename = "../parameters_set.csv"

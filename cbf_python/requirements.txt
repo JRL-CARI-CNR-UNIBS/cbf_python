@@ -78,3 +78,4 @@ u-msgpack-python==2.8.0
 urdfpy==0.0.22
 wcwidth==0.2.13
 zstandard==0.25.0
+optuna

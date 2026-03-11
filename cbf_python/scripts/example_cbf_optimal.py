@@ -49,11 +49,11 @@ from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
 import pandas as pd
 
 
-params_filename = "parameters_set.csv"
+params_filename = "../parameters_set.csv"
 set_ID = "0"
 duration = 150.0
 
-SHOW_DATA = False
+SHOW_DATA = True
 USE_BRIDGE = False
 LOG_DATA = False
 SAVE_DATA = False
@@ -127,8 +127,7 @@ def main():
         else:
             T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
 
-        csv_path= "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv"
-        #csv_publishers.swap_csv(csv_in_path, csv_out_path, 7, 17)
+        csv_path= "../skeleton_vectors/skeleton_vectors_14_NORMAL_TEST1.csv"        #csv_publishers.swap_csv(csv_in_path, csv_out_path, 7, 17)
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
             csv_path=csv_path,
@@ -228,7 +227,7 @@ def main():
     q = first_joint_position.copy()
 
 
-    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.15, DDq_max=cfg.DDq_max*0.15)
+    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.5, DDq_max=cfg.DDq_max*0.25)
     print("Computing trajectory...")
     # BRING THE ROBOT AT HOME BEFORE STARTING THE TEST
     if USE_BRIDGE:
@@ -374,7 +373,7 @@ def main():
             trajectory_error_sum += out["trajectory_error"]
             if (Dtrajectory_time) < scaling_threshold:
                 low_scale_count += 1
-            visualizer.update_vectors(out["h_min"], out["d_min"], out["vr_min"]-out["vh_min"], t, cycles)
+            visualizer.update_vectors(out["h_min"], out["d_min"], out["vr_min"]-out["vh_min"], t,)
             elapsed = time.perf_counter() - loop_start
             if cycles>1:
                 ct.append(elapsed)
@@ -387,7 +386,7 @@ def main():
                 if SHOW_DATA:
                     vizualization_string =f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f} ctrl_state:{unfeasible_string}"
 
-                    renderer.push_state(out["q"], out["Tbt_nominal"], out["obs_pos"], vizualization_string)
+                    renderer.push_state(out["q"], out["Tbt_nominal"], out["obs_pos"], viz_string = vizualization_string)
                     elapsed = time.perf_counter() - loop_start
                     rest = max(0.0,Tc - elapsed)
                     time.sleep(rest)
