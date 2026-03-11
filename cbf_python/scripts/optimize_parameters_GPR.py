@@ -6,7 +6,7 @@ import pinocchio as pin
 from optuna import visualization
 
 from scripts.util.joint_interpolator import SegmentedJointTrap
-from scripts.util.gaussian_process_util import generate_d_value, generate_obs_state_h_fixed, compute_required_d, generate_target_h
+from scripts.util.gaussian_process_util import generate_obs_state_h_fixed, compute_required_d, generate_target_h, save_data_multiobj
 
 from sharework import loadSharework
 from Command_bridge.fake_command_bridge import FakeCommandBridge
@@ -16,9 +16,7 @@ from queue import Empty
 from Controller.dynamic_params_controllers import (PolynomialControllerConfig, PolynomialOptimalController,
                                                    StocasticalControllerConfig, StocasticalOptimalController)
 from pathlib import Path
-import pandas as pd
-import os
-from datetime import datetime
+
 from optuna.samplers import CmaEsSampler
 from optuna.samplers import NSGAIIISampler
 
@@ -36,59 +34,6 @@ from scripts.util.mean_visualizer import StochasticCBFVisualizer
 spawn_freq = 10
 trial_duration = 1000.0
 n_trials = 3000
-def save_data_multiobj(study, filename="log_best_trials.csv"):
-    """
-    Salva i top 5 trial ordinati secondo la funzione di costo personalizzata.
-    Crea il file se non esiste, altrimenti aggiunge i dati in coda.
-    """
-
-    # 1. Recupera i dati
-    df = study.trials_dataframe()
-    df_success = df[df["state"] == "COMPLETE"].copy()
-
-    if df_success.empty:
-        print("Nessun trial completato da salvare.")
-        return
-
-    # 2. Calcola la funzione di costo personalizzata
-    # Usa i nomi definiti nel tuo set_metric_names
-    # Formula: mean_scaling - 10 * violation_rate - mean_trajectory_error
-    try:
-        df_success["calculated_cost"] = (
-                df_success["values_mean_scaling"] -
-               5* df_success["values_violation_rate"] -
-                df_success["values_mean_trajectory_error"] +
-                df_success["values_lap count"] / 200
-        )
-    except KeyError:
-        print("ERRORE: Colonne non trovate. Verifica i nomi con study.trials_dataframe().columns")
-        return
-
-    # 3. Ordina e seleziona i Top 5
-    top_5 = df_success.sort_values(by="calculated_cost", ascending=False).head(5).copy()
-
-    # 4. Aggiungi timestamp e nome studio per tracciabilità
-    top_5.insert(0, 'timestamp', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    top_5.insert(1, 'study_name', study.study_name)
-
-    # 5. Seleziona le colonne da salvare (dinamicamente)
-    cols_to_keep = (
-            ['timestamp', 'study_name', 'number', 'calculated_cost'] +
-            [c for c in top_5.columns if c.startswith('values_')] +  # I tuoi 3 obiettivi
-            [c for c in top_5.columns if c.startswith('params_')] +  # I parametri
-            [c for c in top_5.columns if c.startswith('user_attrs_')]  # Attributi (matrici incluse)
-    )
-    top_5_clean = top_5[cols_to_keep]
-
-    # 6. SALVATAGGIO INTELLIGENTE
-    # Controlla se il file esiste
-    file_exists = os.path.isfile(filename)
-
-    # Scrivi in append. Se il file NON esiste, scrivi l'header. Se esiste, no.
-    top_5_clean.to_csv(filename, mode='a', header=not file_exists, index=False)
-
-    action = "Creato nuovo file" if not file_exists else "Aggiornato file esistente"
-    print(f"{action}: {filename} con i 5 migliori record.")
 
 # Esempio di utilizzo:
 # save_data_custom_names(study)
