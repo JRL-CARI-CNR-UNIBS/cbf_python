@@ -31,9 +31,9 @@ from datetime import datetime
 from scripts.util.mean_visualizer import StochasticCBFVisualizer
 
 
-v_ref = 0.8
+# v_ref = 0.8
 
-spawn_freq = 25
+spawn_freq = 10
 trial_duration = 1000.0
 n_trials = 3000
 def save_data_multiobj(study, filename="log_best_trials.csv"):
@@ -96,7 +96,7 @@ def save_data_multiobj(study, filename="log_best_trials.csv"):
 # --- ESEMPIO DI UTILIZZO ---
 # save_data_complete(study)
 
-def make_objective( h_mean_ref=0.1, ref_std_dev=0.1):
+def make_objective( h_mean_ref=0.1, ref_std_dev=0.1, v_ref= 0.8):
     def objective(trial,):
 
         cfg = ControllerConfig(Tc=2e-3)
@@ -116,7 +116,7 @@ def make_objective( h_mean_ref=0.1, ref_std_dev=0.1):
         try:
             viol_rate, mean_scale, mean_traj_err, low_scale_rate, lap_count, h_mean, d_mean, v_mean, cov_matrix = run_episode_with_timeout(
                 cfg=cfg, Tc=2e-3, duration=trial_duration,
-                timeout=6000, h_mean_ref=h_mean_ref, ref_std_dev=ref_std_dev
+                timeout=6000, h_mean_ref=h_mean_ref, ref_std_dev=ref_std_dev,v_ref=v_ref
             )
             trial.set_user_attr("covariance_matrix", cov_matrix.tolist())
             trial.set_user_attr("h_mean", h_mean)
@@ -223,7 +223,7 @@ scaling_threshold = 0.5
 
 
 # -------------------- EVALUATION FUNCTION --------------------
-def run_episode(Tc=2e-3, duration=500.0, cfg=ControllerConfig(), h_mean_ref=0.1, ref_std_dev=0.1):
+def run_episode(Tc=2e-3, duration=500.0, cfg=ControllerConfig(), h_mean_ref=0.1, ref_std_dev=0.1, v_ref=0.8):
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
     cfg.Dq_max = cfg.Dq_max * 0.25
@@ -389,9 +389,16 @@ sampler = NSGAIIISampler(
 )
 
 
-ref_std_dev = 0.1
-ref_h_mean_vec   = [x / 10.0 for x in range(-1, 11)]
-for h_mean in ref_h_mean_vec:
+ref_std_dev = 0.15
+par_values = {
+    0: [-0.1, 1],
+    1: [-0.1, 2],
+    2: [1.5, -1],
+}
+ref_h_mean_vec   = [-0.1, 1.5] #[x / 10.0 for x in range(-1, 11)]
+for key in par_values:
+    h_mean = par_values[key][0]
+    v_ref = par_values[key][1]
     study = optuna.create_study(
     directions=["minimize", "maximize","minimize","minimize","maximize"],
     storage=storage,
@@ -405,7 +412,7 @@ for h_mean in ref_h_mean_vec:
 
     )
     study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "low_scale_rate", "lap count"])
-    study.optimize(make_objective(0.18, 0.15), n_trials=3000, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
+    study.optimize(make_objective(h_mean,0.1, v_ref), n_trials=n_trials, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
     save_data_multiobj(study)
 # print (run_episode())
 
