@@ -328,7 +328,7 @@ class JointStateCommandBridge(Node, BaseCommandBridgeABC):
         msg.data = q.tolist()
         self._pub.publish(msg)
 
-    def getObstacles(self, max_age_sec: float = 0.5) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def getObstacles(self,elapsed  = 0.0,  max_age_sec: float = 0.5) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Aggregate recent kinematics into (pos, vel, acc) as in the original node:contentReference[oaicite:2]{index=2}."""
         now = self.get_clock().now()
         pos_all, vel_all, acc_all = [], [], []

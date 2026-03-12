@@ -153,15 +153,22 @@ def generate_target_h(h_mean, h_std):
 
     return h_sampled
 
-def import_optuna_csv(file_path, study_name):
+def import_optuna_csv(file_path, h_mean, v_mean,):
     """
     Imports Optuna study data from CSV and converts the
     covariance matrix string into a NumPy array.
     """
     # 1. Load the CSV
     df = pd.read_csv(file_path)
+    # Ensure h_mean and v_mean are treated as strings
+    h_str = f"h_mean_{h_mean}"
+    v_str = f"v_mean_{v_mean}"
 
-    df = df[df['study_name'] == study_name]
+    # Use .str.contains() with the & (AND) operator
+    df = df[df['study_name'].str.contains(h_str) & df['study_name'].str.contains(v_str)]
+    df = df.sort_values(by="calculated_cost", ascending=False).head(1)
+    print(df)
+
     # 2. Convert timestamp to datetime objects
     df['timestamp'] = pd.to_datetime(df['timestamp'])
 
@@ -178,9 +185,9 @@ def import_optuna_csv(file_path, study_name):
 
     return df
 
-def read_config_data_from_csv(cfg: GaussianControllerConfig, filename: str = "../../log_best_trials.csv", study_name = ""):
+def read_config_data_from_csv(cfg: GaussianControllerConfig, filename: str = "../../log_best_trials.csv", h_mean =0.0, v_mean = 0.0):
 
-    df = import_optuna_csv(filename, study_name)
+    df = import_optuna_csv(filename, h_mean, v_mean, )
     cfg.lambda_pos = df.iloc[0]['params_lambda_pos']
     cfg.lambda_vel = df.iloc[0]['params_lambda_vel']
     cfg.lambda_acc = df.iloc[0]['params_lambda_acc']

@@ -31,8 +31,6 @@ from scripts.util.joint_interpolator import SegmentedJointTrap
 from scripts.util.visualization_daemon import VisualizationDaemon
 from sharework import loadSharework
 
-from scripts.util.bcf_utils import make_summary_figure, print_stats_table
-
 from Controller.optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
 
 from datetime import datetime
@@ -42,24 +40,28 @@ import threading
 from scripts.util import csv_publishers, test_publish_utils as pub_utils
 from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
 from scripts.util.test_utils import generate_obs_state, compute_ee_pose, generate_velocity
-import  pandas as pd
+
 import csv
 from scripts.util.gaussian_process_util import generate_d_value, generate_obs_state_h_fixed, compute_required_d, generate_target_h, read_config_data_from_csv
 from scripts.util.mean_visualizer import StochasticCBFVisualizer
-params_filename = "../parameters_set.csv"
 set_ID = "0"
-duration = 150.0
+duration = 15000.0
 
 SHOW_DATA = False
 LOG_DATA = False
-SAVE_DATA = False
+SAVE_DATA = True
 parameters_type = "0"
 stop_event = threading.Event()
 
-h_mean_ref = 1
-v_ref = -0.1
+h_cfg = "article"
+v_cfg = "article"
+
+
+h_mean_ref = -0.1
+v_ref = 1
 spawn_freq = 10
-h_std_dev = 0.15
+h_std_dev = 0.1
+test_name= f"TEST_OBSTRUCTIVE_h_mean_{h_mean_ref:.2f}_v_mean_{v_ref:.2f}_high_par"
 # d_objective = 0.1
 d_objective = generate_d_value(h_mean_ref, 0.1)
 def _on_sigint_with_bridge():
@@ -110,11 +112,11 @@ def main():
 
     delta = 4.5
 
-    read_config_data_from_csv(cfg, study_name="params_GPR_test_20260305-165027_1", filename="../log_best_trials.csv")
+    read_config_data_from_csv(cfg,h_mean=h_cfg, v_mean=v_cfg, filename="../log_best_trials.csv")
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta)
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
-    ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
+    ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
     print(cfg)
     target_name = "ur10e_wrist_3_joint"
     idx = UR10E_JOINTS.index(target_name)
@@ -364,15 +366,15 @@ def main():
                 scaling_log.append(Dtrajectory_time)
                 h_log.append(out["h_min"])
                 trj_error_log.append(out["trajectory_error"])
+            if (out["h_min"] < (h_objective + 1.5 * h_std_dev) and out["h_min"] > (h_objective - 1.5 * h_std_dev)) or SAVE_DATA:
+                if out["h_min"] < 0 and out["vr_min"] < -1e-3:
+                    violations += 1
+                sum_scale += out["Dtrajectory_time"]
+                trajectory_error_sum += out["trajectory_error"]
 
-            if out["h_min"] < 0 and out["vr_min"] < -1e-3:
-                violations += 1
-            sum_scale += out["Dtrajectory_time"]
-            trajectory_error_sum += out["trajectory_error"]
+                if out["Dtrajectory_time"] < scaling_threshold:
+                    low_scale_count += 1
 
-            if out["Dtrajectory_time"] < scaling_threshold:
-                low_scale_count += 1
-            if out["h_min"] <  (h_objective+1.5*h_std_dev) and out["h_min"] >  (h_objective-1.5*h_std_dev):
                 visualizer.update_vectors(out["h_min"], out["d_min"], out["vr_min"] - out["vh_min"], t,)
             elapsed = time.perf_counter() - loop_start
 
@@ -406,9 +408,7 @@ def main():
 
     computation_times = np.array(ct)
     scaling_log = np.array(scaling_log)
-    h_log = np.array(h_log)
-    trj_error_log = np.array(trj_error_log)
-    print(f"LAP COUNT: {lap_count}")
+
 
 
     print(f"average scaling = {np.mean(scaling_log)}")
@@ -419,14 +419,14 @@ def main():
     }
     lap_count = lap_count + ((trajectory_time % T_total) / T_total)
     on_target_rate = on_target_count / (n_wp * ((lap_count) + ((trajectory_time % T_total) / T_total)))
-    viol_rate = violations / max(1, cycles)
-    mean_scale = sum_scale / max(1, cycles)
-    mean_trajectory_error = trajectory_error_sum / max(1, cycles)
-    low_scale_rate = low_scale_count / max(1, cycles)
+    viol_rate = violations / len(visualizer.h_vec)
+    mean_scale = sum_scale / len(visualizer.h_vec)
+    mean_trajectory_error = trajectory_error_sum / len(visualizer.h_vec)
+    low_scale_rate = low_scale_count / len(visualizer.h_vec)
 
     print(
         f"timeout cycles = {timeout_cycles} over {cycles}, percentage = {100.0 * timeout_cycles / cycles}, average = {np.mean(computation_times)}")
-    print(f"unfeasible cycles = {unfeasible_cnt} over {cycles}, percentage = {100.0 * unfeasible_cnt / cycles}")
+    print(f"unfeasible cycles = {unfeasible_cnt} over {cycles}, percentage = {100.0 * unfeasible_cnt / cycles} %")
     print(f"LAP COUNT: {lap_count}")
     print("on target count: ", on_target_count)
     print(((trajectory_time % T_total) / T_total))
@@ -435,7 +435,7 @@ def main():
     print(f"MEAN SCALING: {mean_scale}")
     print(f"MEAN TRAJECTORY ERROR: {mean_trajectory_error}")
     print(f"LOW SCALE RATE: {low_scale_rate}")
-    print(f"D OBJECTIVE: {d_objective}")
+    # print(f"D OBJECTIVE: {d_objective}")
     print((f"V REF: {v_ref}"))
     print(f"Cicli contati: {len(visualizer.h_vec)}, cicli totali: {cycles}")
     print(f"PErcentuale cicli utii: {len(visualizer.h_vec)/cycles}")
@@ -473,12 +473,12 @@ def main():
             'viol_rate',
             'mean_scale',
             'mean_trajectory_error',
-            'low_scale_rate'
+            'low_scale_rate',
         ]
 
         # I dati da salvare (calcolati come nel tuo esempio)
         row_data = {
-            "test_type": F"TEST_OBSTRUCTIVE_ID_{set_ID}",
+            "test_type": test_name,
             "lambda_pos": cfg.lambda_pos,
             "lambda_vel": cfg.lambda_vel,
             "lambda_scaling": cfg.lambda_scaling,

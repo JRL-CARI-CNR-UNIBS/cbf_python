@@ -1,8 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from Controller.gaussian_controller import GaussianControllerConfig
+from math import sqrt
+from scripts.util.gaussian_process_util import read_config_data_from_csv
 
-
-def plot_multiple_gaussians(params_list):
+def plot_multiple_gaussians(cfg:GaussianControllerConfig):
     """
     Plots multiple Gaussian PDFs on the same figure.
 
@@ -12,6 +14,12 @@ def plot_multiple_gaussians(params_list):
 
     # 1. Determine a good range for the X-axis based on all distributions
     # We want to go from the lowest mean - 4*std to the highest mean + 4*std
+    params_list = []
+    for gs in cfg.gaussian_sets:
+        temp = (gs.means["h"], sqrt(gs.covariance[0][0]))
+        params_list.append(temp)
+
+
     min_x = min([m - 4 * s for m, s in params_list])
     max_x = max([m + 4 * s for m, s in params_list])
     x = np.linspace(min_x, max_x, 1000)
@@ -42,21 +50,30 @@ def plot_multiple_gaussians(params_list):
     plt.tight_layout()
     plt.show()
 
-st_dev = 0.15
+cfg = GaussianControllerConfig()
 
-# --- Example Usage ---
-# Let's say these are three different scenarios for your target h
-# Format: (mean, standard_deviation)
-h_parameters = [
-    (0.0, st_dev),  # Scenario A: Tight variance around 5m
-    (0.5, st_dev),  # Scenario B: Wider variance around 8m
-    (1.0, st_dev)  # Scenario C: Very strict variance around 3m
-]
+# read_config_data_from_csv(cfg, filename="../log_best_trials.csv", h_mean=-0.1, v_mean=1)
+# print("1")
+# read_config_data_from_csv(cfg, filename="../log_best_trials.csv", h_mean=1, v_mean=1)
+# print("2")
+# read_config_data_from_csv(cfg, filename="../log_best_trials.csv", h_mean="0.5", v_mean=1)
+# print("3")
+# print(cfg)
+# plot_multiple_gaussians(cfg)
+
+import itertools
+
+# First value: -0.1 to 1.0 (step 0.05)
+val1_list = [round(-0.1 + i * 0.05, 2) for i in range(23)]  # 23 steps reach 1.0
+
+# Second value: 0.2 to 1.4 (step 0.3)
+val2_list = [round(0.2 + i * 0.3, 2) for i in range(5)]     # 5 steps reach 1.4
+
+# Generate all combinations
+combinations = list(itertools.product(val1_list, val2_list))
+
+# Create the final dictionary
+par_values = {i: list(comb) for i, comb in enumerate(combinations)}
+print ( par_values)
 
 
-
-
-ref_std_dev = 0.1
-ref_h_mean   = [x / 10.0 for x in range(-1, 11)]
-
-print(ref_h_mean)
