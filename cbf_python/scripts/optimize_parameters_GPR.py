@@ -32,9 +32,9 @@ from scripts.util.mean_visualizer import StochasticCBFVisualizer
 # v_ref = 0.8
 
 spawn_freq = 10
-trial_duration = 1000.0
-n_trials = 3000
-
+trial_duration = 250.0
+n_trials = 2000
+std_dev= 0.15
 # Esempio di utilizzo:
 # save_data_custom_names(study)
 
@@ -124,20 +124,7 @@ q30 = np.array([136.0, -60.0, 90.0, -122.0, 90.0, 45.0]) * np.pi / 180.0
 q40 = np.array([134.0, -65.0, 70.0, -90.0, 90.0, 45.0]) * np.pi / 180.0
 gen_cfg.Dq_max = gen_cfg.Dq_max * 0.25
 gen_cfg.DDq_max = gen_cfg.DDq_max * 0.2
-planner = SegmentedJointTrap(Dq_max=gen_cfg.Dq_max * 0.25, DDq_max=gen_cfg.DDq_max * 0.25)
-# CONFIG 1
-planner.addWayPoint(q)
-planner.addWayPoint(q10)
-planner.addWayPoint(q22)
-planner.addWayPoint(q25)
-planner.addWayPoint(q30)
-planner.addWayPoint(q)
 
-
-T_total = planner.computeTime()
-model_wrapper = loadSharework(UR10E_JOINTS)
-model = model_wrapper.model
-data = model.createData()
 n_wp = 6
 configs = {
     "q": q,
@@ -157,6 +144,8 @@ cartesian_configs = {
     "q30": 0.0,
     "q40": 0.0,
 }
+model_wrapper = loadSharework(UR10E_JOINTS)
+model = model_wrapper.model
 tool_frame_name = "ur10e_wrist_3_joint"
 tool_frame_id = model.getFrameId(tool_frame_name)
 data = model.createData()
@@ -173,6 +162,20 @@ def run_episode(Tc=2e-3, duration=500.0, cfg=ControllerConfig(), h_mean_ref=0.1,
 
     cfg.Dq_max = cfg.Dq_max * 0.25
     cfg.DDq_max = cfg.DDq_max * 0.2
+    planner = SegmentedJointTrap(Dq_max=gen_cfg.Dq_max * 0.25, DDq_max=gen_cfg.DDq_max * 0.25)
+    # CONFIG 1
+    planner.addWayPoint(q)
+    planner.addWayPoint(q10)
+    planner.addWayPoint(q22)
+    planner.addWayPoint(q25)
+    planner.addWayPoint(q30)
+    planner.addWayPoint(q)
+
+
+    T_total = planner.computeTime()
+    model_wrapper = loadSharework(UR10E_JOINTS)
+    model = model_wrapper.model
+    data = model.createData()
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
 
     bridge = FakeCommandBridge(
@@ -224,6 +227,8 @@ def run_episode(Tc=2e-3, duration=500.0, cfg=ControllerConfig(), h_mean_ref=0.1,
                 nominal_Dq=nominal_Dq,
                 nominal_DDq=nominal_DDq,
             )
+            trajectory_time = out["trajectory_time"]
+
             vr_min = out["vr_min"]
             end_eff_pos = out["end_effector_pos"]
             ee_pos = out["end_effector_pos"]
@@ -257,7 +262,6 @@ def run_episode(Tc=2e-3, duration=500.0, cfg=ControllerConfig(), h_mean_ref=0.1,
             trajectory_error_sum += out["trajectory_error"]
             if out["Dtrajectory_time"] < scaling_threshold:
                 low_scale_count += 1
-            trajectory_time = out["trajectory_time"]
             visualizer.update_vectors(out["h_min"], out["d_min"], out["vr_min"] - out["vh_min"], t)
 
         time.sleep(1e-4)  # To avoid locking issues in multiprocessing
@@ -334,12 +338,12 @@ sampler = NSGAIIISampler(
 )
 
 
-ref_std_dev = 0.15
+ref_std_dev = 0.1
 par_values = {
-    0: [-0.1, 1],
-    1: [-0.1, 2],
-    2: [1.5, -1],
-}
+    0: [0.5, 1],
+    1: [0.0, 1],
+    2: [1,1],
+    }
 ref_h_mean_vec   = [-0.1, 1.5] #[x / 10.0 for x in range(-1, 11)]
 for key in par_values:
     h_mean = par_values[key][0]
@@ -350,14 +354,14 @@ for key in par_values:
     # load_if_exists=True,
     # sampler=sampler,
     sampler =optunahub.load_module("samplers/auto_sampler").AutoSampler(),
-    study_name=f"params_GPR_test_h_mean_{h_mean}_{time.strftime('%Y%m%d-%H%M%S')}",
+    study_name=f"params_GPR_test_h_mean_{h_mean}_v_mean_{v_ref}_{time.strftime('%Y%m%d-%H%M%S')}",
     # study_name=f"params_test_{time.strftime('%Y%m%d-%H%M%S')}",
     # study_name=f"dynamic_params_polynomial_20260216-094358",
     load_if_exists=True,
 
     )
     study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "low_scale_rate", "lap count"])
-    study.optimize(make_objective(h_mean,0.1, v_ref), n_trials=n_trials, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
+    study.optimize(make_objective(h_mean,std_dev, v_ref), n_trials=n_trials, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
     save_data_multiobj(study)
 # print (run_episode())
 
