@@ -4,6 +4,7 @@ import numpy as np
 import time
 import pinocchio as pin
 from optuna import visualization
+import itertools
 
 from scripts.util.joint_interpolator import SegmentedJointTrap
 from scripts.util.gaussian_process_util import generate_obs_state_h_fixed, compute_required_d, generate_target_h, save_data_multiobj
@@ -13,8 +14,7 @@ from Command_bridge.fake_command_bridge import FakeCommandBridge
 from Controller.optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
 from multiprocessing import Process, Queue
 from queue import Empty
-from Controller.dynamic_params_controllers import (PolynomialControllerConfig, PolynomialOptimalController,
-                                                   StocasticalControllerConfig, StocasticalOptimalController)
+
 from pathlib import Path
 
 from optuna.samplers import CmaEsSampler
@@ -34,7 +34,7 @@ from scripts.util.mean_visualizer import StochasticCBFVisualizer
 spawn_freq = 10
 trial_duration = 250.0
 n_trials = 2000
-std_dev= 0.15
+std_dev= 0.1
 # Esempio di utilizzo:
 # save_data_custom_names(study)
 
@@ -338,12 +338,23 @@ sampler = NSGAIIISampler(
 )
 
 
-ref_std_dev = 0.1
-par_values = {
-    0: [0.5, 1],
-    1: [0.0, 1],
-    2: [1,1],
-    }
+# First value: -0.1 to 1.0 (step 0.05)
+val1_list = [round(-0.1 + i * 0.05, 2) for i in range(23)]  # 23 steps reach 1.0
+
+# Second value: 0.2 to 1.4 (step 0.3)
+val2_list = [round(0.2 + i * 0.3, 2) for i in range(5)]     # 5 steps reach 1.4
+
+# Generate all combinations
+combinations = list(itertools.product(val1_list, val2_list))
+
+# Create the final dictionary
+par_values = {i: list(comb) for i, comb in enumerate(combinations)}
+
+# par_values = {
+#     0: [0.5, 1],
+#     1: [0.0, 1],
+#     2: [1,1],
+#     }
 ref_h_mean_vec   = [-0.1, 1.5] #[x / 10.0 for x in range(-1, 11)]
 for key in par_values:
     h_mean = par_values[key][0]
@@ -354,7 +365,7 @@ for key in par_values:
     # load_if_exists=True,
     # sampler=sampler,
     sampler =optunahub.load_module("samplers/auto_sampler").AutoSampler(),
-    study_name=f"params_GPR_test_h_mean_{h_mean}_v_mean_{v_ref}_{time.strftime('%Y%m%d-%H%M%S')}",
+    study_name=f"GPR_Optimization_h_mean_{h_mean}_v_mean_{v_ref}_{time.strftime('%Y%m%d-%H%M%S')}",
     # study_name=f"params_test_{time.strftime('%Y%m%d-%H%M%S')}",
     # study_name=f"dynamic_params_polynomial_20260216-094358",
     load_if_exists=True,
@@ -362,7 +373,7 @@ for key in par_values:
     )
     study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "low_scale_rate", "lap count"])
     study.optimize(make_objective(h_mean,std_dev, v_ref), n_trials=n_trials, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
-    save_data_multiobj(study)
+    save_data_multiobj(study, filename="GPR_optimization_results.csv")
 # print (run_episode())
 
 
