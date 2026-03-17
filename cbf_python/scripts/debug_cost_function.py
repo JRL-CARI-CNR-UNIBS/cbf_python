@@ -74,7 +74,7 @@ def save_data_multiobj(study, filename="log_best_trials.csv"):
     print(f"{action}: {filename} con i 5 migliori record.")
 
 # Define the connection string
-storage_url = "postgresql+psycopg2://optuna:optuna_pw@localhost/optuna_db"
+storage_url = "postgresql+psycopg2://optuna:optuna_pw@192.168.66.106:5432/optuna_db"
 study_name = input("Params_name: ")#"params_GPR_test_20260305-165027"
 
 # Load the study
@@ -86,4 +86,4 @@ study = optuna.load_study(
 # Verify by printing the best parameters found so far
 print(f"Study {study_name} loaded successfully.")
 
-save_data_multiobj(study , filename="log_best_trials.csv")
+save_data_multiobj(study , filename="../stocastic_params.csv")

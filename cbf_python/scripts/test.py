@@ -52,28 +52,14 @@ def plot_multiple_gaussians(cfg:GaussianControllerConfig):
 
 cfg = GaussianControllerConfig()
 
-# read_config_data_from_csv(cfg, filename="../log_best_trials.csv", h_mean=-0.1, v_mean=1)
-# print("1")
-# read_config_data_from_csv(cfg, filename="../log_best_trials.csv", h_mean=1, v_mean=1)
-# print("2")
-# read_config_data_from_csv(cfg, filename="../log_best_trials.csv", h_mean="0.5", v_mean=1)
-# print("3")
-# print(cfg)
-# plot_multiple_gaussians(cfg)
+read_config_data_from_csv(cfg, filename="../stocastic_params.csv", h_mean="0.0", v_mean=1)
+print("1")
+read_config_data_from_csv(cfg, filename="../stocastic_params.csv", h_mean=1, v_mean=1)
+print("2")
+read_config_data_from_csv(cfg, filename="../stocastic_params.csv", h_mean="0.5", v_mean=1)
+print("3")
+print(cfg)
+plot_multiple_gaussians(cfg)
 
-import itertools
-
-# First value: -0.1 to 1.0 (step 0.05)
-val1_list = [round(-0.1 + i * 0.05, 2) for i in range(23)]  # 23 steps reach 1.0
-
-# Second value: 0.2 to 1.4 (step 0.3)
-val2_list = [round(0.2 + i * 0.3, 2) for i in range(5)]     # 5 steps reach 1.4
-
-# Generate all combinations
-combinations = list(itertools.product(val1_list, val2_list))
-
-# Create the final dictionary
-par_values = {i: list(comb) for i, comb in enumerate(combinations)}
-print ( par_values)
 
 

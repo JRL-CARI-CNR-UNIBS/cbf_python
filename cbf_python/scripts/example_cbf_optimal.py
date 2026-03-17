@@ -46,22 +46,32 @@ import signal
 import threading
 from scripts.util import csv_publishers, test_publish_utils as pub_utils
 from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
-import pandas as pd
-
+from scripts.util.gaussian_process_util import read_config_data_from_csv
 
 params_filename = "../parameters_set.csv"
 set_ID = "0"
-duration = 150.0
+duration = 15000.0
 
-SHOW_DATA = True
+SHOW_DATA = False
 USE_BRIDGE = False
 LOG_DATA = False
-SAVE_DATA = False
+SAVE_DATA = True
 
 parameters_type = "0"
 
 stop_event = threading.Event()
 
+
+
+h_cfg = "article"
+v_cfg = "article"
+# h_cfg = 1
+# v_cfg = 1
+
+
+
+test_name= f"TEST_OBSTRUCTIVE_paper_scenario_low_par"
+# d_objective = 0.1
 
 def _on_sigint_with_bridge(bridge, signum, frame):
     stop_event.set()
@@ -95,7 +105,18 @@ def main():
 
     # ------------------------ CONTROLLER SETUP -----------------------------------
     Tc =2e-3
-    cfg = create_base_cfg(set_ID, Tc, params_filename)
+    # cfg = create_base_cfg(set_ID, Tc, params_filename)
+
+    cfg = ControllerConfig(Tc=Tc)
+    delta = 4.5
+
+    read_config_data_from_csv(cfg,h_mean=h_cfg, v_mean=v_cfg, filename="../log_best_trials.csv")
+    cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta)
+    cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
+    cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
+    ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
+    print(cfg)
+
     cfg.Dq_max = cfg.Dq_max*0.15
     cfg.DDq_max = cfg.DDq_max*0.1
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log = -1)
@@ -322,7 +343,8 @@ def main():
             # --------------------------- INTEGRATION ----------------------------
             t += Tc
             end_eff_pos = out["end_effector_pos"]
-
+            if cycles % 5000 == 0:
+                print(f"STILL ALIVE! T: {t:.2f}s")
             if USE_BRIDGE and not stop_event.is_set():
                 bridge.sendCommand(q)
             if not stop_event.is_set() and LOG_DATA:
@@ -396,6 +418,7 @@ def main():
                 timeout_cycles+=1
             if unfeasible_string != "FEASIBLE":
                 unfeasible_cnt += 1
+
         if not stop_event.is_set() and LOG_DATA:
             test_start_publisher.publish_once(False) # pyright: ignore[reportPossiblyUnboundVariable]
 
@@ -485,7 +508,7 @@ def main():
 
         # I dati da salvare (calcolati come nel tuo esempio)
         row_data = {
-            "test_type": "TEST_STATIC_NO_HUMAN",
+            "test_type": test_name,
             "lambda_pos": cfg.lambda_pos,
             "lambda_vel": cfg.lambda_vel,
             "lambda_scaling": cfg.lambda_scaling,

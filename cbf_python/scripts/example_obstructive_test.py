@@ -55,9 +55,12 @@ stop_event = threading.Event()
 
 h_cfg = "article"
 v_cfg = "article"
+# h_cfg = 1
+# v_cfg = 1
 
 
-h_mean_ref = -0.1
+
+h_mean_ref = 1
 v_ref = 1
 spawn_freq = 10
 h_std_dev = 0.1
@@ -438,7 +441,7 @@ def main():
     # print(f"D OBJECTIVE: {d_objective}")
     print((f"V REF: {v_ref}"))
     print(f"Cicli contati: {len(visualizer.h_vec)}, cicli totali: {cycles}")
-    print(f"PErcentuale cicli utii: {len(visualizer.h_vec)/cycles}")
+    print(f"Percentuale cicli utili: {len(visualizer.h_vec)/cycles}")
     visualizer.compute_mean_cov(True)
     # print_stats_table(stats)
     # _ = make_summary_figure(
