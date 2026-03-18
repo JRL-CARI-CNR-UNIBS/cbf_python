@@ -10,122 +10,62 @@ from Controller.optimal_cbf_task_controller import BCFOptimalController, Control
 from multiprocessing import Process, Queue
 from queue import Empty
 from Controller.dynamic_params_controllers import (PolynomialControllerConfig, PolynomialOptimalController,
-                                              StocasticalControllerConfig, StocasticalOptimalController)
+                                              )
+from scripts.util.test_utils import compute_ee_pose
+from scripts.util.gaussian_process_util import save_data_multiobj
 from pathlib import Path
 import pandas as pd
+from scripts.util.gaussian_process_util import generate_obs_state_h_fixed, compute_required_d, generate_target_h, save_data_multiobj
+spawn_freq = 10
+trial_duration = 1500.0
+n_trials = 4000
+std_dev= 0.1
+h_mean_ref = 0.5
+ref_std_dev = 0.5
+v_ref = 1.0
+
 # Database connection (for dashboard)
 POSTGRES_URL = "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
-OPTIMIZE_POLY = True
-OPTIMIZE_STOCHASTIC = True
-params_filename = "../parameters_set.csv"
-set_ID = "3083_no_delta"
+params_filename = "parameters_set.csv"
+
 
 def make_objective():
     def objective(trial):
 
-        cfg = StocasticalControllerConfig(Tc = 2e-3)
+        cfg = PolynomialControllerConfig(Tc = 2e-3)
 
-        cfg.h_t = 2.0
-        if OPTIMIZE_POLY:
-            cfg.lambda_0_pos = trial.suggest_float("lambda_0_pos", 100, 1e6, log=True)
-            cfg.lambda_0_vel = trial.suggest_float("lambda_0_vel", 1, 1e4, log=True)
-            cfg.lambda_0_acc = trial.suggest_float("lambda_0_acc", 1e-15, 1e-4, log=True)
-            cfg.lambda_0_scaling = trial.suggest_float("lambda_0_scaling", 10, 1e5, log=True)
-            cfg.gamma_0 = trial.suggest_float("gamma_0", 0.1, 20, log=True)
-            # cfg.delta_0 = trial.suggest_float("delta_0_deg", 0.1, 20, log=True)
+        cfg.h_t = 1.0
+        cfg.lambda_0_pos = trial.suggest_float("lambda_0_pos", 100, 1e6, log=True)
+        cfg.lambda_0_vel = trial.suggest_float("lambda_0_vel", 1, 1e4, log=True)
+        cfg.lambda_0_acc = trial.suggest_float("lambda_0_acc", 1e-15, 1e-4, log=True)
+        cfg.lambda_0_scaling = trial.suggest_float("lambda_0_scaling", 10, 1e5, log=True)
+        cfg.gamma_0 = trial.suggest_float("gamma_0", 0.1, 20, log=True)
 
-            cfg.lambda_f_pos = trial.suggest_float("lambda_f_pos", 100, 1e6, log=True)
-            cfg.lambda_f_vel = trial.suggest_float("lambda_f_vel", 1, 1e4, log=True)
-            cfg.lambda_f_acc = trial.suggest_float("lambda_f_acc", 1e-15, 1e-4, log=True)
-            cfg.lambda_f_scaling = trial.suggest_float("lambda_f_scaling", 10, 1e5, log=True)
-            cfg.gamma_f = trial.suggest_float("gamma_f", 0.1, 20, log=True)
-            # cfg.delta_f = trial.suggest_float("delta_f_deg", 0.1, 20, log=True)
+        cfg.lambda_f_pos = trial.suggest_float("lambda_f_pos", 100, 1e6, log=True)
+        cfg.lambda_f_vel = trial.suggest_float("lambda_f_vel", 1, 1e4, log=True)
+        cfg.lambda_f_acc = trial.suggest_float("lambda_f_acc", 1e-15, 1e-4, log=True)
+        cfg.lambda_f_scaling = trial.suggest_float("lambda_f_scaling", 10, 1e5, log=True)
+        cfg.gamma_f = trial.suggest_float("gamma_f", 0.1, 20, log=True)
 
-            # cfg.n_pos = trial.suggest_float("n_pos", 1e-4, 1, log=True)
-            # cfg.n_vel= trial.suggest_float("n_vel", 1e-4, 1, log=True)
-            # cfg.n_acc = trial.suggest_float("n_acc", 1e-4, 1, log=True)
-            # cfg.n_scaling = trial.suggest_float("n_scaling", 1e-4, 1, log=True)
-            # cfg.n_gamma = trial.suggest_float("n_gamma", 1e-4, 1, log=True)
-            # cfg.n_delta = trial.suggest_float("n_delta", 1e-9, 1, log=True)
+        cfg.n_pos = trial.suggest_float("n_pos", 1e-4, 1, log=True)
+        cfg.n_vel= trial.suggest_float("n_vel", 1e-4, 1, log=True)
+        cfg.n_acc = trial.suggest_float("n_acc", 1e-4, 1, log=True)
+        cfg.n_scaling = trial.suggest_float("n_scaling", 1e-4, 1, log=True)
+        cfg.n_gamma = trial.suggest_float("n_gamma", 1e-4, 1, log=True)
 
-            cfg.n_pos = 0.0
-            cfg.n_vel= 0.0
-            cfg.n_acc = 0.0
-            cfg.n_scaling = 0.0
-            cfg.n_gamma = 0.0
+        cfg.m_pos = trial.suggest_float("m_pos", 1, 10, log=True)
+        cfg.m_vel = trial.suggest_float("m_vel", 1, 10, log=True)
+        cfg.m_acc = trial.suggest_float("m_acc", 1, 10, log=True)
+        cfg.m_scaling = trial.suggest_float("m_scaling", 1, 10, log=True)
+        cfg.m_gamma = trial.suggest_float("m_gamma", 1, 10, log=True)
 
-            # cfg.m_pos = trial.suggest_float("m_pos", 1, 10, log=True)
-            # cfg.m_vel = trial.suggest_float("m_vel", 1, 10, log=True)
-            # cfg.m_acc = trial.suggest_float("m_acc", 1, 10, log=True)
-            # cfg.m_scaling = trial.suggest_float("m_scaling", 1, 10, log=True)
-            # cfg.m_gamma = trial.suggest_float("m_gamma", 1, 10, log=True)
-            # cfg.m_delta = trial.suggest_float("m_delta", 1, 10, log=True)
-
-            cfg.m_pos = 1.0
-            cfg.m_vel = 1.0
-            cfg.m_acc = 1.0
-            cfg.m_scaling = 1.0
-            cfg.m_gamma = 1.0
-
-
-            # cfg.w_pos = trial.suggest_float("w_pos", 1e-9, 1, log = True)
-            # cfg.w_vel = trial.suggest_float("w_vel", 1e-9, 1, log = True)
-            # cfg.w_acc = trial.suggest_float("w_acc", 1e-9, 1, log = True)
-            # cfg.w_scaling = trial.suggest_float("w_scaling", 1e-9, 1, log = True)
-            # cfg.w_gamma = trial.suggest_float("w_gamma", 1e-9, 1, log = True)
-            # cfg.w_delta = trial.suggest_float("w_delta", 1e-9, 1, log = True)
+        cfg.w_pos = trial.suggest_float("w_pos", 1e-9, 1, log = True)
+        cfg.w_vel = trial.suggest_float("w_vel", 1e-9, 1, log = True)
+        cfg.w_acc = trial.suggest_float("w_acc", 1e-9, 1, log = True)
+        cfg.w_scaling = trial.suggest_float("w_scaling", 1e-9, 1, log = True)
+        cfg.w_gamma = trial.suggest_float("w_gamma", 1e-9, 1, log = True)        
         
-            cfg.w_pos = 0.0
-            cfg.w_vel = 0.0
-            cfg.w_acc = 0.0
-            cfg.w_scaling = 0.0
-            cfg.w_gamma = 0.0
-        
-        
-        else:
-            # 1. Get the absolute path of the directory where THIS script is located
-            from pathlib import Path
-            script_dir = Path(__file__).parent.resolve()
-
-            # 2. Build the absolute path to the CSV file relative to the script
-            # This goes up one level (..) and looks for "parameters_set.csv"
-            params_path = (script_dir / ".." / "parameters_set.csv").resolve()
-            df = pd.read_csv(params_path)
-
-            cfg.lambda_0_pos = float(df.loc[df["ID"] == set_ID, "lambda_0_pos"].values[0])
-            cfg.lambda_0_vel = float(df.loc[df["ID"] == set_ID, "lambda_0_vel"].values[0])
-            cfg.lambda_0_acc = float(df.loc[df["ID"] == set_ID, "lambda_0_acc"].values[0])
-            cfg.lambda_0_scaling = float(df.loc[df["ID"] == set_ID, "lambda_0_scaling"].values[0])
-            cfg.gamma_0 = float(df.loc[df["ID"] == set_ID, "gamma_0"].values[0])
-            # cfg.delta_0 = float(df.loc[df["ID"] == set_ID, "delta_0_deg"].values[0])
-
-            cfg.lambda_f_pos = float(df.loc[df["ID"] == set_ID, "lambda_f_pos"].values[0])
-            cfg.lambda_f_vel = float(df.loc[df["ID"] == set_ID, "lambda_f_vel"].values[0])
-            cfg.lambda_f_acc = float(df.loc[df["ID"] == set_ID, "lambda_f_acc"].values[0])
-            cfg.lambda_f_scaling = float(df.loc[df["ID"] == set_ID, "lambda_f_scaling"].values[0])
-            cfg.gamma_f = float(df.loc[df["ID"] == set_ID, "gamma_f"].values[0])
-            # cfg.delta_f = float(df.loc[df["ID"] == set_ID, "delta_f_deg"].values[0])
-
-            cfg.n_pos = float(df.loc[df["ID"] == set_ID, "n_pos"].values[0])
-            cfg.n_vel = float(df.loc[df["ID"] == set_ID, "n_vel"].values[0])
-            cfg.n_acc = float(df.loc[df["ID"] == set_ID, "n_acc"].values[0])
-            cfg.n_scaling = float(df.loc[df["ID"] == set_ID, "n_scaling"].values[0])
-            cfg.n_gamma = float(df.loc[df["ID"] == set_ID, "n_gamma"].values[0])
-            # cfg.n_delta = float(df.loc[df["ID"] == set_ID, "n_delta"].values[0])
-
-            cfg.m_pos = float(df.loc[df["ID"] == set_ID, "m_pos"].values[0])
-            cfg.m_vel = float(df.loc[df["ID"] == set_ID, "m_vel"].values[0])
-            cfg.m_acc = float(df.loc[df["ID"] == set_ID, "m_acc"].values[0])
-            cfg.m_scaling = float(df.loc[df["ID"] == set_ID, "m_scaling"].values[0])
-            cfg.m_gamma = float(df.loc[df["ID"] == set_ID, "m_gamma"].values[0])
-            # cfg.m_delta = float(df.loc[df["ID"] == set_ID, "m_delta"].values[0])
-
-            cfg.w_pos = float(df.loc[df["ID"] == set_ID, "w_pos"].values[0])
-            cfg.w_vel = float(df.loc[df["ID"] == set_ID, "w_vel"].values[0])
-            cfg.w_acc = float(df.loc[df["ID"] == set_ID, "w_acc"].values[0])
-            cfg.w_scaling = float(df.loc[df["ID"] == set_ID, "w_scaling"].values[0])
-            cfg.w_gamma = float(df.loc[df["ID"] == set_ID, "w_gamma"].values[0])
-            # cfg.w_delta = float(df.loc[df["ID"] == set_ID, "w_delta"].values[0])
+      
 
         cfg.lambda_pos = cfg.lambda_0_pos
         cfg.lambda_vel = cfg.lambda_0_vel
@@ -138,42 +78,17 @@ def make_objective():
         cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*2
         cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*4
 
-        if OPTIMIZE_STOCHASTIC:
-            cfg.n = trial.suggest_int("n", 10, 500)
-            cfg.cv_tol = trial.suggest_float(
-                "cv_tol", 0.01, 1, log = True)
-            cfg.k_min = trial.suggest_float(
-                "k_min", 1e-9, 1e-1, log = True)
-            cfg.p = trial.suggest_float("p", 1, 10, log = True)
-
         try:
-            viol_rate, mean_scale, mean_traj_err, low_scale_rate = run_episode_with_timeout(
-                cfg = cfg, Tc=2e-3, duration=1000.0,
+              viol_rate, mean_scale, mean_traj_err, low_scale_rate, lap_count,  = run_episode_with_timeout(
+                cfg = cfg, Tc=2e-3, duration=trial_duration,
                 timeout=6000
             )
         except TimeoutError:
             # For directions: [minimize, maximize, minimize, minimize]
-            return (1.0, -1.0, 10.0, 1.1)
+            return (1.0, -1.0, 1.0, 1.1, 0.0)
 
-        return (viol_rate, mean_scale, mean_traj_err, low_scale_rate)
+        return (viol_rate, mean_scale, mean_traj_err, low_scale_rate, lap_count)
     return objective
-
-# ----------------- STATIC INITIALIZATION (only once) -----------------
-def compute_ee_pose(q, model, data, ee_frame_id):
-    """
-    Compute forward kinematics of the end-effector for joint config q.
-    Returns (position, rotation_matrix, SE3).
-    """
-    # Forward kinematics for all joints
-    pin.forwardKinematics(model, data, q)
-    # Update frame placements
-    pin.updateFramePlacements(model, data)
-
-    T_ee = data.oMf[ee_frame_id]  # SE3 from world (o) to frame (f=tool0)
-    p = T_ee.translation          # 3D position
-    R = T_ee.rotation             # 3x3 rotation matrix
-    return p, R, T_ee
-
 
 # Camera and bridge
 # Build camera pose from your INITI snippet
@@ -193,37 +108,20 @@ UR10E_JOINTS = [
     "ur10e_wrist_3_joint",
 ]
 
-Tc =2e-3
+Tc = 2e-3
 gen_cfg = ControllerConfig(Tc=Tc)
 # # Basic planner reused across trials
 q = home.copy()
-q10 = np.array([ 31.0, -78.0, 115.0, -127.0, 86.0, -32.0])*np.pi/180.0
-q20 =  np.array([ 31.0, -83.0, 98.0, -110.0, 86.0, -32.0])*np.pi/180.0
-q22 =  np.array([ 40.0, -126.0, 141.0, -100.0, 86.0, 45.0])*np.pi/180.0
-q25 =  np.array([ 130.0, -100.0, 125.0, -115.0, 94.0, -20.0])*np.pi/180.0
-q30 =  np.array([ 136.0, -60.0, 90.0, -122.0, 90.0, 45.0])*np.pi/180.0
-q40 =  np.array([ 134.0, -65.0, 70.0, -90.0, 90.0, 45.0])*np.pi/180.0
-gen_cfg.Dq_max = gen_cfg.Dq_max*0.25
-gen_cfg.DDq_max = gen_cfg.DDq_max*0.2
-planner = SegmentedJointTrap(Dq_max=gen_cfg.Dq_max*0.25, DDq_max=gen_cfg.DDq_max*0.25)
-# CONFIG 1
-planner.addWayPoint(q)
-planner.addWayPoint(q10)
-planner.addWayPoint(q20)
-planner.addWayPoint(q10)
-planner.addWayPoint(q22)
-planner.addWayPoint(q25)
-planner.addWayPoint(q30)
-planner.addWayPoint(q40)
-planner.addWayPoint(q30)
-planner.addWayPoint(q)
+q10 = np.array([31.0, -78.0, 115.0, -127.0, 86.0, -32.0]) * np.pi / 180.0
+q20 = np.array([31.0, -83.0, 98.0, -110.0, 86.0, -32.0]) * np.pi / 180.0
+q22 = np.array([40.0, -126.0, 141.0, -100.0, 86.0, 45.0]) * np.pi / 180.0
+q25 = np.array([130.0, -100.0, 125.0, -115.0, 94.0, -20.0]) * np.pi / 180.0
+q30 = np.array([136.0, -60.0, 90.0, -122.0, 90.0, 45.0]) * np.pi / 180.0
+q40 = np.array([134.0, -65.0, 70.0, -90.0, 90.0, 45.0]) * np.pi / 180.0
+gen_cfg.Dq_max = gen_cfg.Dq_max * 0.25
+gen_cfg.DDq_max = gen_cfg.DDq_max * 0.2
 
-
-T_total = planner.computeTime()
-model_wrapper = loadSharework(UR10E_JOINTS)
-model = model_wrapper.model
-data = model.createData()
-n_wp = 9
+n_wp = 6
 configs = {
     "q": q,
     "q10": q10,
@@ -242,6 +140,8 @@ cartesian_configs = {
     "q30": 0.0,
     "q40": 0.0,
 }
+model_wrapper = loadSharework(UR10E_JOINTS)
+model = model_wrapper.model
 tool_frame_name = "ur10e_wrist_3_joint"
 tool_frame_id = model.getFrameId(tool_frame_name)
 data = model.createData()
@@ -249,19 +149,31 @@ for name in cartesian_configs:
     p, R, T_ee = compute_ee_pose(configs[name], model, data, tool_frame_id)
     cartesian_configs[name] = p.tolist()
 
-scaling_threshold = 0.5  
+scaling_threshold = 0.5
+
 #-------------------- EVALUATION FUNCTION --------------------
 def run_episode(Tc=2e-3, duration=500.0, cfg = PolynomialControllerConfig() ):
 
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
 
+    cfg.Dq_max = cfg.Dq_max * 0.25
+    cfg.DDq_max = cfg.DDq_max * 0.2
+    planner = SegmentedJointTrap(Dq_max=gen_cfg.Dq_max * 0.25, DDq_max=gen_cfg.DDq_max * 0.25)
+    # CONFIG 1
+    planner.addWayPoint(q)
+    planner.addWayPoint(q10)
+    planner.addWayPoint(q22)
+    planner.addWayPoint(q25)
+    planner.addWayPoint(q30)
+    planner.addWayPoint(q)
 
-    cfg.Dq_max = cfg.Dq_max*0.25
-    cfg.DDq_max = cfg.DDq_max*0.2
-    if OPTIMIZE_STOCHASTIC:
-        ctrl = StocasticalOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
-    else:
-        ctrl = PolynomialOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
+
+    T_total = planner.computeTime()
+    model_wrapper = loadSharework(UR10E_JOINTS)
+    model = model_wrapper.model
+    data = model.createData()
+
+    ctrl = PolynomialOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
    
     
     bridge = FakeCommandBridge(
@@ -284,19 +196,41 @@ def run_episode(Tc=2e-3, duration=500.0, cfg = PolynomialControllerConfig() ):
     enable_lap_count = True
 
     low_scale_count = 0
+    obstacle_positions = np.zeros(3)
+    obstacle_velocities = np.zeros(3)
+    obstacle_accelerations = np.array([20.0,20.0,20.0])*0.0
+    obstacle_accelerations = obstacle_accelerations.reshape(1, 3)
+    enable_spawn = True
+    vr_min = -0.1
+    ee_pos = np.zeros(3)
+    ee_vel = np.zeros(3)
+    count_move = 0
+    Dtrajectory_time = 1.0
     while t < duration:
-        obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed = t)
+        # obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed = t)
         nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
+        
+        h_objective = generate_target_h(h_mean_ref, ref_std_dev)
+        d_objective = compute_required_d(h_objective, vr_min, v_ref, np.linalg.norm(obstacle_accelerations) )
+        obstacle_positions, obstacle_velocities, enable_spawn, count_move = generate_obs_state_h_fixed(obstacle_positions, obstacle_velocities, nsteps, enable_spawn, ctrl.model, ctrl.data, tool_frame_id, ee_pos, Dtrajectory_time, count_move, d_objective, v_ref, spawn_freq, ee_vel)#nominal_q, nominal_Dq, nominal_DDq)
+
+
         try:
             out = ctrl.step(
-                obs_pos=obs_pos,
-                obs_vel=obs_vel,
-                obs_acc=obs_acc,
+                obs_pos=obstacle_positions,
+                obs_vel=obstacle_velocities,
+                obs_acc=obstacle_accelerations,
                 nominal_q=nominal_q,
                 nominal_Dq=nominal_Dq,
                 nominal_DDq=nominal_DDq,
             )
+            trajectory_time = out["trajectory_time"]
+
+            vr_min = out["vr_min"]
             end_eff_pos = out["end_effector_pos"]
+            ee_pos = out["end_effector_pos"]
+            ee_vel = out["end_effector_vel"]
+            Dtrajectory_time = out["Dtrajectory_time"]            
             if (trajectory_time % T_total) < Tc:
                 if enable_lap_count:
                     lap_count += 1
@@ -313,20 +247,18 @@ def run_episode(Tc=2e-3, duration=500.0, cfg = PolynomialControllerConfig() ):
         except Exception:
             # Penalize infeasible or divergent QP
             print("QP failed")
-            return 1.0, -1.0, 10.0, 1.0
+            return 1.0, -1.0, 10.0, 1.0,0.0
         t += Tc
         
+        nsteps += 1
+
         if out["h_min"] < 0 and out["vr_min"] < -1e-3:
             violations += 1
         sum_scale += out["Dtrajectory_time"]
-        nsteps += 1
         trajectory_error_sum += out["trajectory_error"]
         if out["Dtrajectory_time"] < scaling_threshold:
             low_scale_count += 1
-        trajectory_time = out["trajectory_time"]
-        
-
-       
+      
         time.sleep(1e-4)  # To avoid locking issues in multiprocessing
 
 
@@ -336,7 +268,7 @@ def run_episode(Tc=2e-3, duration=500.0, cfg = PolynomialControllerConfig() ):
     mean_scale = sum_scale / max(1, nsteps)
     mean_trajectory_error = trajectory_error_sum / max(1, nsteps)
     low_scale_rate = low_scale_count / max(1, nsteps)
-    return viol_rate, mean_scale, mean_trajectory_error, low_scale_rate
+    return viol_rate, mean_scale, mean_trajectory_error, low_scale_rate, lap_count
 
 
 def _run_episode_worker(args, kwargs, q):
@@ -392,7 +324,7 @@ storage = optuna.storages.RDBStorage(
 
 
 study = optuna.create_study(
-    directions=["minimize", "maximize","minimize", "minimize"],
+    directions=["minimize", "maximize","minimize", "minimize", "maximize"],
     sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
     storage=storage,
     #load_if_exists=True,
@@ -401,9 +333,9 @@ study = optuna.create_study(
     load_if_exists=True,
 
 )
-study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "low_scale_rate"])
-study.optimize(make_objective(), n_trials=5000, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
-
+study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "low_scale_rate", "lap count"])
+study.optimize(make_objective(), n_trials=n_trials, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
+save_data_multiobj(study, filename="Dynamic_parameters_results.csv")
     # print (run_episode(1e3,1e3,1e3,1e-3,5,1))
 
 

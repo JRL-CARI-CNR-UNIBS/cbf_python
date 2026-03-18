@@ -52,10 +52,10 @@ params_filename = "../parameters_set.csv"
 set_ID = "0"
 duration = 15000.0
 
-SHOW_DATA = False
+SHOW_DATA = True
 USE_BRIDGE = False
 LOG_DATA = False
-SAVE_DATA = True
+SAVE_DATA = False
 
 parameters_type = "0"
 

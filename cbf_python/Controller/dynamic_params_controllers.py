@@ -69,7 +69,7 @@ class PolynomialOptimalController(BCFOptimalController):
         self.cfg.generate_poly_dict()
         
 
-    def update_parameters(self, h):
+    def update_parameters(self, h, d, v):
 
         self.cfg.lambda_pos = compute_generic_lambda(h, self.cfg.h_t, self.cfg.polynomial_dict["pos"])
         self.cfg.lambda_vel = compute_generic_lambda(h, self.cfg.h_t, self.cfg.polynomial_dict["vel"])

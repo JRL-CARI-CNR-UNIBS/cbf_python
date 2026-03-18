@@ -213,7 +213,7 @@ def read_config_data_from_csv(cfg: GaussianControllerConfig, filename: str = "..
         cfg.n_gaussian_sets = len(cfg.gaussian_sets)
 
 
-def save_data_multiobj(study, filename="log_best_trials.csv"):
+def save_data_multiobj(study, filename="log_best_trials.csv", n_samples = 5):
     df = study.trials_dataframe()
     df_success = df[df["state"] == "COMPLETE"].copy()
 
@@ -257,7 +257,7 @@ def save_data_multiobj(study, filename="log_best_trials.csv"):
     )
 
     # ... Proceed with your existing sorting and saving logic ...
-    top_5 = df_success.sort_values(by="calculated_cost", ascending=False).head(5).copy()
+    top_5 = df_success.sort_values(by="calculated_cost", ascending=False).head(n_samples).copy()
     # ...
     # 4. Aggiungi timestamp e nome studio per tracciabilità
     top_5.insert(0, 'timestamp', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))

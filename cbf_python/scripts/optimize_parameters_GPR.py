@@ -251,7 +251,7 @@ def run_episode(Tc=2e-3, duration=500.0, cfg=ControllerConfig(), h_mean_ref=0.1,
         except Exception:
             # Penalize infeasible or divergent QP
             print("QP failed")
-            return 1.0, -1.0, 10.0, 1.0
+            return 1.0, -1.0, 10.0, 1.0,0.0
         t += Tc
         nsteps += 1
         if out["h_min"] <  (h_objective+1.5*ref_std_dev) and out["h_min"] >  (h_objective-1.5*ref_std_dev):

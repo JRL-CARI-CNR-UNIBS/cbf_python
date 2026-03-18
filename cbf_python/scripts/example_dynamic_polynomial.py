@@ -27,11 +27,10 @@ import numpy as np
 import pinocchio as pin
 from pinocchio.visualize import MeshcatVisualizer
 
-from scripts.example_obstructive_test import h_mean_ref, spawn_freq
 from scripts.util.joint_interpolator import SegmentedJointTrap
 from scripts.util.visualization_daemon import VisualizationDaemon
 from sharework import loadSharework
-from scripts.util.gaussian_process_util import generate_d_value, generate_obs_state_h_fixed, compute_required_d, generate_target_h, read_config_data_from_csv
+from scripts.util.gaussian_process_util import generate_obs_state_h_fixed, compute_required_d, generate_target_h
 from scripts.util.mean_visualizer import StochasticCBFVisualizer
 
 import functools
@@ -44,31 +43,33 @@ import signal
 import threading
 from scripts.util import csv_publishers, test_publish_utils as pub_utils
 from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
-from Controller.dynamic_params_controllers import (PolynomialControllerConfig, PolynomialOptimalController,
-                                                   compute_generic_lambda)
-from scripts.util.test_utils import generate_obs_state, generate_velocity, compute_ee_pose
+from Controller.dynamic_params_controllers import (PolynomialControllerConfig, PolynomialOptimalController,)
+from scripts.util.test_utils import compute_ee_pose
 import pandas as pd
 from scripts.util.mean_visualizer import StochasticCBFVisualizer
+from scripts.util.bcf_utils import plot_lambdas
+
 
 stop_event = threading.Event()
 
 params_filename = "../parameters_set.csv"
 set_ID = "3083_no_delta"
-duration = 15000.0
+duration = 150.0
 
 USE_BRIDGE = False
 LOG_DATA = False
 
-SHOW_DATA = False
-SAVE_DATA = True
-test_type = "O"
+SHOW_DATA = True
+SAVE_DATA = False
+test_type = "5"
 
 PLOT_MEAN = False
-
+PLOT_LAMBDAS = True
 h_mean_ref = -0.1
 h_std_dev = 0.15
 v_ref = 1.0
 spawn_freq = 10
+
 def _on_sigint_with_bridge(bridge, signum, frame):
     stop_event.set()
     try:
@@ -160,7 +161,12 @@ def main():
 
 
     ctrl = PolynomialOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
-
+    gamma_list = []
+    lambda_pos_list = []
+    lambda_vel_list = []
+    lambda_acc_list = []
+    lambda_scaling_list = []
+    t_list = []
     target_name = "ur10e_wrist_3_joint"
     idx = UR10E_JOINTS.index(target_name)
     if USE_BRIDGE:
@@ -262,7 +268,8 @@ def main():
     obstacle_positions = [tmp.copy() for _ in range(18*5)]
     tmp = np.array([0, 0., 0.])
     obstacle_velocities = [tmp.copy() for _ in range(18*5)]
-    obstacle_accelerations = obstacle_velocities.copy()
+    obstacle_accelerations = np.array([20.0, 20.0, 20.0]) * 0.0
+    obstacle_accelerations = obstacle_accelerations.reshape(1, 3)
 
     for i, pos in enumerate(obstacle_positions):
         if i == 7:
@@ -326,6 +333,7 @@ def main():
                 nominal_Dq=nominal_Dq, 
                 nominal_DDq=nominal_DDq
             )
+
             q = out["q"]
             bridge.sendCommand(q)
 
@@ -415,8 +423,11 @@ def main():
             obstacle_positions = np.zeros(3)
             obstacle_velocities = np.zeros(3)
             obstacle_accelerations = np.array([20.0, 20.0, 20.0]) * 0.0
+            obstacle_accelerations = obstacle_accelerations.reshape(1, 3)
             ee_vel = np.zeros(3)
             vr_min = 0.0
+
+
         while t < duration and not stop_event.is_set():
 
             loop_start = time.perf_counter()
@@ -449,6 +460,15 @@ def main():
                 nominal_Dq=nominal_Dq, 
                 nominal_DDq=nominal_DDq
             )
+
+            if PLOT_LAMBDAS and t > 0.1:
+                gamma_list.append(ctrl.cfg.gamma)
+                lambda_pos_list.append(ctrl.cfg.lambda_pos)
+                lambda_vel_list.append(ctrl.cfg.lambda_vel)
+                lambda_acc_list.append(ctrl.cfg.lambda_acc)
+                lambda_scaling_list.append(ctrl.cfg.lambda_scaling)
+                t_list.append(t)
+
             unfeasible_string = out["unfeasible_cnt"]
             q = out["q"]
 
@@ -535,16 +555,12 @@ def main():
             if out["Dtrajectory_time"] < scaling_threshold:
                 low_scale_count += 1
 
-            if PLOT_MEAN:
-                visualizer.update_vectors(out["h_min"], t, cycles)
-                visualizer.lambda_stoc_vec.append(ctrl.cfg.lambda_pos)
-                visualizer.lambda_det_vec.append(compute_generic_lambda(out["h_min"], ctrl.cfg.h_t,ctrl.cfg.polynomial_dict["pos"]))
             rest = Tc - elapsed
             if rest > 0:
                 if SHOW_DATA:
                     vizualization_string =f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f} ctrl_state:{unfeasible_string}"
 
-                    renderer.push_state(out["q"], out["Tbt_nominal"], out["obs_pos"], vizualization_string)
+                    renderer.push_state(out["q"], out["Tbt_nominal"], obstacle_positions, obstacle_velocities,vizualization_string)
                     elapsed = time.perf_counter() - loop_start
                     rest = max(0.0,Tc - elapsed)
                     time.sleep(rest)
@@ -665,5 +681,8 @@ def main():
 
             # Aggiungiamo la riga con i risultati
             writer.writerow(row_data)
+
+    if PLOT_LAMBDAS:
+        plot_lambdas(t_list, gamma_list, lambda_pos_list, lambda_vel_list, lambda_acc_list, lambda_scaling_list)
 if __name__ == "__main__":
     main()

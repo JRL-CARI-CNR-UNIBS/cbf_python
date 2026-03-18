@@ -1,5 +1,6 @@
 from plotly.subplots import make_subplots
 import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 import numpy as np
 
 def make_summary_figure(
@@ -116,8 +117,6 @@ def make_summary_figure(
         fig.show()
     return fig
 
-
-
 def print_stats_table(stats):
     # Print header
     print(f"{'Name':<30} {'Mean':>12} {'50%':>12} {'90%':>12} {'95%':>12} {'99%':>12}")
@@ -127,3 +126,50 @@ def print_stats_table(stats):
         mean_val = np.mean(data*1000)
         q50, q90, q95, q99 = np.quantile(data*1000, [0.50, 0.90, 0.95, 0.99])
         print(f"{name:<30} {mean_val:12.6f} {q50:12.6f} {q90:12.6f} {q95:12.6f} {q99:12.6f}")
+
+def plot_lambdas(t_list, gamma_list, lambda_pos_list, lambda_vel_list, lambda_acc_list, lambda_scaling_list):
+    """
+    Plots gamma and the lambda multipliers on 5 separate subplots sharing the same time axis.
+    """
+    # Create 5 subplots stacked vertically, sharing the X (time) axis
+    fig, axs = plt.subplots(5, 1, figsize=(10, 12), sharex=True)
+    
+    # 1. Plot Gamma
+    axs[0].plot(t_list, gamma_list, label=r'$\gamma$', color='purple', linewidth=2)
+    axs[0].set_ylabel('Gamma')
+    axs[0].legend(loc='best')
+    axs[0].grid(True, linestyle=':', alpha=0.7)
+    axs[0].set_title('Evolution of Gamma and Lambda Multipliers')
+    
+    # 2. Plot Lambda Position
+    axs[1].plot(t_list, lambda_pos_list, label=r'$\lambda_{pos}$', color='blue', linewidth=2)
+    axs[1].set_ylabel('Pos')
+    axs[1].legend(loc='best')
+    axs[1].grid(True, linestyle=':', alpha=0.7)
+    
+    # 3. Plot Lambda Velocity
+    axs[2].plot(t_list, lambda_vel_list, label=r'$\lambda_{vel}$', color='orange', linewidth=2)
+    axs[2].set_ylabel('Vel')
+    axs[2].legend(loc='best')
+    axs[2].grid(True, linestyle=':', alpha=0.7)
+    
+    # 4. Plot Lambda Acceleration
+    axs[3].plot(t_list, lambda_acc_list, label=r'$\lambda_{acc}$', color='green', linewidth=2)
+    axs[3].set_ylabel('Acc')
+    axs[3].legend(loc='best')
+    axs[3].grid(True, linestyle=':', alpha=0.7)
+    
+    # 5. Plot Lambda Scaling
+    axs[4].plot(t_list, lambda_scaling_list, label=r'$\lambda_{scaling}$', color='red', linewidth=2)
+    axs[4].set_ylabel('Scaling')
+    axs[4].legend(loc='best')
+    axs[4].grid(True, linestyle=':', alpha=0.7)
+    
+    # Set the x-axis label only on the bottom subplot
+    axs[4].set_xlabel('Time (t)', fontsize=12)
+    
+    # Adjust layout to prevent overlapping labels
+    plt.tight_layout()
+    
+    # Display the plots
+    plt.show()
