@@ -217,3 +217,5 @@ __marimo__/
 
 resullts/
 skeleton_vectors/
+
+*.csv
