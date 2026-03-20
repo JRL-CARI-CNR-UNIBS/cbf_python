@@ -122,7 +122,7 @@ def compute_ds_scaling_h(h, error):
     return ds
 
 def compute_ds_scaling_d(distance, error):
-    d_activation = 0.2
+    d_activation = 0.0
     slope_d = 100.0
     term_safety = 1.0 / (1.0 + np.exp(-slope_d * (distance - d_activation)))
     #print(f"Distance: {distance:.4f}, Scaling-safety-term: {term_safety:.4f}")
@@ -178,8 +178,8 @@ def main():
         R = quat.toRotationMatrix()
 
         T_wc = pin.SE3(R, np.array([0.208, -0.883, 2.351]))
-        csv_path = "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_22.csv"
-        #csv_path = "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv"
+        #csv_path = "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_22.csv"
+        csv_path = "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv"
         # csv_path = "C:/Users/Pietro/OneDrive/Desktop/cbf_python/skeleton_vectors_22.csv"
         #csv_path = "C:/Users/Pietro/OneDrive/Desktop/cbf_python/UR10_obst.csv"
         bridge = FakeCommandBridge(UR10E_JOINTS, csv_path=csv_path, Tworld_to_cam=T_wc, slowdown_factor=1.0, t0=0.0)
@@ -213,8 +213,8 @@ def main():
     Kd_rot = np.array([1, 1, 1]) * 2.0 * xi * wn
     
     #planner_cart = SegmentedSE3Trap(vlin_max=0.06, vang_max=0.12, alin_max=1.8, aang_max=2.0)
-    planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=1.2, alin_max=1.8, aang_max=2.0)
-    #planner_cart = SegmentedSE3Trap(vlin_max=0.1, vang_max=0.3, alin_max=0.8, aang_max=0.5)
+    #planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=0.8, alin_max=1.8, aang_max=2.0)
+    planner_cart = SegmentedSE3Trap(vlin_max=0.1, vang_max=0.3, alin_max=0.8, aang_max=0.5)
     
     q_start = first_joint_position.copy()
     q10 = np.array([31.0, -78.0, 115.0, -127.0, 86.0, -32.0]) * np.pi / 180.0
@@ -259,7 +259,7 @@ def main():
     h_min = 100.0
     
     v_rel_max = 2.5;
-    v_pfl = 0.0;
+    v_pfl = 0.25;
     
 
     # --- Variables for Logging ---

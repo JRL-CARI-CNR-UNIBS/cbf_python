@@ -1,5 +1,5 @@
-import os 
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE" 
+#import os 
+#os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE" 
 
 import optuna
 import optunahub
@@ -16,7 +16,7 @@ from sharework import loadSharework
 from fake_command_bridge import FakeCommandBridge
 
 # ----------------- CONFIGURAZIONE DATABASE -----------------
-POSTGRES_URL = "postgresql+psycopg2://optuna:optuna_pw@127.0.0.1:5432/optuna_db"
+POSTGRES_URL = "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
 
 # ----------------- CONFIGURAZIONE FISICA/CBF -----------------
 Tr_param = 0.15     
@@ -117,7 +117,7 @@ def run_simulation(gamma_param, ks_param, d_thresh_param, wn_param, xi_param, w_
     quat.normalize()
     R = pin.utils.rotate('z', 1.9) @ pin.utils.rotate('x', np.pi*0.5)
     T_wc = pin.SE3(R, np.array([-2.3, -1.2 ,0.9]))
-    csv_path = "C:/Users/Pietro/OneDrive/Desktop/cbf_python/UR10_obst_spline.csv"
+    csv_path = "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_22.csv"
     
     bridge = FakeCommandBridge(UR10E_JOINTS, csv_path=csv_path, Tworld_to_cam=T_wc, slowdown_factor=1.0)
     
@@ -243,13 +243,13 @@ def run_simulation(gamma_param, ks_param, d_thresh_param, wn_param, xi_param, w_
                 if h_softmax_val < h_min_curr: 
                     h_min_curr = h_softmax_val
                     
-                # --- LOGICA DI PENALIZZAZIONE "COLPEVOLE" PER OPTUNA ---
-                # 1. Colpa in avvicinamento: vr_act < 0 significa che il robot va verso l'ostacolo
+                # --- LOGICA DI PENALIZZAZIONE ---
+                # Colpa in avvicinamento: vr_act < 0 significa che il robot va verso l'ostacolo
                 if h_softmax_val < 0.0 and vr_act < -1e-4:
                     if h_softmax_val < min_h_softmax_viol:
                         min_h_softmax_viol = h_softmax_val
                         
-                # 2. Colpa in fuga: supera v_max
+                # Colpa in fuga: supera v_max
                 if h_vmax_val < 0.0:
                     if h_vmax_val < min_h_vmax_viol:
                         min_h_vmax_viol = h_vmax_val
@@ -276,7 +276,7 @@ def run_simulation(gamma_param, ks_param, d_thresh_param, wn_param, xi_param, w_
             constraint_acc_mat = np.hstack([np.eye(model.nq), np.zeros((model.nq, 1))])
             constraint_acc_vec = np.ones((model.nq, 1)) * DDq_MAX
             
-            # ----------------- LIMITI DI TRACKING (RELAXED) -----------------
+            # ----------------- LIMITI DI TRACKING -----------------
             next_trajectory_time = trajectory_time + Dtrajectory_time * Tc + 0.5 * DDtrajectory_time * Tc ** 2.0
             next_pose_des, _, _ = planner_cart.getMotionLaw(next_trajectory_time % T_total)
             next_x_des = next_pose_des.translation
@@ -416,11 +416,11 @@ if __name__ == "__main__":
         sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
         storage=storage,
         load_if_exists=True,
-        study_name=f"pfl_opt_ur10_3objectives_{time.strftime('%Y%m%d-%H%M%S')}",
+        study_name=f"PFL.AGNELLI{time.strftime('%Y%m%d-%H%M%S')}",
     )
     
     print("Starting Multi-Objective Optimization (J1: Makespan, J2: Quality/Slack, J3: Safety/Fails)...")
-    study.optimize(objective, n_trials=2000, show_progress_bar=True, n_jobs=2)
+    study.optimize(objective, n_trials=2000, show_progress_bar=True, n_jobs=30)
     
     pareto_front = study.best_trials
 
