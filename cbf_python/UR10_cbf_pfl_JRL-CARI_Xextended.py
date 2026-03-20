@@ -1,9 +1,3 @@
-#####MODIFICHE RISPETTO ALLO SCRIPT ORIGINALE: 
-#Aumentiamo le dimensioni del vettore degli stati X = [d, vrel , vr_act] in modo da poter definire un vincolo di velocità massimo sensibile alla sola velocità del robot
-#questo comporta delle modifiche al calcolo dello jacobiano di h e di psi
-
-
-
 import time
 import math
 import numpy as np
@@ -20,6 +14,7 @@ from sharework import loadSharework
 from interpolator import SegmentedSE3Trap
 from joint_interpolator import SegmentedJointTrap
 from pinocchio import SE3
+from VisualizationClass import ThesisPlotter
 
 # CONFIGURATION
 USE_BRIDGE = False  # Set to True to use the real robot bridge, False for fake data
@@ -524,97 +519,125 @@ def main():
     
     finally:
         # --- PLOTs ---
+        # if len(log_time) > 0:
+        #     time_arr = np.array(log_time)
+        #     ds_time_arr = np.array(log_ds_time)
+        #     pos_act_arr = np.array(log_pos_act)
+        #     pos_nom_arr = np.array(log_pos_nom)
+        #     dist_arr = np.array(log_dist)
+        #     vrel_arr = np.array(log_vrel)
+        #     ddq_arr = np.array(log_ddq)
+        #     ddq_nom_arr = np.array(log_ddq_nom)
+        #     delta_arr = np.array(log_delta)
+        #     # Fig: XYZ Position Tracking
+        #     fig1, axs1 = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
+        #     labels = ['x [m]', 'y [m]', 'z [m]']
+        #     for i in range(3):
+        #         axs1[i].plot(time_arr, pos_act_arr[:, i], 'r-', label='Actual')
+        #         axs1[i].plot(time_arr, pos_nom_arr[:, i], 'k--', label='Nominal')
+        #         axs1[i].set_ylabel(labels[i])
+        #         axs1[i].grid(True)
+        #     axs1[0].legend(loc='upper right')
+        #     axs1[0].set_title('Task Space Position Tracking')
+        #     axs1[2].set_xlabel('Time [s]')
+        #     plt.tight_layout()
+
+        #     # Fig: Distance and V_rel
+        #     fig2, ax1 = plt.subplots(figsize=(10, 6))
+        #     ax1.set_xlabel('Time [s]')
+        #     ax1.set_ylabel('Min Distance [m]', color='r')
+        #     ax1.plot(time_arr, dist_arr, 'r-', label='Distance')
+        #     ax1.tick_params(axis='y', labelcolor='r')
+        #     ax1.grid(True)
+            
+        #     ax2 = ax1.twinx()
+        #     ax2.set_ylabel('V_rel [m/s]', color='g')
+        #     ax2.plot(time_arr, vrel_arr, 'g-', label='V_rel')
+        #     ax2.axhline(y=-v_pfl, color='k', linestyle=':', label=f'-v_PFL ({-v_pfl})')
+        #     ax2.tick_params(axis='y', labelcolor='g')
+            
+        #     lines1, labels1 = ax1.get_legend_handles_labels()
+        #     lines2, labels2 = ax2.get_legend_handles_labels()
+        #     ax2.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+        #     plt.title('Obstacle: Min Distance & Relative Velocity')
+        #     plt.tight_layout()
+
+        #     # Fig: CBF 
+        #     plt.figure(figsize=(10, 6))
+        #     plt.plot(time_arr, log_h, 'r', label='h_min')
+        #     plt.axhline(0, color='k', linestyle='--')
+        #     plt.ylabel('h value')
+        #     plt.title('Control Barrier Function')
+        #     plt.legend()
+        #     plt.grid(True)
+            
+
+        #     # Fig: Joint Accelerations
+        #     plt.figure(figsize=(10, 6))
+        #     #colors = ['r', 'g', 'b', 'c', 'm', 'y']
+        #     #for j in range(model.nq):
+        #        # plt.plot(time_arr, ddq_arr[:, j], color=colors[j % len(colors)], label=f'ddq_{j}')
+        #     plt.plot(time_arr, ddq_arr[:,-1], label=f'ddq')
+        #     plt.plot(time_arr, ddq_nom_arr[:,-1], label = f'ddq_des' )
+        #     plt.xlabel('Time [s]')
+        #     plt.ylabel('Joint Acc [rad/s^2]')
+        #     plt.title('Joint Accelerations')
+        #     plt.legend(ncol=3)
+        #     plt.grid(True)
+        #     plt.tight_layout()
+            
+            
+        #     # Fig: DS_Time Scaling
+        #     plt.figure(figsize=(10, 6))
+        #     plt.plot(time_arr, ds_time_arr , 'r', label='ds_traj_time')
+        #     plt.axhline(0, color='k', linestyle='--')
+        #     plt.xlabel('time')
+        #     plt.ylabel('DS_traj_time')
+        #     plt.title('DS_traj_time')
+        #     plt.legend()
+        #     plt.grid(True)
+            
+        #     # Fig: Delta
+        #     plt.figure(figsize=(10, 6))
+        #     plt.plot(time_arr, delta_arr , 'r' )
+        #     plt.axhline(0, color='k', linestyle='--')
+        #     plt.xlabel('time')
+        #     plt.ylabel('Delta')
+        #     plt.title('Delta')
+        #     plt.legend()
+        #     plt.grid(True)
+            
+            
+
+        #     plt.show()
         if len(log_time) > 0:
-            time_arr = np.array(log_time)
-            ds_time_arr = np.array(log_ds_time)
-            pos_act_arr = np.array(log_pos_act)
-            pos_nom_arr = np.array(log_pos_nom)
-            dist_arr = np.array(log_dist)
-            vrel_arr = np.array(log_vrel)
-            ddq_arr = np.array(log_ddq)
-            ddq_nom_arr = np.array(log_ddq_nom)
-            delta_arr = np.array(log_delta)
-            # Fig: XYZ Position Tracking
-            fig1, axs1 = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
-            labels = ['x [m]', 'y [m]', 'z [m]']
-            for i in range(3):
-                axs1[i].plot(time_arr, pos_act_arr[:, i], 'r-', label='Actual')
-                axs1[i].plot(time_arr, pos_nom_arr[:, i], 'k--', label='Nominal')
-                axs1[i].set_ylabel(labels[i])
-                axs1[i].grid(True)
-            axs1[0].legend(loc='upper right')
-            axs1[0].set_title('Task Space Position Tracking')
-            axs1[2].set_xlabel('Time [s]')
-            plt.tight_layout()
-
-            # Fig: Distance and V_rel
-            fig2, ax1 = plt.subplots(figsize=(10, 6))
-            ax1.set_xlabel('Time [s]')
-            ax1.set_ylabel('Min Distance [m]', color='r')
-            ax1.plot(time_arr, dist_arr, 'r-', label='Distance')
-            ax1.tick_params(axis='y', labelcolor='r')
-            ax1.grid(True)
+            print("\nSimulation ended. Generating Thesis Plots...")
             
-            ax2 = ax1.twinx()
-            ax2.set_ylabel('V_rel [m/s]', color='g')
-            ax2.plot(time_arr, vrel_arr, 'g-', label='V_rel')
-            ax2.axhline(y=-v_pfl, color='k', linestyle=':', label=f'-v_PFL ({-v_pfl})')
-            ax2.tick_params(axis='y', labelcolor='g')
+            # 1. Raccogliamo tutti i log in un dizionario
+            logs = {
+                'time': log_time,
+                'pos_act': log_pos_act,
+                'pos_nom': log_pos_nom,
+                'dist': log_dist,
+                'vrel': log_vrel,
+                'h': log_h,
+                'ddq': log_ddq,
+                'ddq_nom': log_ddq_nom,
+                'ds_time': log_ds_time,
+                'delta': log_delta
+            }
             
-            lines1, labels1 = ax1.get_legend_handles_labels()
-            lines2, labels2 = ax2.get_legend_handles_labels()
-            ax2.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
-            plt.title('Obstacle: Min Distance & Relative Velocity')
-            plt.tight_layout()
-
-            # Fig: CBF 
-            plt.figure(figsize=(10, 6))
-            plt.plot(time_arr, log_h, 'r', label='h_min')
-            plt.axhline(0, color='k', linestyle='--')
-            plt.ylabel('h value')
-            plt.title('Control Barrier Function')
-            plt.legend()
-            plt.grid(True)
+            # 2. Raccogliamo i parametri usati nel controllo
+            config = {
+                'v_pfl': v_pfl,
+                'a_s': as_param,
+                'Tr': Tr_param,
+                'v_max': v_rel_max
+            }
             
-
-            # Fig: Joint Accelerations
-            plt.figure(figsize=(10, 6))
-            #colors = ['r', 'g', 'b', 'c', 'm', 'y']
-            #for j in range(model.nq):
-               # plt.plot(time_arr, ddq_arr[:, j], color=colors[j % len(colors)], label=f'ddq_{j}')
-            plt.plot(time_arr, ddq_arr[:,-1], label=f'ddq')
-            plt.plot(time_arr, ddq_nom_arr[:,-1], label = f'ddq_des' )
-            plt.xlabel('Time [s]')
-            plt.ylabel('Joint Acc [rad/s^2]')
-            plt.title('Joint Accelerations')
-            plt.legend(ncol=3)
-            plt.grid(True)
-            plt.tight_layout()
-            
-            
-            # Fig: DS_Time Scaling
-            plt.figure(figsize=(10, 6))
-            plt.plot(time_arr, ds_time_arr , 'r', label='ds_traj_time')
-            plt.axhline(0, color='k', linestyle='--')
-            plt.xlabel('time')
-            plt.ylabel('DS_traj_time')
-            plt.title('DS_traj_time')
-            plt.legend()
-            plt.grid(True)
-            
-            # Fig: Delta
-            plt.figure(figsize=(10, 6))
-            plt.plot(time_arr, delta_arr , 'r' )
-            plt.axhline(0, color='k', linestyle='--')
-            plt.xlabel('time')
-            plt.ylabel('Delta')
-            plt.title('Delta')
-            plt.legend()
-            plt.grid(True)
-            
-            
-
-            plt.show()
+            # 3. Inizializziamo il plotter e mostriamo tutto!
+            plotter = ThesisPlotter(logs, config)
+            plotter.show_all_plots()
 
 if __name__ == "__main__":
     main()
