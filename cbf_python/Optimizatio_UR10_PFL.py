@@ -115,11 +115,20 @@ def run_simulation(gamma_param, ks_param, d_thresh_param, wn_param, xi_param, w_
     # Bridge Setup
     quat = pin.Quaternion(0.814, 0.178, 0.535, 0.137)
     quat.normalize()
-    R = pin.utils.rotate('z', 1.9) @ pin.utils.rotate('x', np.pi*0.5)
-    T_wc = pin.SE3(R, np.array([-2.3, -1.2 ,0.9]))
-    csv_path = "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_22.csv"
+    R = quat.toRotationMatrix()
+    T_wc = pin.SE3(R, np.array([0.208, -0.883, 2.351]))
+
+    # Camera and bridge
+    # # Build camera pose from your INITI snippet
+    # quat = pin.Quaternion(0.83, 0.185, 0.513, 0.12)
+    # quat.normalize()
+    # R = quat.toRotationMatrix()
+
+    # T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
+
+    csv_path = "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv"
     
-    bridge = FakeCommandBridge(UR10E_JOINTS, csv_path=csv_path, Tworld_to_cam=T_wc, slowdown_factor=1.0)
+    bridge = FakeCommandBridge(UR10E_JOINTS, csv_path=csv_path, Tworld_to_cam=T_wc, slowdown_factor=1.0, t0=0.0)
     
     # Inizializzazione Robot
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
@@ -379,12 +388,12 @@ def run_simulation(gamma_param, ks_param, d_thresh_param, wn_param, xi_param, w_
 # ----------------- OPTUNA OBJECTIVE -----------------
 def objective(trial):
     # Parametri Barriera e Time Scaling
-    gamma_param_trial = trial.suggest_float("gamma", 1.0, 20.0)
+    gamma_param_trial = trial.suggest_float("gamma", 1.0, 50.0)
     ks_param_trial = trial.suggest_float("k_s", 1.0, 20.0)
     d_thresh_trial = trial.suggest_float("d_threshold", 0.1, 0.8) 
     
     # Parametri Controllore PD Cartesiano
-    wn_trial = trial.suggest_float("omega_n", 20.0, 100.0)
+    wn_trial = trial.suggest_float("omega_n", 20.0, 500.0)
     xi_trial = trial.suggest_float("xi", 0.5, 1.2)
     
     # Parametri Solutore QP
@@ -420,7 +429,9 @@ if __name__ == "__main__":
     )
     
     print("Starting Multi-Objective Optimization (J1: Makespan, J2: Quality/Slack, J3: Safety/Fails)...")
-    study.optimize(objective, n_trials=2000, show_progress_bar=True, n_jobs=30)
+    # study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "low_scale_rate", "lap count"])
+
+    study.optimize(objective, n_trials=3000, show_progress_bar=True, n_jobs=30)
     
     pareto_front = study.best_trials
 

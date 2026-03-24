@@ -17,18 +17,18 @@ from pinocchio import SE3
 from VisualizationClass import ThesisPlotter
 
 # CONFIGURATION
-USE_BRIDGE = False  # Set to True to use the real robot bridge, False for fake data
+USE_BRIDGE = True  # Set to True to use the real robot bridge, False for fake data
 
 # Safety Parameters
 C_param = 0.25
 Tr_param = 0.15
 as_param = 2.5
-gamma_param = 30.0
+gamma_param =10.0
 Tc = 2e-3
 DDq_MAX = np.pi**2*5
 
 
-eps_track = 0.03 # 3cm
+eps_track = 0.1
 rho = 20.0 #parametro softmin e softmax
 
 
@@ -114,7 +114,7 @@ def compute_ds_scaling_h(h, error):
     slope_h = 30.0
     term_safety = 1.0 / (1.0 + np.exp(-slope_h * (h - h_threshold)))
     
-    # Fattore Errore
+    # Fattore Erruore
     sigma_error = eps_track #m di tolleranza
     term_error = np.exp(- (error**2) / (2 * sigma_error**2))
     
@@ -122,7 +122,7 @@ def compute_ds_scaling_h(h, error):
     return ds
 
 def compute_ds_scaling_d(distance, error):
-    d_activation = 0.0
+    d_activation = 0.1
     slope_d = 100.0
     term_safety = 1.0 / (1.0 + np.exp(-slope_d * (distance - d_activation)))
     #print(f"Distance: {distance:.4f}, Scaling-safety-term: {term_safety:.4f}")
@@ -177,9 +177,13 @@ def main():
         quat.normalize()
         R = quat.toRotationMatrix()
 
-        T_wc = pin.SE3(R, np.array([0.208, -0.883, 2.351]))
+        # T_wc = pin.SE3(R, np.array([0.208, -0.883, 2.351]))
+        T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
+
         #csv_path = "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_22.csv"
-        csv_path = "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv"
+        # csv_path = "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv"
+        csv_path = "/home/nyquist/projects/tesisti/agnelli/cbf_python/skeletons_csv/skeleton_agnelli_1.csv"
+
         # csv_path = "C:/Users/Pietro/OneDrive/Desktop/cbf_python/skeleton_vectors_22.csv"
         #csv_path = "C:/Users/Pietro/OneDrive/Desktop/cbf_python/UR10_obst.csv"
         bridge = FakeCommandBridge(UR10E_JOINTS, csv_path=csv_path, Tworld_to_cam=T_wc, slowdown_factor=1.0, t0=0.0)
@@ -213,9 +217,9 @@ def main():
     Kd_rot = np.array([1, 1, 1]) * 2.0 * xi * wn
     
     #planner_cart = SegmentedSE3Trap(vlin_max=0.06, vang_max=0.12, alin_max=1.8, aang_max=2.0)
-    #planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=0.8, alin_max=1.8, aang_max=2.0)
-    planner_cart = SegmentedSE3Trap(vlin_max=0.1, vang_max=0.3, alin_max=0.8, aang_max=0.5)
-    
+    planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=0.8, alin_max=1.8, aang_max=2.0)
+    # planner_cart = SegmentedSE3Trap(vlin_max=0.1, vang_max=0.3, alin_max=0.8, aang_max=0.5)
+    # planner_cart = SegmentedSE3Trap(vlin_max=2.5, vang_max=3, alin_max=80, aang_max=50)
     q_start = first_joint_position.copy()
     q10 = np.array([31.0, -78.0, 115.0, -127.0, 86.0, -32.0]) * np.pi / 180.0
     q20 = np.array([31.0, -83.0, 98.0, -110.0, 86.0, -32.0]) * np.pi / 180.0
@@ -258,9 +262,9 @@ def main():
     h_prev = 100.0
     h_min = 100.0
     
-    v_rel_max = 2.5;
-    v_pfl = 0.25;
-    
+    v_rel_max = 2.5
+    v_pfl = 0.25
+   
 
     # --- Variables for Logging ---
     pos_nominal = np.zeros(3)
