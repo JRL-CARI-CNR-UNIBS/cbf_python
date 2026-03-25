@@ -1,6 +1,6 @@
 import numpy as np
 
-class HRC_PFLSafetyUtils:
+class PFLSafetyUtils:
     """
     Libreria matematica e cinematica per la gestione della sicurezza HRC 
     tramite Control Barrier Functions (CBF) e Time Scaling.
@@ -11,9 +11,9 @@ class HRC_PFLSafetyUtils:
     rho : smothness dell'approssimazione softmax (maggiore rho più accuratezza)
     limit_err: errore massimo sul tracking della traiettoria
     """
-    def __init__(self, Tr=0.15, a_s=2.5, v_pfl=0.25, v_max=2.0, rho=20.0, limit_err=0.03):
+    def __init__(self, Tc=0.002, a_s=2.5, v_pfl=0.25, v_max=2.0, rho=20.0, traj_max_err=0.1):
         # Parametri Fisici e Normativi
-        self.Tr = Tr
+        self.Tc = Tc
         self.a_s = a_s
         self.v_pfl = v_pfl
         self.v_max = v_max
@@ -22,7 +22,7 @@ class HRC_PFLSafetyUtils:
         self.rho = rho
         
         # Parametri Time Scaling
-        self.limit_err = limit_err  # Errore massimo di tracking "fisiologico" (es. 3 cm)
+        self.traj_max_err = traj_max_err  # Errore massimo di tracking "fisiologico" (es. 3 cm)
         self.n_power = 6.0          # Ordine della Super-Gaussiana (plateau piatto)
         self.slope_d = 100.0        # Pendenza della sigmoide per la distanza
 
@@ -32,12 +32,12 @@ class HRC_PFLSafetyUtils:
         utilizzando l'operatore di aggregazione liscia SoftMax.
         """
         # 1. Barriera di Frenata
-        h_br = d - (-v_rel * self.Tr + (v_rel**2) / (2.0 * abs(self.a_s)))
-        grad_br = np.array([1.0, self.Tr - v_rel / self.a_s, 0.0])
+        h_br = d - (-v_rel * self.Tc + (v_rel**2) / (2.0 * abs(self.a_s)))
+        grad_br = np.array([1.0, self.Tc - v_rel / self.a_s, 0.0])
         
         # 2. Barriera PFL (impatto ammissibile)
-        h_pfl = (self.v_pfl + v_rel) * self.Tr
-        grad_pfl = np.array([0.0, self.Tr, 0.0])
+        h_pfl = (self.v_pfl + v_rel) * self.Tc
+        grad_pfl = np.array([0.0, self.Tc, 0.0])
 
         # Aggregazione SoftMax con log-sum-exp trick per evitare overflow
         max_inner = max(h_br, h_pfl)
@@ -104,7 +104,7 @@ class HRC_PFLSafetyUtils:
         
         return np.vstack((row_d, row_vrel, row_vract))
 
-    def compute_ds_scaling(self, distance, unjustified_error, d_thresh):
+    def compute_ds_scaling(self, distance, tracking_error, d_thresh):
         """
         Calcola il fattore di Time Scaling combinando la distanza (Sigmoide)
         e l'errore di inseguimento ingiustificato (Super-Gaussiana).
@@ -113,7 +113,7 @@ class HRC_PFLSafetyUtils:
         term_safety = 1.0 / (1.0 + np.exp(-self.slope_d * (distance - d_thresh)))
         
         # Fattore Errore basato su Super-Gaussiana
-        term_error = np.exp(- (abs(unjustified_error) / self.limit_err)**self.n_power)
+        term_error = np.exp(- (abs(tracking_error) / self.traj_max_err)**self.n_power)
 
         # Ritorna il caso più restrittivo tra i due
         return min(term_safety, term_error)

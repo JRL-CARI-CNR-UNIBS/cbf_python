@@ -5,7 +5,7 @@ import pinocchio as pin
 import meshcat.geometry as mgeom
 import quadprog
 import matplotlib.pyplot as plt
-from HRC_PFLSafetyUtils import HRC_PFLSafetyUtils
+from PFLSafetyUtils_Class import PFLSafetyUtils
 
 from pinocchio.visualize import MeshcatVisualizer
 from visualization_daemon import VisualizationDaemon
@@ -18,131 +18,21 @@ from pinocchio import SE3
 from VisualizationClass import ThesisPlotter
 
 # CONFIGURATION
-USE_BRIDGE = True  # Set to True to use the real robot bridge, False for fake data
+USE_BRIDGE = False  # Set to True to use the real robot bridge, False for fake data
 
-# Safety Parameters
-
-Tr_param = 0.15
-as_param = 2.5
-gamma_param =10.0
-Tc = 2e-3
+# QP constraints Parameters
+gamma_param =5.0
+Dq_MAX = np.pi * np.array([1,1,1,1,1,1], dtype=np.float64) * np.pi
 DDq_MAX = np.pi**2*5
-
-
-eps_track = 0.1
-rho = 20.0 #parametro softmin e softmax
-
-
-# MATH & KINEMATICS
-# =============================================================================
-# def compute_h_softmax_and_grad(d, v_rel, Tr, a_s, v_pfl, rho):
-#     h_br = d - (-v_rel*Tr + (v_rel**2) / (2.0 * abs(a_s)))
-#     grad_br = np.array([1.0,Tr -v_rel / a_s, 0.0])
-    
-#     h_pfl = (v_pfl + v_rel) * Tr
-#     grad_pfl = np.array([0.0, Tr, 0.0])
-
-#     max_inner = max(h_br, h_pfl)
-    
-#     exp_br = np.exp(rho * (h_br - max_inner))
-#     exp_pfl = np.exp(rho * (h_pfl - max_inner))
-#     sum_inner = exp_br + exp_pfl
-    
-#     h_softmax = max_inner + (1.0 / rho) * np.log(sum_inner)
-    
-#     # Pesi Interni
-#     omega_br = exp_br / sum_inner
-#     omega_pfl = exp_pfl / sum_inner
-    
-#     grad_hsoftmax = omega_br * grad_br + omega_pfl * grad_pfl
-    
-#     return h_softmax, grad_hsoftmax
-
-# def compute_h_vmax_and_grad(v_rel_max, vr_act):
-#     h_vmax_pos = (v_rel_max - vr_act)*(v_rel_max + vr_act)
-#     grad_vmax = np.array([0.0, 0.0, -2.0 * vr_act ])
-    
-#     return h_vmax_pos, grad_vmax
-
-
-# def range_state_derivative(v_lin, v_human):
-#     zero3 = np.zeros(3)
-#     f = np.concatenate([v_lin, v_human, zero3, zero3])
-#     g = np.zeros((12, 3))
-#     g[6:9] = np.eye(3)
-#     return f, g
-
-# def jacobian_psi(p_r, p_h, v_lin, v_human):
-#     diff = p_r - p_h
-#     norm = np.linalg.norm(diff)
-#     if norm < 1e-9: norm = 1e-9
-#     u_rh = (diff / norm).reshape(3, 1)
-#     P = np.eye(3) - u_rh @ u_rh.T
-#     w = v_lin - v_human
-#     wP_over_d = (w @ P) / norm
-
-#     vrP_over_d = (v_lin @ P) / norm
-    
-#     row_d = np.hstack((u_rh.T, 
-#                        -u_rh.T,
-#                         np.zeros((1, 3)),
-#                         np.zeros((1, 3))))
-    
-#     row_vrel = np.hstack((wP_over_d.reshape(1, -1),
-#                         -wP_over_d.reshape(1, -1), 
-#                         u_rh.T,
-#                         -u_rh.T))
-    
-#     row_vract = np.hstack((vrP_over_d.reshape(1, -1),
-#                         -vrP_over_d.reshape(1, -1), 
-#                         u_rh.T,
-#                         np.zeros((1, 3))))
-    
-#     return np.vstack((row_d, row_vrel, row_vract))
-
-# def damped_pinv_svd(J, lam=1e-4):
-#     U, S, Vt = np.linalg.svd(J, full_matrices=False)
-#     S_damped = S / (S ** 2 + lam ** 2)
-#     return (Vt.T * S_damped) @ U.T
-
-# def pose_eul(z, y, x, xyz):
-#     R = pin.utils.rotate('z', z) @ pin.utils.rotate('y', y) @ pin.utils.rotate('x', x)
-#     return SE3(R, np.array(xyz))
-
-# def compute_ds_scaling_h(h, error):
-#     # Fattore Sicurezza (Sigmoide)
-#     h_threshold = 0.9
-#     slope_h = 30.0
-#     term_safety = 1.0 / (1.0 + np.exp(-slope_h * (h - h_threshold)))
-    
-#     # Fattore Erruore
-#     sigma_error = eps_track #m di tolleranza
-#     term_error = np.exp(- (error**2) / (2 * sigma_error**2))
-    
-#     ds = min(term_safety, term_error)
-#     return ds
-
-# def compute_ds_scaling_d(distance, error):
-#     d_activation = 0.1
-#     slope_d = 100.0
-#     term_safety = 1.0 / (1.0 + np.exp(-slope_d * (distance - d_activation)))
-#     #print(f"Distance: {distance:.4f}, Scaling-safety-term: {term_safety:.4f}")
-
-#     limit_err = 0.03
-#     n_power = 6.0               
-
-#     term_error = np.exp(- (abs(error) / limit_err)**n_power)
-
-#     # print(f"Err: {error:.4f}, Scaling: {term_error:.4f}")
-
-#     ds = min(term_safety, term_error)
-#     return ds
-
 
 # MAIN
 def main():
 
-    safety_utilis = HRC_PFLSafetyUtils(Tr=0.15, a_s=2.5, v_pfl=0.25, v_max=2.0, rho=20.0, limit_err=0.03)
+    safety_utilis = PFLSafetyUtils(Tc=0.005, a_s=2.5, v_pfl=0.25, v_max=2.0, rho=20.0, traj_max_err=0.1)
+    Tc = safety_utilis.Tc
+    a_s = safety_utilis.a_s
+    v_pfl = safety_utilis.v_pfl
+    eps_track = safety_utilis.traj_max_err
     # Model Setup
     UR10E_JOINTS = [
         "ur10e_shoulder_pan_joint", "ur10e_shoulder_lift_joint", "ur10e_elbow_joint",
@@ -221,7 +111,7 @@ def main():
     
     #planner_cart = SegmentedSE3Trap(vlin_max=0.06, vang_max=0.12, alin_max=1.8, aang_max=2.0)
     planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=0.8, alin_max=1.8, aang_max=2.0)
-    # planner_cart = SegmentedSE3Trap(vlin_max=0.1, vang_max=0.3, alin_max=0.8, aang_max=0.5)
+    #planner_cart = SegmentedSE3Trap(vlin_max=0.1, vang_max=0.3, alin_max=0.8, aang_max=0.5)
     # planner_cart = SegmentedSE3Trap(vlin_max=2.5, vang_max=3, alin_max=80, aang_max=50)
     q_start = first_joint_position.copy()
     q10 = np.array([31.0, -78.0, 115.0, -127.0, 86.0, -32.0]) * np.pi / 180.0
@@ -308,13 +198,12 @@ def main():
             Tbt = data.oMf[tool_frame_id]
             x_curr = Tbt.translation
             tracking_error = np.linalg.norm(goal_pose.translation - x_curr)
-            tracking_error = np.max(0.0, tracking_error - delta)
             # Time Scaling ds(h, err)
             #Ds_target = np.clip(compute_ds_scaling_h(h_prev, tracking_error), 0, 1)
             
             # Time Scaling ds(h, err)
             
-            Ds_target = np.clip(safety_utilis.compute_ds_scaling_d(current_dist_min, tracking_error), 0, 1)
+            Ds_target = np.clip(safety_utilis.compute_ds_scaling(current_dist_min, tracking_error, 0.1), 0, 1)
             
             DDtrajectory_time = 5.0 * (Ds_target - Dtrajectory_time)
                 
@@ -339,10 +228,16 @@ def main():
             constraint_matrix = np.empty((0, model.nq + 1))
             constraint_vector = np.empty((0, 1))
             
+            #Acceleration Constraints:
             constraint_acc_mat = np.hstack([np.eye(model.nq), np.zeros((model.nq, 1))])
             constraint_acc_vec = np.ones((model.nq, 1)) * DDq_MAX
+
+            #Velocity constraints: -
+            constraint_vel_mat = np.hstack([np.eye(model.nq), np.zeros((model.nq, 1))])
+            upper_constraint_vel_vec = ((Dq_MAX - dq)/Tc).reshape(-1, 1)
+            lower_constraint_vel_vec = ((-Dq_MAX - dq)/Tc).reshape(-1, 1)
             
-            
+            #Trajectory Tracking Constraints:
             next_trajectory_time =trajectory_time + Dtrajectory_time * Tc + 0.5 * DDtrajectory_time * Tc ** 2.0
             next_pose_des, _, _ = planner_cart.getMotionLaw(next_trajectory_time % T_total)
             next_x_des = next_pose_des.translation
@@ -388,7 +283,7 @@ def main():
                     h_softmax_val, dh_softmax_dx = safety_utilis.compute_h_softmax_and_grad(dist, v_rel)
 
                     ## Vmax CBF Evalutation
-                    h_vmax_val, dh_vmax_dx = safety_utilis.compute_h_vmax_and_grad(v_rel_max, vr_act)
+                    h_vmax_val, dh_vmax_dx = safety_utilis.compute_h_vmax_and_grad(vr_act)
                     
                     if h_softmax_val < h_min_curr: h_min_curr = h_softmax_val
                     
@@ -423,6 +318,8 @@ def main():
             constraint_matrix = np.concatenate((constraint_matrix,
                                                 constraint_acc_mat, 
                                                 -constraint_acc_mat,
+                                                -constraint_vel_mat,
+                                                constraint_vel_mat,
                                                 constraint_track_matrix_up,
                                                 constraint_track_matrix_lower,
                                                 constraint_delta_matrix,
@@ -431,6 +328,8 @@ def main():
             constraint_vector = np.concatenate((constraint_vector,
                                                 -constraint_acc_vec,
                                                 -constraint_acc_vec,
+                                                -upper_constraint_vel_vec,
+                                                lower_constraint_vel_vec,
                                                 upper_constraint_track_vector,
                                                 lower_constraint_track_vector, 
                                                 constraint_delta_vec,
@@ -525,98 +424,6 @@ def main():
         print("Interrupted by User.")
     
     finally:
-        # --- PLOTs ---
-        # if len(log_time) > 0:
-        #     time_arr = np.array(log_time)
-        #     ds_time_arr = np.array(log_ds_time)
-        #     pos_act_arr = np.array(log_pos_act)
-        #     pos_nom_arr = np.array(log_pos_nom)
-        #     dist_arr = np.array(log_dist)
-        #     vrel_arr = np.array(log_vrel)
-        #     ddq_arr = np.array(log_ddq)
-        #     ddq_nom_arr = np.array(log_ddq_nom)
-        #     delta_arr = np.array(log_delta)
-        #     # Fig: XYZ Position Tracking
-        #     fig1, axs1 = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
-        #     labels = ['x [m]', 'y [m]', 'z [m]']
-        #     for i in range(3):
-        #         axs1[i].plot(time_arr, pos_act_arr[:, i], 'r-', label='Actual')
-        #         axs1[i].plot(time_arr, pos_nom_arr[:, i], 'k--', label='Nominal')
-        #         axs1[i].set_ylabel(labels[i])
-        #         axs1[i].grid(True)
-        #     axs1[0].legend(loc='upper right')
-        #     axs1[0].set_title('Task Space Position Tracking')
-        #     axs1[2].set_xlabel('Time [s]')
-        #     plt.tight_layout()
-
-        #     # Fig: Distance and V_rel
-        #     fig2, ax1 = plt.subplots(figsize=(10, 6))
-        #     ax1.set_xlabel('Time [s]')
-        #     ax1.set_ylabel('Min Distance [m]', color='r')
-        #     ax1.plot(time_arr, dist_arr, 'r-', label='Distance')
-        #     ax1.tick_params(axis='y', labelcolor='r')
-        #     ax1.grid(True)
-            
-        #     ax2 = ax1.twinx()
-        #     ax2.set_ylabel('V_rel [m/s]', color='g')
-        #     ax2.plot(time_arr, vrel_arr, 'g-', label='V_rel')
-        #     ax2.axhline(y=-v_pfl, color='k', linestyle=':', label=f'-v_PFL ({-v_pfl})')
-        #     ax2.tick_params(axis='y', labelcolor='g')
-            
-        #     lines1, labels1 = ax1.get_legend_handles_labels()
-        #     lines2, labels2 = ax2.get_legend_handles_labels()
-        #     ax2.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
-        #     plt.title('Obstacle: Min Distance & Relative Velocity')
-        #     plt.tight_layout()
-
-        #     # Fig: CBF 
-        #     plt.figure(figsize=(10, 6))
-        #     plt.plot(time_arr, log_h, 'r', label='h_min')
-        #     plt.axhline(0, color='k', linestyle='--')
-        #     plt.ylabel('h value')
-        #     plt.title('Control Barrier Function')
-        #     plt.legend()
-        #     plt.grid(True)
-            
-
-        #     # Fig: Joint Accelerations
-        #     plt.figure(figsize=(10, 6))
-        #     #colors = ['r', 'g', 'b', 'c', 'm', 'y']
-        #     #for j in range(model.nq):
-        #        # plt.plot(time_arr, ddq_arr[:, j], color=colors[j % len(colors)], label=f'ddq_{j}')
-        #     plt.plot(time_arr, ddq_arr[:,-1], label=f'ddq')
-        #     plt.plot(time_arr, ddq_nom_arr[:,-1], label = f'ddq_des' )
-        #     plt.xlabel('Time [s]')
-        #     plt.ylabel('Joint Acc [rad/s^2]')
-        #     plt.title('Joint Accelerations')
-        #     plt.legend(ncol=3)
-        #     plt.grid(True)
-        #     plt.tight_layout()
-            
-            
-        #     # Fig: DS_Time Scaling
-        #     plt.figure(figsize=(10, 6))
-        #     plt.plot(time_arr, ds_time_arr , 'r', label='ds_traj_time')
-        #     plt.axhline(0, color='k', linestyle='--')
-        #     plt.xlabel('time')
-        #     plt.ylabel('DS_traj_time')
-        #     plt.title('DS_traj_time')
-        #     plt.legend()
-        #     plt.grid(True)
-            
-        #     # Fig: Delta
-        #     plt.figure(figsize=(10, 6))
-        #     plt.plot(time_arr, delta_arr , 'r' )
-        #     plt.axhline(0, color='k', linestyle='--')
-        #     plt.xlabel('time')
-        #     plt.ylabel('Delta')
-        #     plt.title('Delta')
-        #     plt.legend()
-        #     plt.grid(True)
-            
-            
-
-        #     plt.show()
         if len(log_time) > 0:
             print("\nSimulation ended. Generating Thesis Plots...")
             
@@ -637,8 +444,8 @@ def main():
             # 2. Raccogliamo i parametri usati nel controllo
             config = {
                 'v_pfl': v_pfl,
-                'a_s': as_param,
-                'Tr': Tr_param,
+                'a_s': a_s,
+                'Tr': Tc,
                 'v_max': v_rel_max
             }
             
