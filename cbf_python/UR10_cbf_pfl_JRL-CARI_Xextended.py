@@ -12,7 +12,7 @@ from visualization_daemon import VisualizationDaemon
 from sharework import loadSharework
 # from optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
 
-from interpolator import SegmentedSE3Trap
+from interpolator import SegmentedSE3Trap, SegmentedSE3MinJerk
 from joint_interpolator import SegmentedJointTrap
 from pinocchio import SE3
 from VisualizationClass import ThesisPlotter
@@ -110,7 +110,10 @@ def main():
     Kd_rot = np.array([1, 1, 1]) * 2.0 * xi * wn
     
     #planner_cart = SegmentedSE3Trap(vlin_max=0.06, vang_max=0.12, alin_max=1.8, aang_max=2.0)
-    planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=0.8, alin_max=1.8, aang_max=2.0)
+    
+    #planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=0.8, alin_max=1.8, aang_max=2.0)
+    planner_cart = SegmentedSE3MinJerk(vlin_max=0.6, vang_max=0.8, alin_max=1.8, aang_max=2.0)
+    
     #planner_cart = SegmentedSE3Trap(vlin_max=0.1, vang_max=0.3, alin_max=0.8, aang_max=0.5)
     # planner_cart = SegmentedSE3Trap(vlin_max=2.5, vang_max=3, alin_max=80, aang_max=50)
     q_start = first_joint_position.copy()
