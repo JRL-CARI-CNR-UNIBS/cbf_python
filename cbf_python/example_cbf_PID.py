@@ -30,8 +30,8 @@ from PID_cbf_task_controller import UR10CBFController
 import csv_publishers
 import threading
 USE_BRIDGE = False
-LOG_DATA = False
-log_path = "resullts/simulation/PID"
+LOG_DATA = True
+#log_path = "resullts/simulation/PID"
 stop_event = threading.Event()
 duration  = 150.0
 def _on_sigint_with_bridge(bridge, signum, frame):

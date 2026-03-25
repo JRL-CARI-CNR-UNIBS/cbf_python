@@ -21,7 +21,7 @@ from VisualizationClass import ThesisPlotter
 USE_BRIDGE = False  # Set to True to use the real robot bridge, False for fake data
 
 # QP constraints Parameters
-gamma_param =5.0
+gamma_param =10.0
 Dq_MAX = np.pi * np.array([1,1,1,1,1,1], dtype=np.float64) * np.pi
 DDq_MAX = np.pi**2*5
 
@@ -33,6 +33,9 @@ def main():
     a_s = safety_utilis.a_s
     v_pfl = safety_utilis.v_pfl
     eps_track = safety_utilis.traj_max_err
+    v_max = safety_utilis.v_max
+    a_s = safety_utilis.a_s
+
     # Model Setup
     UR10E_JOINTS = [
         "ur10e_shoulder_pan_joint", "ur10e_shoulder_lift_joint", "ur10e_elbow_joint",
@@ -83,7 +86,6 @@ def main():
         first_joint_position = home
 
     # Controller Initialization
-    ctrl_prof = None
     planner_joint = None
     planner_cart = None
     
@@ -102,8 +104,8 @@ def main():
 
 
     print("Control Mode: Manual QP")
-    wn = 100.0
-    xi = 0.3
+    wn =50
+    xi = 0.7
     Kp_tra = np.array([1, 1, 1]) * wn ** 2
     Kd_tra = np.array([1, 1, 1]) * 2.0 * xi * wn
     Kp_rot = np.array([1, 1, 1]) * wn ** 2
@@ -111,8 +113,8 @@ def main():
     
     #planner_cart = SegmentedSE3Trap(vlin_max=0.06, vang_max=0.12, alin_max=1.8, aang_max=2.0)
     
-    #planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=0.8, alin_max=1.8, aang_max=2.0)
-    planner_cart = SegmentedSE3MinJerk(vlin_max=0.6, vang_max=0.8, alin_max=1.8, aang_max=2.0)
+    #planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=0.8, alin_max = 0.8, aang_max=2.0)
+    planner_cart = SegmentedSE3MinJerk(vlin_max=1, vang_max=0.8, alin_max=0.8, aang_max=2.0)
     
     #planner_cart = SegmentedSE3Trap(vlin_max=0.1, vang_max=0.3, alin_max=0.8, aang_max=0.5)
     # planner_cart = SegmentedSE3Trap(vlin_max=2.5, vang_max=3, alin_max=80, aang_max=50)
@@ -206,7 +208,7 @@ def main():
             
             # Time Scaling ds(h, err)
             
-            Ds_target = np.clip(safety_utilis.compute_ds_scaling(current_dist_min, tracking_error, 0.1), 0, 1)
+            Ds_target = np.clip(safety_utilis.compute_ds_scaling(current_dist_min, tracking_error - delta, 0.1), 0, 1)
             
             DDtrajectory_time = 5.0 * (Ds_target - Dtrajectory_time)
                 
@@ -348,7 +350,7 @@ def main():
             # Matrici per problema QP sull'accelerazione
             P_acc = J.T @ J + 1e-6 * np.eye(model.nq)
             b_acc = (J.T @ (dtwist_des - dJ @ dq)).flatten()
-            ddq_nom = safety_utilis.damped_pinv_svd(J) @ (dtwist_des - dJ @ dq)
+            ddq_nom = safety_utilis.damped_pinv_svd(J, lam = 2e-3) @ (dtwist_des - dJ @ dq)
             
             # Matrici per problema QP su delta
             w_delta = 100.0; w_dyn_delta = 5000.0
