@@ -75,6 +75,7 @@ def main():
 
         
         csv_path = "/home/nyquist/projects/tesisti/agnelli/cbf_python/skeletons_csv/skeleton_agnelli_1.csv"
+        #csv_path = "/home/nyquist/projects/tesisti/agnelli/cbf_python/skeletons_csv/skeleton_vectors_14_NORMAL_TEST1.csv"
         bridge = FakeCommandBridge(UR10E_JOINTS, csv_path=csv_path, Tworld_to_cam=T_wc, slowdown_factor=1.0, t0=0.0)
         first_joint_position = home
 
@@ -97,7 +98,7 @@ def main():
     Kp_rot = np.array([1, 1, 1]) * wn ** 2
     Kd_rot = np.array([1, 1, 1]) * 2.0 * xi * wn
     
-    planner_cart = SegmentedSE3Trap(vlin_max=1.0, vang_max=0.8, alin_max=0.8, aang_max=2.0)
+    planner_cart = SegmentedSE3Trap(vlin_max=2.5, vang_max=0.8, alin_max=0.8, aang_max=2.0)
     
     q_start = first_joint_position.copy()
     q10 = np.array([31.0, -78.0, 115.0, -127.0, 86.0, -32.0]) * np.pi / 180.0
@@ -122,7 +123,7 @@ def main():
     renderer.publishPath(planner_cart.publishPath())
 
     # Initialization QPclass
-    qp_solver = QPSolver(model.nq, Tc, DDq_MAX, Dq_MAX, eps_track)
+    qp_solver = QPSolver(model.nq, Tc, DDq_MAX, Dq_MAX, eps_track, w_delta=100.0, w_dds=1.0)
     qp_solver.enable_velocity_limits = True
     qp_solver.enable_delta_dynamics = True
     qp_solver.enable_scaling_dynamics = True
@@ -202,8 +203,8 @@ def main():
             Jlin = J[:3, :]
             dJlin = dJ[:3, :]
 
-            ks = 2
-            d_safe = 0.05
+            ks = 5.0
+            d_safe = 0.1
             s_dot_target = 1.0 / (1.0 + np.exp(-100 * (current_dist_min - d_safe)))
             s_ddot_des = ks * (s_dot_target - Dtrajectory_time)
 

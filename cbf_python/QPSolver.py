@@ -2,7 +2,7 @@ import numpy as np
 import quadprog
 
 class QPSolver:
-    def __init__(self, nq, Tc, DDq_MAX, Dq_MAX, eps_track):
+    def __init__(self, nq, Tc, DDq_MAX, Dq_MAX, eps_track, w_delta = 1e5, w_dds = 10.0):
         self.nq = nq
         self.nv = nq + 2  # Variabili: [ddq(0:5), delta(6), s_ddot(7)]
         self.Tc = Tc
@@ -11,8 +11,8 @@ class QPSolver:
         self.eps_track = eps_track
         
         # --- TUNING PESI E LIMITI DINAMICI ---
-        self.w_delta = 1e5
-        self.w_dds = 5.0
+        self.w_delta = w_delta
+        self.w_dds = w_dds
         
         self.s_ddot_decel_max = -15.0
         self.s_ddot_accel_max = 0.5
