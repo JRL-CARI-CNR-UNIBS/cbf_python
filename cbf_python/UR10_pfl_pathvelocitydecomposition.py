@@ -142,6 +142,9 @@ def main():
     h_prev = 100.0
     delta_prev = 0.0
     
+    current_dist_min = 100.0
+
+    
     print(f"Starting Simulation. Duration: 60s.")
 
     try:
@@ -200,7 +203,9 @@ def main():
             dJlin = dJ[:3, :]
 
             ks = 2
-            s_ddot_des = ks * (1.0 - Dtrajectory_time)
+            d_safe = 0.05
+            s_dot_target = 1.0 / (1.0 + np.exp(-100 * (current_dist_min - d_safe)))
+            s_ddot_des = ks * (s_dot_target - Dtrajectory_time)
 
             #Qp solver setup
             qp_solver.reset_constraints()

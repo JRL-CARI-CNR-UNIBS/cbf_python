@@ -49,7 +49,7 @@ def main():
     viz.initViewer(open=True)
     viz.loadViewerModel()
     
-    # Visualizziamo solo le mani (2 ostacoli)
+    
     for i in range(20):
         viz.viewer[f"obstacle_{i}"].set_object(mgeom.Sphere(0.1), mgeom.MeshLambertMaterial(color=0xFF0000))
     viz.viewer["goal"].set_object(mgeom.Box([0.2, 0.2, 0.02]), mgeom.MeshLambertMaterial(color=0x00FF00))
