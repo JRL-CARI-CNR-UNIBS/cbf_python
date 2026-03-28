@@ -28,8 +28,8 @@ DDq_MAX = np.pi**2*5
 
 # MAIN
 def main():
-    safety_utilis = PFLSafetyUtils(Tc=0.005, a_s=2.5, v_pfl=0.25, v_max=2.0, rho=20.0, traj_max_err=0.1)
-    Tc = safety_utilis.Tc
+    safety_utilis = PFLSafetyUtils(Tr=0.15, a_s=2.5, v_pfl=0.25, v_max=2.0, rho=20.0, traj_max_err=0.1)
+    Tc = 2e-3
     a_s = safety_utilis.a_s
     v_pfl = safety_utilis.v_pfl
     eps_track = safety_utilis.traj_max_err
@@ -90,8 +90,8 @@ def main():
     print("Control Mode: Path-Velocity Decomposition QP")
     
     # Guadagni smorzati per un comportamento collaborativo
-    wn = 40.0
-    xi = 1.0
+    wn = 100
+    xi = 0.7
     Kp_tra = np.array([1, 1, 1]) * wn ** 2
     Kd_tra = np.array([1, 1, 1]) * 2.0 * xi * wn
     Kp_rot = np.array([1, 1, 1]) * wn ** 2

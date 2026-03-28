@@ -11,9 +11,9 @@ class PFLSafetyUtils:
     rho : smothness dell'approssimazione softmax (maggiore rho più accuratezza)
     limit_err: errore massimo sul tracking della traiettoria
     """
-    def __init__(self, Tc=0.002, a_s=2.5, v_pfl=0.25, v_max=2.0, rho=20.0, traj_max_err=0.1):
+    def __init__(self, Tr=0.002, a_s=2.5, v_pfl=0.25, v_max=2.0, rho=20.0, traj_max_err=0.1):
         # Parametri Fisici e Normativi
-        self.Tc = Tc
+        self.Tr = Tr #tempo di recupero (tempo di reazione del sistema di controllo)
         self.a_s = a_s
         self.v_pfl = v_pfl
         self.v_max = v_max
@@ -32,12 +32,12 @@ class PFLSafetyUtils:
         utilizzando l'operatore di aggregazione liscia SoftMax.
         """
         # 1. Barriera di Frenata
-        h_br = d - (-v_rel * self.Tc + (v_rel**2) / (2.0 * abs(self.a_s)))
-        grad_br = np.array([1.0, self.Tc - v_rel / self.a_s, 0.0])
+        h_br = d - (-v_rel * self.Tr + (v_rel**2) / (2.0 * abs(self.a_s)))
+        grad_br = np.array([1.0, self.Tr - v_rel / self.a_s, 0.0])
         
         # 2. Barriera PFL (impatto ammissibile)
-        h_pfl = (self.v_pfl + v_rel) * self.Tc
-        grad_pfl = np.array([0.0, self.Tc, 0.0])
+        h_pfl = (self.v_pfl + v_rel) * self.Tr
+        grad_pfl = np.array([0.0, self.Tr, 0.0])
 
         # Aggregazione SoftMax con log-sum-exp trick per evitare overflow
         max_inner = max(h_br, h_pfl)

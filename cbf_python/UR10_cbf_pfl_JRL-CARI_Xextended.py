@@ -28,8 +28,8 @@ DDq_MAX = np.pi**2*5
 # MAIN
 def main():
 
-    safety_utilis = PFLSafetyUtils(Tc=0.005, a_s=2.5, v_pfl=0.25, v_max=2.0, rho=20.0, traj_max_err=0.1)
-    Tc = safety_utilis.Tc
+    safety_utilis = PFLSafetyUtils(Tr = 0.15, a_s=2.5, v_pfl=0.25, v_max=2.0, rho=20.0, traj_max_err=0.1)
+    Tc = 2e-3
     a_s = safety_utilis.a_s
     v_pfl = safety_utilis.v_pfl
     eps_track = safety_utilis.traj_max_err
@@ -350,7 +350,7 @@ def main():
             # Matrici per problema QP sull'accelerazione
             P_acc = J.T @ J + 1e-6 * np.eye(model.nq)
             b_acc = (J.T @ (dtwist_des - dJ @ dq)).flatten()
-            ddq_nom = safety_utilis.damped_pinv_svd(J, lam = 2e-3) @ (dtwist_des - dJ @ dq)
+            ddq_nom = safety_utilis.damped_pinv_svd(J, lam = 2e-3) @ (dtwist_des + nom_twist * DDtrajectory_time  - dJ @ dq)
             
             # Matrici per problema QP su delta
             w_delta = 100.0; w_dyn_delta = 5000.0
