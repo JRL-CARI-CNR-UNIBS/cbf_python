@@ -2,7 +2,7 @@ import ast
 
 from Controller.Numba_scripts.ssm_cbf_acc import *
 import pinocchio as pin
-from scripts.util.test_utils import generate_velocity
+from util.test_utils import generate_velocity
 from Controller.gaussian_controller import GaussianControllerConfig, GaussianSet, GaussianController
 from Controller.dynamic_params_controllers import PolynomialControllerConfig
 import pandas as pd

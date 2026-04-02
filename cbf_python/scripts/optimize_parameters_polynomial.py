@@ -1,9 +1,11 @@
+import math
+
 import optuna
 import optunahub
 import numpy as np
 import time
 import pinocchio as pin
-from scripts.util.joint_interpolator import SegmentedJointTrap
+from util.joint_interpolator import SegmentedJointTrap
 from sharework import loadSharework
 from Command_bridge.fake_command_bridge import FakeCommandBridge
 from Controller.optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
@@ -11,11 +13,11 @@ from multiprocessing import Process, Queue
 from queue import Empty
 from Controller.dynamic_params_controllers import (PolynomialControllerConfig, PolynomialOptimalController,
                                               )
-from scripts.util.test_utils import compute_ee_pose
-from scripts.util.gaussian_process_util import save_data_multiobj
+from util.test_utils import compute_ee_pose
+from util.gaussian_process_util import save_data_multiobj
 from pathlib import Path
 import pandas as pd
-from scripts.util.gaussian_process_util import generate_obs_state_h_fixed, compute_required_d, generate_target_h, save_data_multiobj
+from util.gaussian_process_util import generate_obs_state_h_fixed, compute_required_d, generate_target_h, save_data_multiobj
 spawn_freq = 10
 trial_duration = 1500.0
 n_trials = 6000
@@ -47,22 +49,24 @@ def make_objective():
         cfg.lambda_f_scaling = trial.suggest_float("lambda_f_scaling", 10, 1e5, log=True)
         cfg.gamma_f = trial.suggest_float("gamma_f", 0.1, 20, log=True)
 
-        cfg.m_pos = trial.suggest_float("m_pos", 1, 15, log=True)
-        cfg.m_vel = trial.suggest_float("m_vel", 1, 15, log=True)
-        cfg.m_acc = trial.suggest_float("m_acc", 1, 15, log=True)
-        cfg.m_scaling = trial.suggest_float("m_scaling", 1, 15, log=True)
-        cfg.m_gamma = trial.suggest_float("m_gamma", 1, 15, log=True)
+        cfg.m_pos = trial.suggest_float("m_pos", 1, 10, log=True)
+        cfg.m_vel = trial.suggest_float("m_vel", 1, 10, log=True)
+        cfg.m_acc = trial.suggest_float("m_acc", 1, 10, log=True)
+        cfg.m_scaling = trial.suggest_float("m_scaling", 1, 10, log=True)
+        cfg.m_gamma = trial.suggest_float("m_gamma", 1, 10, log=True)
 
         # cfg.n_pos = trial.suggest_float("n_pos", 1e-4, 1, log=True)
         # cfg.n_vel= trial.suggest_float("n_vel", 1e-4, 1, log=True)
         # cfg.n_acc = trial.suggest_float("n_acc", 1e-4, 1, log=True)
         # cfg.n_scaling = trial.suggest_float("n_scaling", 1e-4, 1, log=True)
         # cfg.n_gamma = trial.suggest_float("n_gamma", 1e-4, 1, log=True)
-        cfg.n_pos = trial.suggest_float("n_pos",  1e-4, cfg.m_pos, log=True)
-        cfg.n_vel= trial.suggest_float("n_vel",  1e-4, cfg.m_vel, log=True)
-        cfg.n_acc = trial.suggest_float("n_acc",  1e-4, cfg.m_acc, log=True)
-        cfg.n_scaling = trial.suggest_float("n_scaling",  1e-4, cfg.m_scaling, log=True)
-        cfg.n_gamma = trial.suggest_float("n_gamma",  1e-4, cfg.m_gamma, log=True)
+        cfg.n_pos = trial.suggest_float("n_pos", 1e-4, 10, log=True)
+        cfg.n_vel= trial.suggest_float("n_vel", 1e-4, 10, log=True)
+        cfg.n_acc = trial.suggest_float("n_acc", 1e-4, 10, log=True)
+        cfg.n_scaling = trial.suggest_float("n_scaling", 1e-4, 10, log=True)
+        cfg.n_gamma = trial.suggest_float("n_gamma", 1e-4, 10, log=True)
+        
+
         #
         # cfg.n_pos = 0.0
         # cfg.n_vel= 0.0
@@ -77,11 +81,11 @@ def make_objective():
         # cfg.w_acc = trial.suggest_float("w_acc", 1e-9, 1, log = True)
         # cfg.w_scaling = trial.suggest_float("w_scaling", 1e-9, 1, log = True)
         # cfg.w_gamma = trial.suggest_float("w_gamma", 1e-9, 1, log = True)        
-        cfg.w_pos = trial.suggest_float("w_pos", 1e-9, 15, log = True)
-        cfg.w_vel = trial.suggest_float("w_vel", 1e-9, 15, log = True)
-        cfg.w_acc = trial.suggest_float("w_acc", 1e-9, 15, log = True)
-        cfg.w_scaling = trial.suggest_float("w_scaling",1e-9, 15, log = True)
-        cfg.w_gamma = trial.suggest_float("w_gamma", 1e-9, 15, log = True)
+        cfg.w_pos = trial.suggest_float("w_pos", 1e-9, 10, log = True)
+        cfg.w_vel = trial.suggest_float("w_vel", 1e-9, 10, log = True)
+        cfg.w_acc = trial.suggest_float("w_acc", 1e-9, 10, log = True)
+        cfg.w_scaling = trial.suggest_float("w_scaling",1e-9, 10, log = True)
+        cfg.w_gamma = trial.suggest_float("w_gamma", 1e-9, 10, log = True)
 
         # cfg.w_pos = 0.0
         # cfg.w_vel = 0.0
@@ -267,9 +271,10 @@ def run_episode(Tc=2e-3, duration=500.0, cfg = PolynomialControllerConfig() ):
                     on_target_count += 1
                     prec_target = i
                     break
-        except Exception:
+        except Exception as e:
             # Penalize infeasible or divergent QP
             print("QP failed")
+            print (e)
             return 1.0, -1.0, 10.0, 1.0,0.0
         t += Tc
         
@@ -352,11 +357,11 @@ study = optuna.create_study(
     storage=storage,
     #load_if_exists=True,
     #study_name=f"dynamic_params_polynomial_{time.strftime('%Y%m%d-%H%M%S')}",
-    study_name=f"dynamic_params_polynomial_convex_{time.strftime('%Y%m%d-%H%M%S')}",
+    study_name=f"dynamic_params_polynomial_general_case_{time.strftime('%Y%m%d-%H%M%S')}",
     load_if_exists=True,
 
 )
 study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error", "low_scale_rate", "lap count"])
 study.optimize(make_objective(), n_trials=n_trials, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
-save_data_multiobj(study, filename="Dynamic_parameters_results.csv")
+save_data_multiobj(study, filename="Dynamic_parameters_general_case_results.csv")
     # print (run_episode(1e3,1e3,1e3,1e-3,5,1))
