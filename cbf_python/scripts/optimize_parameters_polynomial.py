@@ -47,11 +47,18 @@ def make_objective():
         cfg.lambda_f_scaling = trial.suggest_float("lambda_f_scaling", 10, 1e5, log=True)
         cfg.gamma_f = trial.suggest_float("gamma_f", 0.1, 20, log=True)
 
-        cfg.n_pos = trial.suggest_float("n_pos", 1e-4, 1, log=True)
-        cfg.n_vel= trial.suggest_float("n_vel", 1e-4, 1, log=True)
-        cfg.n_acc = trial.suggest_float("n_acc", 1e-4, 1, log=True)
-        cfg.n_scaling = trial.suggest_float("n_scaling", 1e-4, 1, log=True)
-        cfg.n_gamma = trial.suggest_float("n_gamma", 1e-4, 1, log=True)
+        # cfg.n_pos = trial.suggest_float("n_pos", 1e-4, 1, log=True)
+        # cfg.n_vel= trial.suggest_float("n_vel", 1e-4, 1, log=True)
+        # cfg.n_acc = trial.suggest_float("n_acc", 1e-4, 1, log=True)
+        # cfg.n_scaling = trial.suggest_float("n_scaling", 1e-4, 1, log=True)
+        # cfg.n_gamma = trial.suggest_float("n_gamma", 1e-4, 1, log=True)
+
+        cfg.n_pos = 0.0
+        cfg.n_vel= 0.0
+        cfg.n_acc = 0.0
+        cfg.n_scaling = 0.0
+        cfg.n_gamma = 0.0
+
 
         cfg.m_pos = trial.suggest_float("m_pos", 1, 10, log=True)
         cfg.m_vel = trial.suggest_float("m_vel", 1, 10, log=True)
@@ -59,12 +66,17 @@ def make_objective():
         cfg.m_scaling = trial.suggest_float("m_scaling", 1, 10, log=True)
         cfg.m_gamma = trial.suggest_float("m_gamma", 1, 10, log=True)
 
-        cfg.w_pos = trial.suggest_float("w_pos", 1e-9, 1, log = True)
-        cfg.w_vel = trial.suggest_float("w_vel", 1e-9, 1, log = True)
-        cfg.w_acc = trial.suggest_float("w_acc", 1e-9, 1, log = True)
-        cfg.w_scaling = trial.suggest_float("w_scaling", 1e-9, 1, log = True)
-        cfg.w_gamma = trial.suggest_float("w_gamma", 1e-9, 1, log = True)        
+        # cfg.w_pos = trial.suggest_float("w_pos", 1e-9, 1, log = True)
+        # cfg.w_vel = trial.suggest_float("w_vel", 1e-9, 1, log = True)
+        # cfg.w_acc = trial.suggest_float("w_acc", 1e-9, 1, log = True)
+        # cfg.w_scaling = trial.suggest_float("w_scaling", 1e-9, 1, log = True)
+        # cfg.w_gamma = trial.suggest_float("w_gamma", 1e-9, 1, log = True)        
         
+        cfg.w_pos = 0.0
+        cfg.w_vel = 0.0
+        cfg.w_acc = 0.0
+        cfg.w_scaling = 0.0
+        cfg.w_gamma = 0.0
       
 
         cfg.lambda_pos = cfg.lambda_0_pos
@@ -87,7 +99,7 @@ def make_objective():
             # For directions: [minimize, maximize, minimize, minimize]
             return (1.0, -1.0, 1.0, 1.1, 0.0)
 
-        return (viol_rate, mean_scale, mean_traj_err, low_scale_rate, lap_count)
+        return viol_rate, mean_scale, mean_traj_err, low_scale_rate, lap_count
     return objective
 
 # Camera and bridge
@@ -207,7 +219,7 @@ def run_episode(Tc=2e-3, duration=500.0, cfg = PolynomialControllerConfig() ):
     count_move = 0
     Dtrajectory_time = 1.0
     while t < duration:
-        # obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed = t)
+        # obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles(elapsed = t)
         nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
         
         h_objective = generate_target_h(h_mean_ref, ref_std_dev)
@@ -329,7 +341,7 @@ study = optuna.create_study(
     storage=storage,
     #load_if_exists=True,
     #study_name=f"dynamic_params_polynomial_{time.strftime('%Y%m%d-%H%M%S')}",
-    study_name=f"dynamic_params_polynomial_20260216-094358",
+    study_name=f"dynamic_params_polynomial_convex_{time.strftime('%Y%m%d-%H%M%S')}",
     load_if_exists=True,
 
 )
