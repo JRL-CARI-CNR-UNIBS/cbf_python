@@ -18,7 +18,7 @@ import pandas as pd
 from scripts.util.gaussian_process_util import generate_obs_state_h_fixed, compute_required_d, generate_target_h, save_data_multiobj
 spawn_freq = 10
 trial_duration = 1500.0
-n_trials = 4000
+n_trials = 6000
 std_dev= 0.1
 h_mean_ref = 0.5
 ref_std_dev = 0.5
@@ -35,49 +35,60 @@ def make_objective():
         cfg = PolynomialControllerConfig(Tc = 2e-3)
 
         cfg.h_t = 1.0
-        cfg.lambda_0_pos = trial.suggest_float("lambda_0_pos", 100, 1e6, log=True)
+        cfg.lambda_0_pos = trial.suggest_float("lambda_0_pos", 10, 1e6, log=True)
         cfg.lambda_0_vel = trial.suggest_float("lambda_0_vel", 1, 1e4, log=True)
         cfg.lambda_0_acc = trial.suggest_float("lambda_0_acc", 1e-15, 1e-4, log=True)
         cfg.lambda_0_scaling = trial.suggest_float("lambda_0_scaling", 10, 1e5, log=True)
         cfg.gamma_0 = trial.suggest_float("gamma_0", 0.1, 20, log=True)
 
-        cfg.lambda_f_pos = trial.suggest_float("lambda_f_pos", 100, 1e6, log=True)
+        cfg.lambda_f_pos = trial.suggest_float("lambda_f_pos", 10, 1e6, log=True)
         cfg.lambda_f_vel = trial.suggest_float("lambda_f_vel", 1, 1e4, log=True)
         cfg.lambda_f_acc = trial.suggest_float("lambda_f_acc", 1e-15, 1e-4, log=True)
         cfg.lambda_f_scaling = trial.suggest_float("lambda_f_scaling", 10, 1e5, log=True)
         cfg.gamma_f = trial.suggest_float("gamma_f", 0.1, 20, log=True)
+
+        cfg.m_pos = trial.suggest_float("m_pos", 1, 15, log=True)
+        cfg.m_vel = trial.suggest_float("m_vel", 1, 15, log=True)
+        cfg.m_acc = trial.suggest_float("m_acc", 1, 15, log=True)
+        cfg.m_scaling = trial.suggest_float("m_scaling", 1, 15, log=True)
+        cfg.m_gamma = trial.suggest_float("m_gamma", 1, 15, log=True)
 
         # cfg.n_pos = trial.suggest_float("n_pos", 1e-4, 1, log=True)
         # cfg.n_vel= trial.suggest_float("n_vel", 1e-4, 1, log=True)
         # cfg.n_acc = trial.suggest_float("n_acc", 1e-4, 1, log=True)
         # cfg.n_scaling = trial.suggest_float("n_scaling", 1e-4, 1, log=True)
         # cfg.n_gamma = trial.suggest_float("n_gamma", 1e-4, 1, log=True)
+        cfg.n_pos = trial.suggest_float("n_pos",  1e-4, cfg.m_pos, log=True)
+        cfg.n_vel= trial.suggest_float("n_vel",  1e-4, cfg.m_vel, log=True)
+        cfg.n_acc = trial.suggest_float("n_acc",  1e-4, cfg.m_acc, log=True)
+        cfg.n_scaling = trial.suggest_float("n_scaling",  1e-4, cfg.m_scaling, log=True)
+        cfg.n_gamma = trial.suggest_float("n_gamma",  1e-4, cfg.m_gamma, log=True)
+        #
+        # cfg.n_pos = 0.0
+        # cfg.n_vel= 0.0
+        # cfg.n_acc = 0.0
+        # cfg.n_scaling = 0.0
+        # cfg.n_gamma = 0.0
 
-        cfg.n_pos = 0.0
-        cfg.n_vel= 0.0
-        cfg.n_acc = 0.0
-        cfg.n_scaling = 0.0
-        cfg.n_gamma = 0.0
 
-
-        cfg.m_pos = trial.suggest_float("m_pos", 1, 10, log=True)
-        cfg.m_vel = trial.suggest_float("m_vel", 1, 10, log=True)
-        cfg.m_acc = trial.suggest_float("m_acc", 1, 10, log=True)
-        cfg.m_scaling = trial.suggest_float("m_scaling", 1, 10, log=True)
-        cfg.m_gamma = trial.suggest_float("m_gamma", 1, 10, log=True)
 
         # cfg.w_pos = trial.suggest_float("w_pos", 1e-9, 1, log = True)
         # cfg.w_vel = trial.suggest_float("w_vel", 1e-9, 1, log = True)
         # cfg.w_acc = trial.suggest_float("w_acc", 1e-9, 1, log = True)
         # cfg.w_scaling = trial.suggest_float("w_scaling", 1e-9, 1, log = True)
         # cfg.w_gamma = trial.suggest_float("w_gamma", 1e-9, 1, log = True)        
-        
-        cfg.w_pos = 0.0
-        cfg.w_vel = 0.0
-        cfg.w_acc = 0.0
-        cfg.w_scaling = 0.0
-        cfg.w_gamma = 0.0
-      
+        cfg.w_pos = trial.suggest_float("w_pos", 1e-9, 15, log = True)
+        cfg.w_vel = trial.suggest_float("w_vel", 1e-9, 15, log = True)
+        cfg.w_acc = trial.suggest_float("w_acc", 1e-9, 15, log = True)
+        cfg.w_scaling = trial.suggest_float("w_scaling",1e-9, 15, log = True)
+        cfg.w_gamma = trial.suggest_float("w_gamma", 1e-9, 15, log = True)
+
+        # cfg.w_pos = 0.0
+        # cfg.w_vel = 0.0
+        # cfg.w_acc = 0.0
+        # cfg.w_scaling = 0.0
+        # cfg.w_gamma = 0.0
+        #
 
         cfg.lambda_pos = cfg.lambda_0_pos
         cfg.lambda_vel = cfg.lambda_0_vel
@@ -349,26 +360,3 @@ study.set_metric_names(["violation_rate", "mean_scaling", "mean_trajectory_error
 study.optimize(make_objective(), n_trials=n_trials, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
 save_data_multiobj(study, filename="Dynamic_parameters_results.csv")
     # print (run_episode(1e3,1e3,1e3,1e-3,5,1))
-
-
-''' 
-TRIAL BELLI delta variabile
-
-4999
-4780
-4789
-4845
-4706
-4630
-4558
-761
-'''
-
-''' 
-TRIAL BELLI delta fisso
-
-3083
-3289
-3978
-4937
-'''
