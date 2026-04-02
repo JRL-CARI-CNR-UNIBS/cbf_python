@@ -53,7 +53,7 @@ from scripts.util.bcf_utils import plot_lambdas
 stop_event = threading.Event()
 
 params_filename = "../parameters_set.csv"
-test_name = "Polynomial_convex_h_1"
+test_name = "Polynomial_convex_h_-0.1"
 set_ID = "3083_no_delta"
 duration = 15000.0
 
@@ -66,7 +66,7 @@ test_type = "O"
 
 PLOT_MEAN = False
 PLOT_LAMBDAS = False
-h_mean_ref = 1
+h_mean_ref = -0.1
 h_std_dev = 0.15
 v_ref = 1.0
 spawn_freq = 10

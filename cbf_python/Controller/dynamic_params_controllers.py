@@ -127,6 +127,78 @@ class PolynomialControllerConfig(ControllerConfig):
         axes[5].set_visible(False)
         plt.tight_layout()
 
+    """ Function to check that all lambdas are positive in the interval [0, h_t]"""
+    def check_config_integrity(self):
+        self.generate_poly_dict()
+        
+        for index in self.polynomial_dict.keys():
+            l_0 = self.polynomial_dict[index][0]
+            l_f = self.polynomial_dict[index][1]
+            n = self.polynomial_dict[index][2]
+            m = self.polynomial_dict[index][3]
+            w = self.polynomial_dict[index][4]
+            
+            # 1. Prevent ZeroDivisionError (constant weight)
+            if l_f == l_0:
+                if l_0 < 0:
+                    return False # The constant weight is already negative!
+                continue # Everything is fine, proceed to the next parameter
+
+            # 2. Safety check on exponents
+            if m == n:
+                continue # Avoid zero division if m and n are equal
+                
+            # Upper limit for w beyond which an overshoot occurs
+            w_upper_limit = m / (m - n)
+            
+            # 3. Calculate the extremum ONLY if w creates an undershoot or an overshoot
+            if w < 0 or w > w_upper_limit:
+                base = (w * n) / ((w - 1) * m)
+                
+                # Prevent Math Domain Error (extra safety)
+                if base > 0:
+                    y_ext = w * ((m - n) / m) * (base ** (n / (m - n)))
+                    
+                    # The comparison term is IDENTICAL in both cases
+                    comparison_term = -l_0 / (l_f - l_0)
+                    
+                    if l_f > l_0:
+                        # Increasing transition: risk of undershoot
+                        if y_ext < comparison_term:
+                            return False
+                    else:
+                        # Decreasing transition: risk of overshoot
+                        if y_ext > comparison_term:
+                            return False
+                            
+        return True
+    
+    def normalize_parameters(self):
+        """
+        Normalizes the polynomial parameters to ensure n <= m for all tasks.
+        If n > m, it swaps the exponents and inverts the weight (w = 1 - w).
+        The resulting mathematical curve remains strictly identical.
+        """
+        categories = ["pos", "vel", "acc", "scaling", "gamma"]
+        
+        for cat in categories:
+            # Retrieve current values
+            n = getattr(self, f"n_{cat}")
+            m = getattr(self, f"m_{cat}")
+            w = getattr(self, f"w_{cat}")
+            
+            # Check if normalization is needed
+            if n > m:
+                # Apply normalization rules
+                setattr(self, f"n_{cat}", m)
+                setattr(self, f"m_{cat}", n)
+                setattr(self, f"w_{cat}", 1.0 - w)
+                
+        # Update the internal dictionary with the newly normalized values
+        self.generate_poly_dict()
+
+
+
 class PolynomialOptimalController(BCFOptimalController):
 
     def __init__(self, model_wrapper, cfg: PolynomialControllerConfig, useCbf, keypoint_to_log = 7):
