@@ -170,6 +170,3 @@ def plot_lambdas(t_list, gamma_list, lambda_pos_list, lambda_vel_list, lambda_ac
     
     # Adjust layout to prevent overlapping labels
     plt.tight_layout()
-    
-    # Display the plots
-    plt.show()

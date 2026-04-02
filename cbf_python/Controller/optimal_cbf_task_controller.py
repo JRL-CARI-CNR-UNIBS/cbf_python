@@ -28,6 +28,13 @@ class ControllerConfig:
         default_factory=lambda: np.pi * np.array([1,1,1,1,1,1], dtype=np.float64) * np.pi*5.0
     )
 
+    # Dq_max: np.ndarray = field(
+    #     default_factory=lambda: np.pi * np.array([1, 1, 1, 1, 1, 1], dtype=np.float64)
+    # )
+    # DDq_max: np.ndarray = field(
+    #     default_factory=lambda: np.array([1, 1, 1, 1, 1, 1], dtype=np.float64) * 12.7
+    # )
+
     lambda_pos: float = 1.0e-2
     lambda_vel: float = 1.0e-2
     lambda_scaling: float = 1.0e3

@@ -30,9 +30,9 @@ from pinocchio.visualize import MeshcatVisualizer
 from scripts.util.joint_interpolator import SegmentedJointTrap
 from scripts.util.visualization_daemon import VisualizationDaemon
 from sharework import loadSharework
-from scripts.util.gaussian_process_util import generate_obs_state_h_fixed, compute_required_d, generate_target_h
+from scripts.util.gaussian_process_util import generate_obs_state_h_fixed, compute_required_d, generate_target_h, read_poly_config_data_from_csv
 from scripts.util.mean_visualizer import StochasticCBFVisualizer
-
+import matplotlib.pyplot as plt
 import functools
 
 import math
@@ -53,19 +53,20 @@ from scripts.util.bcf_utils import plot_lambdas
 stop_event = threading.Event()
 
 params_filename = "../parameters_set.csv"
+test_name = "Polynomial_convex_h_1"
 set_ID = "3083_no_delta"
-duration = 150.0
+duration = 15000.0
 
 USE_BRIDGE = False
 LOG_DATA = False
 
-SHOW_DATA = True
-SAVE_DATA = False
-test_type = "5"
+SHOW_DATA = False
+SAVE_DATA = True
+test_type = "O"
 
 PLOT_MEAN = False
-PLOT_LAMBDAS = True
-h_mean_ref = -0.1
+PLOT_LAMBDAS = False
+h_mean_ref = 1
 h_std_dev = 0.15
 v_ref = 1.0
 spawn_freq = 10
@@ -106,60 +107,18 @@ def main():
     cfg = PolynomialControllerConfig(Tc=Tc)
     # PAPER PARAMETERS
 
-    cfg.h_t = 2.0
+    cfg.h_t = 1.0
 
     df = pd.read_csv(params_filename)
 
+    read_poly_config_data_from_csv(cfg=cfg, filename = "../Dynamic_parameters_results.csv", trial_name= "dynamic_params_polynomial_convex")
 
-    cfg.lambda_0_pos = float(df.loc[df["ID"] == set_ID, "lambda_0_pos"].values[0])
-    cfg.lambda_0_vel = float(df.loc[df["ID"] == set_ID, "lambda_0_vel"].values[0]) 
-    cfg.lambda_0_acc =  float(df.loc[df["ID"] == set_ID, "lambda_0_acc"].values[0])
-    cfg.lambda_0_scaling = float(df.loc[df["ID"] == set_ID, "lambda_0_scaling"].values[0])
-    cfg.gamma_0 = float(df.loc[df["ID"] == set_ID, "gamma_0"].values[0])
-    # cfg.delta_0 = float(df.loc[df["ID"] == set_ID, "delta_0_deg"].values[0])
-
-    cfg.lambda_f_pos = float(df.loc[df["ID"] == set_ID, "lambda_f_pos"].values[0])
-    cfg.lambda_f_vel = float(df.loc[df["ID"] == set_ID, "lambda_f_vel"].values[0])
-    cfg.lambda_f_acc = float(df.loc[df["ID"] == set_ID, "lambda_f_acc"].values[0])
-    cfg.lambda_f_scaling = float(df.loc[df["ID"] == set_ID, "lambda_f_scaling"].values[0])
-    cfg.gamma_f = float(df.loc[df["ID"] == set_ID, "gamma_f"].values[0])
-    # cfg.delta_f = float(df.loc[df["ID"] == set_ID, "delta_f_deg"].values[0])
-
-    cfg.n_pos = float(df.loc[df["ID"] == set_ID, "n_pos"].values[0])
-    cfg.n_vel = float(df.loc[df["ID"] == set_ID, "n_vel"].values[0])
-    cfg.n_acc = float(df.loc[df["ID"] == set_ID, "n_acc"].values[0])
-    cfg.n_scaling = float(df.loc[df["ID"] == set_ID, "n_scaling"].values[0])
-    cfg.n_gamma = float(df.loc[df["ID"] == set_ID, "n_gamma"].values[0])
-    # cfg.n_delta = float(df.loc[df["ID"] == set_ID, "n_delta"].values[0])
-
-    cfg.m_pos = float(df.loc[df["ID"] == set_ID, "m_pos"].values[0])
-    cfg.m_vel = float(df.loc[df["ID"] == set_ID, "m_vel"].values[0])
-    cfg.m_acc = float(df.loc[df["ID"] == set_ID, "m_acc"].values[0])
-    cfg.m_scaling = float(df.loc[df["ID"] == set_ID, "m_scaling"].values[0])
-    cfg.m_gamma = float(df.loc[df["ID"] == set_ID, "m_gamma"].values[0])
-    # cfg.m_delta = float(df.loc[df["ID"] == set_ID, "m_delta"].values[0])
-
-    cfg.w_pos = float(df.loc[df["ID"] == set_ID, "w_pos"].values[0])
-    cfg.w_vel =  float(df.loc[df["ID"] == set_ID, "w_vel"].values[0])
-    cfg.w_acc = float(df.loc[df["ID"] == set_ID, "w_acc"].values[0])
-    cfg.w_scaling = float(df.loc[df["ID"] == set_ID, "w_scaling"].values[0])
-    cfg.w_gamma = float(df.loc[df["ID"] == set_ID, "w_gamma"].values[0])
-    # cfg.w_delta = float(df.loc[df["ID"] == set_ID, "w_delta"].values[0])
-
-
-    cfg.lambda_pos = cfg.lambda_0_pos
-    cfg.lambda_vel = cfg.lambda_0_vel
-    cfg.lambda_scaling = cfg.lambda_0_scaling
-    cfg.lambda_acc = cfg.lambda_0_acc
-    cfg.gamma = cfg.gamma_0
-    delta = cfg.delta_0
     delta = 4.5
 
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta)
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
-
-
+    print(f"config: {cfg}")
     ctrl = PolynomialOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
     gamma_list = []
     lambda_pos_list = []
@@ -190,12 +149,9 @@ def main():
 
         R = quat.toRotationMatrix()
 
-        if test_type == "0":
-            T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
-        else:
-            T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
+        T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
 
-        csv_path= "../skeleton_vectors/skeleton_vectors_14_NORMAL_TEST1.csv"
+        csv_path= "../skeleton_vectors/skeleton_vectors_22.csv"
         # csv_path= "../skeleton_vectors/skeleton_vectors_22.csv"
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
@@ -554,7 +510,8 @@ def main():
             trajectory_error_sum += out["trajectory_error"]
             if out["Dtrajectory_time"] < scaling_threshold:
                 low_scale_count += 1
-
+            if cycles % 5000 == 0:
+                print(f"STILL ALIVE! T: {t:.2f}s")
             rest = Tc - elapsed
             if rest > 0:
                 if SHOW_DATA:
@@ -653,7 +610,7 @@ def main():
 
         # I dati da salvare (calcolati come nel tuo esempio)
         row_data = {
-            "test_type": f"TEST_POLYNOMIAL_ID_{set_ID}",
+            "test_type": test_name,
             "lambda_pos": cfg.lambda_pos,
             "lambda_vel": cfg.lambda_vel,
             "lambda_scaling": cfg.lambda_scaling,
@@ -684,5 +641,7 @@ def main():
 
     if PLOT_LAMBDAS:
         plot_lambdas(t_list, gamma_list, lambda_pos_list, lambda_vel_list, lambda_acc_list, lambda_scaling_list)
+        cfg.plot_lambdas()
+        plt.show()
 if __name__ == "__main__":
     main()

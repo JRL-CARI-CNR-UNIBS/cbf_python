@@ -64,7 +64,7 @@ h_mean_ref = 0.5
 v_ref = 1
 spawn_freq = 10
 h_std_dev = 0.5
-test_name= f"TEST_OBSTRUCTIVE_h_mean_{h_mean_ref:.2f}_v_mean_{v_ref:.2f}_high_par"
+test_name= f"TEST_OBSTRUCTIVE_h_mean_{h_mean_ref:.2f}_v_mean_{v_ref:.2f}_paper_par"
 # d_objective = 0.1
 d_objective = generate_d_value(h_mean_ref, 0.1)
 def _on_sigint_with_bridge():
@@ -200,15 +200,15 @@ def main():
 
     planner.addWayPoint(q)
     planner.addWayPoint(q10)
-    # planner.addWayPoint(q20)
-    # planner.addWayPoint(q10)
+    planner.addWayPoint(q20)
+    planner.addWayPoint(q10)
     planner.addWayPoint(q22)
     planner.addWayPoint(q25)
     planner.addWayPoint(q30)
-    # planner.addWayPoint(q40)
-    # planner.addWayPoint(q30)
+    planner.addWayPoint(q40)
+    planner.addWayPoint(q30)
     planner.addWayPoint(q)
-    n_wp = 6
+    n_wp = 10
     configs = {
         "q": q,
         "q10": q10,

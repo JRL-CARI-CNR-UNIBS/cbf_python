@@ -52,10 +52,10 @@ params_filename = "../parameters_set.csv"
 set_ID = "0"
 duration = 15000.0
 
-SHOW_DATA = True
+SHOW_DATA = False
 USE_BRIDGE = False
 LOG_DATA = False
-SAVE_DATA = False
+SAVE_DATA = True
 
 parameters_type = "0"
 
@@ -63,14 +63,14 @@ stop_event = threading.Event()
 
 
 
-h_cfg = "article"
-v_cfg = "article"
-# h_cfg = 1
-# v_cfg = 1
+# h_cfg = "article"
+# v_cfg = "article"
+h_cfg = -0.1
+v_cfg = 1
 
 
 
-test_name= f"TEST_OBSTRUCTIVE_paper_scenario_low_par"
+test_name= "recorded_skeleton_low_par"
 # d_objective = 0.1
 
 def _on_sigint_with_bridge(bridge, signum, frame):
@@ -148,7 +148,7 @@ def main():
         else:
             T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
 
-        csv_path= "../skeleton_vectors/skeleton_vectors_14_NORMAL_TEST1.csv"        #csv_publishers.swap_csv(csv_in_path, csv_out_path, 7, 17)
+        csv_path= "../skeleton_vectors/skeleton_vectors_22.csv"        #csv_publishers.swap_csv(csv_in_path, csv_out_path, 7, 17)
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
             csv_path=csv_path,
@@ -256,7 +256,7 @@ def main():
         q = home.copy()
     # 2 · add way‑points -------------------------------------------
     plan_path(planner,q)
-    n_wp = 6
+    n_wp = 10
     cartesian_configs = compute_cartesian_poses(q, model)
 
     T_total = planner.computeTime()

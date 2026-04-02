@@ -1,6 +1,7 @@
 from Controller.optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
 from dataclasses import dataclass, field
 import numpy as np
+import matplotlib.pyplot as plt
 def compute_generic_lambda(h, ht, params):
     lambda_0 = params[0]
     lambda_f = params[1]
@@ -21,35 +22,30 @@ class PolynomialControllerConfig(ControllerConfig):
     lambda_0_acc: float = 0.0
     lambda_0_scaling: float = 0.0
     gamma_0: float = 0.0
-    delta_0: float = 0.0
 
     lambda_f_pos : float = 0.0
     lambda_f_vel : float = 0.0
     lambda_f_acc : float= 0.0
     lambda_f_scaling : float = 0.0
     gamma_f : float = 0.0
-    delta_f : float = 0.0
 
     n_pos : float = 0.0
     n_vel : float = 0.0
     n_acc : float= 0.0
     n_scaling : float = 0.0
     n_gamma : float = 0.0
-    n_delta : float = 0.0
 
     m_pos : float = 0.0
     m_vel : float = 0.0
     m_acc : float= 0.0
     m_scaling : float = 0.0
     m_gamma : float = 0.0
-    m_delta : float = 0.0
 
     w_pos : float = 0.0
     w_vel : float = 0.0
     w_acc : float= 0.0
     w_scaling : float = 0.0
     w_gamma : float = 0.0
-    w_delta : float = 0.0
 
     h_t : float = 0.0
     polynomial_dict = {"pos": [], "vel": [], "acc": [], "scaling": [], "gamma": []}
@@ -60,6 +56,76 @@ class PolynomialControllerConfig(ControllerConfig):
         self.polynomial_dict["acc"] = [self.lambda_0_acc, self.lambda_f_acc, self.n_acc, self.m_acc, self.w_acc]
         self.polynomial_dict["scaling"] = [self.lambda_0_scaling, self.lambda_f_scaling, self.n_scaling, self.m_scaling, self.w_scaling]
         self.polynomial_dict["gamma"] = [self.gamma_0, self.gamma_f, self.n_gamma, self.m_gamma, self.w_gamma]
+
+    def __str__(self):
+        # 1. Get the base configuration string from the parent class
+        base_str = super().__str__()
+
+        # 2. Optionally, update the title to reflect the child class
+        base_str = base_str.replace("ControllerConfig:", "PolynomialControllerConfig:")
+
+        # 3. Format the specific attributes of this child class cleanly
+        poly_str = (
+            f"\nPolynomial Parameters (h_t = {self.h_t}):\n"
+            f"  Position: [lambda_0: {self.lambda_0_pos}, lambda_f: {self.lambda_f_pos}, n: {self.n_pos}, m: {self.m_pos}, w: {self.w_pos}]\n"
+            f"  Velocity: [lambda_0: {self.lambda_0_vel}, lambda_f: {self.lambda_f_vel}, n: {self.n_vel}, m: {self.m_vel}, w: {self.w_vel}]\n"
+            f"  Accel:    [lambda_0: {self.lambda_0_acc}, lambda_f: {self.lambda_f_acc}, n: {self.n_acc}, m: {self.m_acc}, w: {self.w_acc}]\n"
+            f"  Scaling:  [lambda_0: {self.lambda_0_scaling}, lambda_f: {self.lambda_f_scaling}, n: {self.n_scaling}, m: {self.m_scaling}, w: {self.w_scaling}]\n"
+            f"  Gamma:    [gamma_0: {self.gamma_0}, gamma_f: {self.gamma_f}, n: {self.n_gamma}, m: {self.m_gamma}, w: {self.w_gamma}]\n"
+        )
+
+        return base_str + poly_str
+
+    def plot_lambdas(self):
+        """Plots the piecewise polynomial evolution of all parameters as a function of h."""
+        self.generate_poly_dict()
+        ht = self.h_t if self.h_t != 0.0 else 1.0
+
+        # Range extended slightly to visualize the flat regions clearly
+        h_vals = np.linspace(-0.2, ht + 0.2, 5000)
+
+        fig, axes = plt.subplots(3, 2, figsize=(14, 10))
+        axes = axes.flatten()
+        categories = ["pos", "vel", "acc", "scaling", "gamma"]
+
+        for i, cat in enumerate(categories):
+            l0, lf, n, m, w = self.polynomial_dict[cat]
+
+            # 1. Define the piecewise conditions
+            conditions = [
+                h_vals < 0.0,
+                h_vals >= ht,
+                (h_vals >= 0.0) & (h_vals < ht)
+            ]
+
+            # 2. Calculate the polynomial values (using np.clip to prevent any edge-case warnings)
+            safe_h = np.clip(h_vals, 0.0, ht)
+            base = safe_h / ht
+            poly_vals = l0 + (lf - l0) * (w * (base ** n) + (1 - w) * (base ** m))
+
+            # 3. Define the outputs corresponding to each condition
+            choices = [
+                l0,  # Output if h < 0.0
+                lf,  # Output if h >= ht
+                poly_vals  # Output if 0 <= h < ht
+            ]
+
+            # Apply the piecewise law
+            y_vals = np.select(conditions, choices)
+
+            # Plotting
+            axes[i].plot(h_vals, y_vals, color='#1f77b4', linewidth=2.5)
+            axes[i].axvline(0, color='red', linestyle='--', alpha=0.6, label='h=0 (Boundary)')
+            axes[i].axvline(ht, color='green', linestyle='--', alpha=0.6, label='h=h_t (Target)')
+
+            axes[i].set_title(f"Parameter: {cat.upper()}", fontweight='bold')
+            axes[i].set_xlabel("h (CBF Value)")
+            axes[i].set_ylabel("Weight Value")
+            axes[i].grid(True, linestyle=':', alpha=0.7)
+            axes[i].legend(loc="best", fontsize="small")
+
+        axes[5].set_visible(False)
+        plt.tight_layout()
 
 class PolynomialOptimalController(BCFOptimalController):
 

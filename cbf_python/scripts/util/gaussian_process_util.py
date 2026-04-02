@@ -4,7 +4,7 @@ from Controller.Numba_scripts.ssm_cbf_acc import *
 import pinocchio as pin
 from scripts.util.test_utils import generate_velocity
 from Controller.gaussian_controller import GaussianControllerConfig, GaussianSet, GaussianController
-
+from Controller.dynamic_params_controllers import PolynomialControllerConfig
 import pandas as pd
 import numpy as np
 
@@ -167,7 +167,7 @@ def import_optuna_csv(file_path, h_mean, v_mean,):
     # Use .str.contains() with the & (AND) operator
     df = df[df['study_name'].str.contains(h_str) & df['study_name'].str.contains(v_str)]
     df = df.sort_values(by="calculated_cost", ascending=False).head(1)
-    print(df)
+    # print(df)
 
     # 2. Convert timestamp to datetime objects
     df['timestamp'] = pd.to_datetime(df['timestamp'])
@@ -188,11 +188,11 @@ def import_optuna_csv(file_path, h_mean, v_mean,):
 def read_config_data_from_csv(cfg: GaussianControllerConfig, filename: str = "../../log_best_trials.csv", h_mean =0.0, v_mean = 0.0):
 
     df = import_optuna_csv(filename, h_mean, v_mean, )
-    cfg.lambda_pos = df.iloc[0]['params_lambda_pos']
-    cfg.lambda_vel = df.iloc[0]['params_lambda_vel']
-    cfg.lambda_acc = df.iloc[0]['params_lambda_acc']
-    cfg.lambda_scaling = df.iloc[0]['params_lambda_scaling']
-    cfg.gamma = df.iloc[0]['params_gamma']
+    cfg.lambda_pos = float(df.iloc[0]['params_lambda_pos'])
+    cfg.lambda_vel = float(df.iloc[0]['params_lambda_vel'])
+    cfg.lambda_acc = float(df.iloc[0]['params_lambda_acc'])
+    cfg.lambda_scaling = float(df.iloc[0]['params_lambda_scaling'])
+    cfg.gamma = float(df.iloc[0]['params_gamma'])
 
     if "Gaussian" in type(cfg).__name__:
         gs = GaussianSet()
@@ -212,6 +212,52 @@ def read_config_data_from_csv(cfg: GaussianControllerConfig, filename: str = "..
         cfg.gaussian_sets.append(gs)
         cfg.n_gaussian_sets = len(cfg.gaussian_sets)
 
+def read_poly_config_data_from_csv(cfg: PolynomialControllerConfig, filename: str = "../../log_best_trials.csv", trial_name: str = ""):
+    df = pd.read_csv(filename)
+    df = df[df['study_name'].str.contains(trial_name)]
+    df = df.sort_values(by="calculated_cost", ascending=False).head(1)
+
+    cfg.lambda_0_pos = float(df.iloc[0]['params_lambda_0_pos'])
+    cfg.lambda_0_vel = float(df.iloc[0]['params_lambda_0_vel'])
+    cfg.lambda_0_acc = float(df.iloc[0]['params_lambda_0_acc'])
+    cfg.lambda_0_scaling = float(df.iloc[0]['params_lambda_0_scaling'])
+    cfg.gamma_0 = float(df.iloc[0]['params_gamma_0'])
+    # cfg.delta_0 = float(df.loc[df["ID"] == set_ID, "delta_0_deg"].values[0])
+
+    cfg.lambda_f_pos = float(df.iloc[0]['params_lambda_f_pos'])
+    cfg.lambda_f_vel = float(df.iloc[0]['params_lambda_f_vel'])
+    cfg.lambda_f_acc = float(df.iloc[0]['params_lambda_f_acc'])
+    cfg.lambda_f_scaling = float(df.iloc[0]['params_lambda_f_scaling'])
+    cfg.gamma_f = float(df.iloc[0]['params_gamma_f'])
+    # cfg.delta_f = float(df.loc[df["ID"] == set_ID, "delta_f_deg"].values[0])
+
+    cfg.n_pos = float(df.iloc[0]['params_n_pos'])
+    cfg.n_vel = float(df.iloc[0]['params_n_vel'])
+    cfg.n_acc = float(df.iloc[0]['params_n_acc'])
+    cfg.n_scaling = float(df.iloc[0]['params_n_scaling'])
+    cfg.n_gamma = float(df.iloc[0]['params_n_gamma'])
+    # cfg.n_delta = float(df.loc[df["ID"] == set_ID, "n_delta"].values[0])
+
+    cfg.m_pos = float(df.iloc[0]['params_m_pos'])
+    cfg.m_vel = float(df.iloc[0]['params_m_vel'])
+    cfg.m_acc = float(df.iloc[0]['params_m_acc'])
+    cfg.m_scaling = float(df.iloc[0]['params_m_scaling'])
+    cfg.m_gamma = float(df.iloc[0]['params_m_gamma'])
+    # cfg.m_delta = float(df.loc[df["ID"] == set_ID, "m_delta"].values[0])
+
+    cfg.w_pos = float(df.iloc[0]['params_w_pos'])
+    cfg.w_vel = float(df.iloc[0]['params_w_vel'])
+    cfg.w_acc = float(df.iloc[0]['params_w_acc'])
+    cfg.w_scaling = float(df.iloc[0]['params_w_scaling'])
+    cfg.w_gamma = float(df.iloc[0]['params_w_gamma'])
+    # cfg.w_delta = float(df.loc[df["ID"] == set_ID, "w_delta"].values[0])
+
+    cfg.lambda_pos = cfg.lambda_0_pos
+    cfg.lambda_vel = cfg.lambda_0_vel
+    cfg.lambda_scaling = cfg.lambda_0_scaling
+    cfg.lambda_acc = cfg.lambda_0_acc
+    cfg.gamma = cfg.gamma_0
+    
 
 def save_data_multiobj(study, filename="log_best_trials.csv", n_samples = 5):
     df = study.trials_dataframe()

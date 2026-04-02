@@ -110,41 +110,6 @@ def create_base_cfg(set_ID, Tc, filename):
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
     return cfg
 
-def create_gaussian_config(set_IDs : list, df: pd.DataFrame, Tc, delta):
-    cfg = GaussianControllerConfig(Tc = Tc)
-    for set_ID in set_IDs:
-        cfg.lambda_pos = float(df.loc[df["ID"] == set_ID, "lambda_0_pos"].values[0])
-        cfg.lambda_vel = float(df.loc[df["ID"] == set_ID, "lambda_0_vel"].values[0])
-        cfg.lambda_acc = float(df.loc[df["ID"] == set_ID, "lambda_0_acc"].values[0])
-        cfg.lambda_scaling = float(df.loc[df["ID"] == set_ID, "lambda_0_scaling"].values[0])
-        cfg.gamma = float(df.loc[df["ID"] == set_ID, "gamma_0"].values[0])
-
-        h_mean = float(df.loc[df["ID"] == set_ID, "h_mean"].values[0])
-        d_mean = float(df.loc[df["ID"] == set_ID, "d_mean"].values[0])
-        v_rel_mean = float(df.loc[df["ID"] == set_ID, "v_rel_mean"].values[0])
-
-        cov_values = df.loc[0, "cov_00":"cov_22"].values
-        cov_matrix = cov_values.astype(float).reshape((3, 3))
-        gaussian_set = GaussianSet()
-        gaussian_set.covariance = cov_matrix
-        gaussian_set.means["h"] = h_mean
-        gaussian_set.means["d"] = d_mean
-        gaussian_set.means["v"] = v_rel_mean
-
-        gaussian_set.lambda_ref["pos"] = cfg.lambda_pos
-        gaussian_set.lambda_ref["vel"] = cfg.lambda_vel
-        gaussian_set.lambda_ref["acc"] = cfg.lambda_acc
-        gaussian_set.lambda_ref["scaling"] = cfg.lambda_scaling
-        gaussian_set.lambda_ref["gamma"] = cfg.gamma
-        cfg.gaussian_sets.append(gaussian_set)
-
-    cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta)
-    cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
-    cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
-
-    cfg.precompute_gaussian_parameters()
-    return cfg
-
 def bring_robot_home(cfg, q, home, bridge, ctrl):
     start_planner = SegmentedJointTrap(Dq_max=cfg.Dq_max * 0.25, DDq_max=cfg.DDq_max * 0.25)
     print(f"Bringing robot to home position from {q.T} to {home.T}")
@@ -189,13 +154,13 @@ def bring_robot_home(cfg, q, home, bridge, ctrl):
 def plan_path(planner, q):
     planner.addWayPoint(q)
     planner.addWayPoint(q10)
-    # planner.addWayPoint(q20)
-    # planner.addWayPoint(q10)
+    planner.addWayPoint(q20)
+    planner.addWayPoint(q10)
     planner.addWayPoint(q22)
     planner.addWayPoint(q25)
     planner.addWayPoint(q30)
-    # planner.addWayPoint(q40)
-    # planner.addWayPoint(q30)
+    planner.addWayPoint(q40)
+    planner.addWayPoint(q30)
     planner.addWayPoint(q)
 
 def compute_cartesian_poses(q, model):
