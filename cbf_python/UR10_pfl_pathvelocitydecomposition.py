@@ -19,7 +19,7 @@ from VisualizationClass import ThesisPlotter
 from QPSolver import QPSolver
 
 # CONFIGURATION
-USE_BRIDGE = True  # Set to True to use the real robot bridge, False for fake data
+USE_BRIDGE = True  
 
 # QP constraints Parameters
 gamma_param = 10.0
@@ -98,7 +98,6 @@ def main():
     Kp_rot = np.array([1, 1, 1]) * wn ** 2
     Kd_rot = np.array([1, 1, 1]) * 2.0 * xi * wn
     
-    #planner_cart = SegmentedSE3Trap(vlin_max=2.5, vang_max=0.8, alin_max=0.8, aang_max=2.0)
     planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=0.8, alin_max=0.8, aang_max=0.6)
     
     q_start = first_joint_position.copy()
@@ -147,21 +146,49 @@ def main():
     current_dist_min = 100.0
 
     
+    last_obs_pos = []
+    last_obs_vel = []
+    
     print(f"Starting Simulation. Duration: 60s.")
 
     try:
         while t < 60.0:
             loop_start = time.perf_counter()
 
-            if USE_BRIDGE:
-                obs_pos, obs_vel, obs_acc = bridge.getObstacles()
-            else:
-                obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=t)
+            ### NUOVO: Lettura dal sensore protetta da try-except
+            try:
+                if USE_BRIDGE:
+                    obs_pos_raw, obs_vel_raw, obs_acc_raw = bridge.getObstacles()
+                else:
+                    obs_pos_raw, obs_vel_raw, obs_acc_raw = bridge.getObstacles(elapsed=t)
+            except Exception as e:
+                obs_pos_raw, obs_vel_raw, obs_acc_raw = [], [], []
 
-            if len(obs_pos) == 0:
+            
+            obs_pos = []
+            obs_vel = []
+            
+            if len(obs_pos_raw) > 0:
+                if len(last_obs_pos) != len(obs_pos_raw):
+                    last_obs_pos = [p.copy() for p in obs_pos_raw]
+                    last_obs_vel = [v.copy() for v in obs_vel_raw]
+                    
+                for i in range(len(obs_pos_raw)):
+                    dist_from_memory = np.linalg.norm(obs_pos_raw[i] - last_obs_pos[i])
+                    
+                    if dist_from_memory > 1e-4: 
+                        last_obs_pos[i] = obs_pos_raw[i].copy()
+                        last_obs_vel[i] = obs_vel_raw[i].copy()
+                    else:
+                        last_obs_pos[i] += last_obs_vel[i] * Tc
+                    
+                    obs_pos.append(last_obs_pos[i].copy())
+                    obs_vel.append(last_obs_vel[i].copy())
+            else:
                 obs_pos = [np.array([10.0, 10.0, 10.0])]
                 obs_vel = [np.zeros(3)]
-                obs_acc = [np.zeros(3)]
+                last_obs_pos = []  
+                last_obs_vel = []
 
             # Lettura Task Nominale
             goal_pose, nom_twist, nom_d_twist = planner_cart.getMotionLaw(trajectory_time % T_total)
@@ -280,7 +307,7 @@ def main():
             q += dq * Tc + 0.5 * ddq * Tc**2
             dq += ddq * Tc
 
-            dq.clip(-1.0, 1.0, out=dq)
+            dq.clip(-Dq_MAX, Dq_MAX, out=dq) # Aggiornato con il limite corretto invece di [-1, 1]
             ddq.clip(-DDq_MAX, DDq_MAX, out=ddq)
                 
             trajectory_time += Dtrajectory_time * Tc + 0.5 * DDtrajectory_time * Tc ** 2.0
