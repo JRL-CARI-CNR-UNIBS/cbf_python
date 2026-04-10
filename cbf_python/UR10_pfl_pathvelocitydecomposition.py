@@ -14,7 +14,7 @@ from sharework import loadSharework
 
 from interpolator import SegmentedSE3Trap, SegmentedSE3MinJerk
 from pinocchio import SE3
-from VisualizationClass import ThesisPlotter
+from VisualizationClass import LogPlotter
 
 from QPSolver import QPSolver
 
@@ -345,7 +345,7 @@ def main():
     
     finally:
         if len(log_time) > 0:
-            print("\nSimulation ended. Generating Thesis Plots...")
+            print("\nSimulation ended. Generating Plots...")
             logs = {
                 'time': log_time, 'pos_act': log_pos_act, 'pos_nom': log_pos_nom,
                 'dist': log_dist, 'vrel': log_vrel, 'h': log_h,
@@ -355,8 +355,9 @@ def main():
             config = {
                 'v_pfl': v_pfl, 'a_s': a_s, 'Tr': Tc, 'v_max': safety_utilis.v_max
             }
-            plotter = ThesisPlotter(logs, config)
+            plotter = LogPlotter(logs, config)
             plotter.show_all_plots()
-
+            
+            plotter.plot_jerk_analysis()
 if __name__ == "__main__":
     main()

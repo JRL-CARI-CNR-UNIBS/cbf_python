@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-class ThesisPlotter:
+class LogPlotter:
     def __init__(self, logs, config):
         """
         Inizializza il plotter con i log della simulazione e i parametri di sicurezza.
@@ -122,6 +122,57 @@ class ThesisPlotter:
         plt.legend()
         plt.grid(True, linestyle=':', alpha=0.7)
         plt.tight_layout()
+    
+    def plot_jerk_analysis(self):
+        """
+        Calcola e visualizza il Jerk (derivata dell'accelerazione) per i 6 giunti.
+        Fondamentale per diagnosticare i picchi causati dal disallineamento 
+        tra la frequenza dei sensori e la frequenza di controllo.
+        """
+        if 'ddq' not in self.logs or 'time' not in self.logs:
+            print("Errore: Dati di accelerazione o tempo mancanti per il plot del Jerk.")
+            return
+
+        import numpy as np
+        import matplotlib.pyplot as plt
+
+        time_array = np.array(self.logs['time'])
+        ddq_array = np.array(self.logs['ddq'])  # Dimensione attesa: (N_steps, 6)
+        
+        # Recupera il tempo di campionamento Tc (di default 2ms)
+        Tc = self.config.get('Tr', 0.002) 
+
+        # Calcolo del Jerk usando il gradiente numerico
+        # axis=0 calcola la derivata lungo le righe (il tempo) per ogni colonna (giunto)
+        jerk_array = np.gradient(ddq_array, Tc, axis=0)
+
+        # Creazione della griglia di subplot 3x2
+        fig, axs = plt.subplots(3, 2, figsize=(15, 10))
+        fig.suptitle('Analisi del Jerk ai Giunti (Derivata terza $\\dddot{q}$)', fontsize=16, fontweight='bold')
+
+        joint_names = ['Shoulder Pan', 'Shoulder Lift', 'Elbow', 'Wrist 1', 'Wrist 2', 'Wrist 3']
+
+        for i in range(6):
+            row = i // 2
+            col = i % 2
+            ax = axs[row, col]
+
+            # Plottiamo il jerk in rosso per indicare la natura "critica" del dato
+            ax.plot(time_array, jerk_array[:, i], color='firebrick', linewidth=1.0)
+
+            # Linea guida dello zero per facilitare la lettura
+            ax.axhline(0, color='black', linewidth=0.8, linestyle='--')
+
+            ax.set_title(f'Giunto {i+1}: {joint_names[i]}', fontsize=12)
+            ax.set_ylabel('Jerk [rad/s³]')
+            ax.set_xlabel('Tempo [s]')
+            ax.grid(True, linestyle=':', alpha=0.7)
+
+        # Aggiusta i margini per evitare che i grafici si sovrappongano
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95]) 
+        plt.show()
+        
+    
 
     def plot_time_scaling(self):
         """Plot del fattore di Dynamic Time Scaling."""
