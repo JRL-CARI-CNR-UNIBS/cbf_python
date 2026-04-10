@@ -19,7 +19,7 @@ from VisualizationClass import ThesisPlotter
 from QPSolver import QPSolver
 
 # CONFIGURATION
-USE_BRIDGE = False  # Set to True to use the real robot bridge, False for fake data
+USE_BRIDGE = True  # Set to True to use the real robot bridge, False for fake data
 
 # QP constraints Parameters
 gamma_param = 10.0
@@ -98,7 +98,8 @@ def main():
     Kp_rot = np.array([1, 1, 1]) * wn ** 2
     Kd_rot = np.array([1, 1, 1]) * 2.0 * xi * wn
     
-    planner_cart = SegmentedSE3Trap(vlin_max=2.5, vang_max=0.8, alin_max=0.8, aang_max=2.0)
+    #planner_cart = SegmentedSE3Trap(vlin_max=2.5, vang_max=0.8, alin_max=0.8, aang_max=2.0)
+    planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=0.8, alin_max=0.8, aang_max=0.6)
     
     q_start = first_joint_position.copy()
     q10 = np.array([31.0, -78.0, 115.0, -127.0, 86.0, -32.0]) * np.pi / 180.0

@@ -57,7 +57,6 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
     R = quat.toRotationMatrix()
     T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
 
-    # NOTA: Assicurati che questo path sia corretto per il tuo PC
     csv_path = "/home/nyquist/projects/tesisti/agnelli/cbf_python/skeletons_csv/skeleton_agnelli_1.csv"
     bridge = FakeCommandBridge(UR10E_JOINTS, csv_path=csv_path, Tworld_to_cam=T_wc, slowdown_factor=1.0, t0=0.0)
     
@@ -262,16 +261,16 @@ def objective(trial):
     gamma_param_trial = trial.suggest_float("gamma", 1.0, 50.0)
     
     # Parametri Target Time Scaling (Sigmoide)
-    ks_param_trial = trial.suggest_float("k_s", 1.0, 20.0)
-    d_safe_trial = trial.suggest_float("d_safe", 0.05, 0.5) 
+    ks_param_trial = trial.suggest_float("k_s", 1.0, 50.0)
+    d_safe_trial = trial.suggest_float("d_safe", 0.05, 1.0) 
     
     # Parametri Controllore PD Cartesiano
     wn_trial = trial.suggest_float("omega_n", 20.0, 200.0)
     xi_trial = trial.suggest_float("xi", 0.5, 1.2)
     
     # Parametri Pesi Matrice Hessiana Solutore QP
-    w_delta_trial = trial.suggest_float("w_delta", 10.0, 100000.0, log=True) 
-    w_dds_trial = trial.suggest_float("w_dds", 0.1, 50.0)
+    w_delta_trial = trial.suggest_float("w_delta", 10.0, 50000.0, log=True) 
+    w_dds_trial = trial.suggest_float("w_dds", 10.0, 50000.0)
     
     J1, J2, J3 = run_simulation(
         gamma_param_trial, ks_param_trial, d_safe_trial, 
@@ -299,7 +298,7 @@ if __name__ == "__main__":
         sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
         storage=storage,
         load_if_exists=True,
-        study_name=f"PFL.AGNELLI.NEW_LOGIC_{time.strftime('%Y%m%d-%H%M%S')}",
+        study_name=f"PFL.AGNELLI_{time.strftime('%Y%m%d-%H%M%S')}",
     )
     
     print("Starting Multi-Objective Optimization (J1: Makespan, J2: Quality/Slack, J3: Safety/Fails)...")

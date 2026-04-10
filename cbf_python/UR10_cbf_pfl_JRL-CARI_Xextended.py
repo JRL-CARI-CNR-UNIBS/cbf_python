@@ -18,7 +18,7 @@ from pinocchio import SE3
 from VisualizationClass import ThesisPlotter
 
 # CONFIGURATION
-USE_BRIDGE = False  # Set to True to use the real robot bridge, False for fake data
+USE_BRIDGE = True  # Set to True to use the real robot bridge, False for fake data
 
 # QP constraints Parameters
 gamma_param =10.0
