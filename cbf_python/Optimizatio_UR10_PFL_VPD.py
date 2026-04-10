@@ -114,7 +114,7 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
         while t < max_duration:
             
             # --- 1. KILL-SWITCH HARDWARE (Se il PC è bloccato da 60s) ---
-            if time.time() - real_start_time > 60.0:
+            if time.time() - real_start_time > 300.0:
                 print("Timeout hardware superato. CPU in stallo.")
                 qp_fails += 1000.0
                 break
@@ -295,8 +295,8 @@ def objective(trial):
     d_safe_trial = trial.suggest_float("d_safe", 0.05, 1.0) 
     wn_trial = trial.suggest_float("omega_n", 20.0, 200.0)
     xi_trial = trial.suggest_float("xi", 0.5, 1.2)
-    w_delta_trial = trial.suggest_float("w_delta", 10.0, 50000.0, log=True) 
-    w_dds_trial = trial.suggest_float("w_dds", 10.0, 50000.0)
+    w_delta_trial = trial.suggest_float("w_delta", 10.0, 5000.0, log=True) 
+    w_dds_trial = trial.suggest_float("w_dds", 10.0, 1000.0)
     
     J1, J2, J3 = run_simulation(
         gamma_param_trial, ks_param_trial, d_safe_trial, 
@@ -321,22 +321,21 @@ if __name__ == "__main__":
 
     study = optuna.create_study(
         directions=["minimize", "minimize", "minimize"],
-        sampler=optuna.samplers.MOTPESampler(), # NUOVO: Sampler stabile nativo
+        sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
         storage=storage,
         load_if_exists=True,
-        study_name=f"PFL.AGNELLI_FIXED_{time.strftime('%Y%m%d-%H%M%S')}",
+        study_name=f"PFL.AGNELLI_{time.strftime('%Y%m%d-%H%M%S')}",
     )
     
     # NUOVO: Diamo a Optuna un punto di partenza ragionevole per non fargli sprecare tempo
     study.enqueue_trial({
         "gamma": 10.0, "k_s": 5.0, "d_safe": 0.2,
-        "omega_n": 100.0, "xi": 0.7, "w_delta": 10000.0, "w_dds": 50.0
+        "omega_n": 100.0, "xi": 0.7, "w_delta": 100.0, "w_dds": 50.0
     })
     
     print("Starting Multi-Objective Optimization...")
     
-    # NUOVO: Limita a 12 o 16 n_jobs (non 30) per evitare CPU Thrashing
-    study.optimize(objective, n_trials=3000, show_progress_bar=True, n_jobs=12) 
+    study.optimize(objective, n_trials=3000, show_progress_bar=True, n_jobs=30) 
     
     pareto_front = study.best_trials
 
