@@ -109,14 +109,18 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
     sum_sq_scale_penalty = 0.0  
     sum_delta = 0.0             
     max_duration = 30.0 
-    
-    
+    max_simulation_steps = int(max_duration / Tc)  # Limite massimo di passi per evitare loop infiniti
     idle_time = 0
     
     try:
         while t < max_duration:
             
             if trajectory_time >= T_total:
+                break
+            
+            if steps >= max_simulation_steps:
+                print("Raggiunto il numero massimo di passi, terminazione forzata.")
+                qp_fails += 500.0
                 break
             
             # Perception
@@ -157,7 +161,7 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
             dtwist_base = np.hstack([acc_lin, acc_ang])
             
             # Speed and Separation Monitoring Target
-            dist_min_all = min([np.linalg.norm(x_curr - p) for p in obs_pos]) if obs_pos else 10.0
+            dist_min_all = min([np.linalg.norm(x_curr - p) for p in obs_pos]) if len(obs_pos) > 0 else 10.0
             s_dot_target = 1.0 / (1.0 + np.exp(-100.0 * (dist_min_all - d_safe_param)))
             s_ddot_des = ks_param * (s_dot_target - Dtrajectory_time)
 
@@ -226,11 +230,14 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
             
             sum_sq_scale_penalty += (1.0 - Dtrajectory_time)**2
             sum_delta += delta_val
-            steps += 1
+            
             
             q += dq * Tc + 0.5 * ddq * Tc**2
             dq += ddq * Tc
             
+            if np.any(np.isnan(q)) or np.any(np.isnan(dq)) or np.any(np.isnan(ddq)) or np.any(np.isinf(ddq)):
+                qp_fails += 500.0
+                break
             dq.clip(-Dq_MAX, Dq_MAX, out=dq)
             ddq.clip(-DDq_MAX, DDq_MAX, out=ddq)
             
@@ -238,12 +245,15 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
             trajectory_time += Dtrajectory_time * Tc + 0.5 * DDtrajectory_time * Tc**2
             Dtrajectory_time = np.clip(Dtrajectory_time + DDtrajectory_time * Tc, 0.0, 1.0)
             
-            if (Dtrajectory_time < 0.01):idle_time += Tc 
+            if (np.linalg.norm(dq) < 1e-3):idle_time += Tc 
             else: idle_time = 0
             
             if idle_time >= 3.0: 
-                qp_fails = 500.0
+                qp_fails += 500.0
                 break
+
+            steps += 1
+
             
     except Exception as e:
         print(f"Simulation crashed: {e}")
