@@ -108,7 +108,10 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
     min_h_vmax_viol = 0.0
     sum_sq_scale_penalty = 0.0  
     sum_delta = 0.0             
-    max_duration = 150.0 
+    max_duration = 30.0 
+    
+    
+    idle_time = 0
     
     try:
         while t < max_duration:
@@ -234,6 +237,13 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
             t += Tc
             trajectory_time += Dtrajectory_time * Tc + 0.5 * DDtrajectory_time * Tc**2
             Dtrajectory_time = np.clip(Dtrajectory_time + DDtrajectory_time * Tc, 0.0, 1.0)
+            
+            if (Dtrajectory_time < 0.01):idle_time += Tc 
+            else: idle_time = 0
+            
+            if idle_time >= 3.0: 
+                qp_fails = 500.0
+                break
             
     except Exception as e:
         print(f"Simulation crashed: {e}")
