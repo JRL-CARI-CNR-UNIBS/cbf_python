@@ -129,22 +129,17 @@ class LogPlotter:
         Fondamentale per diagnosticare i picchi causati dal disallineamento 
         tra la frequenza dei sensori e la frequenza di controllo.
         """
-        if 'ddq' not in self.logs or 'time' not in self.logs:
-            print("Errore: Dati di accelerazione o tempo mancanti per il plot del Jerk.")
-            return
-
         import numpy as np
         import matplotlib.pyplot as plt
 
-        time_array = np.array(self.logs['time'])
-        ddq_array = np.array(self.logs['ddq'])  # Dimensione attesa: (N_steps, 6)
+
         
         # Recupera il tempo di campionamento Tc (di default 2ms)
-        Tc = self.config.get('Tr', 0.002) 
+        Tc = self.Tr
 
         # Calcolo del Jerk usando il gradiente numerico
         # axis=0 calcola la derivata lungo le righe (il tempo) per ogni colonna (giunto)
-        jerk_array = np.gradient(ddq_array, Tc, axis=0)
+        jerk_array = np.gradient(self.ddq, Tc, axis=0)
 
         # Creazione della griglia di subplot 3x2
         fig, axs = plt.subplots(3, 2, figsize=(15, 10))
@@ -158,7 +153,7 @@ class LogPlotter:
             ax = axs[row, col]
 
             # Plottiamo il jerk in rosso per indicare la natura "critica" del dato
-            ax.plot(time_array, jerk_array[:, i], color='firebrick', linewidth=1.0)
+            ax.plot(self.time, jerk_array[:, i], color='firebrick', linewidth=1.0)
 
             # Linea guida dello zero per facilitare la lettura
             ax.axhline(0, color='black', linewidth=0.8, linestyle='--')
@@ -207,4 +202,5 @@ class LogPlotter:
         self.plot_joint_accelerations()
         self.plot_time_scaling()
         self.plot_slack_variable()
+        self.plot_jerk_analysis()
         plt.show()

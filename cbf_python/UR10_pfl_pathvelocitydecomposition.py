@@ -98,7 +98,7 @@ def main():
     Kp_rot = np.array([1, 1, 1]) * wn ** 2
     Kd_rot = np.array([1, 1, 1]) * 2.0 * xi * wn
     
-    planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=0.8, alin_max=0.8, aang_max=0.6)
+    planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=0.8, alin_max=0.6, aang_max=1.0)
     
     q_start = first_joint_position.copy()
     q10 = np.array([31.0, -78.0, 115.0, -127.0, 86.0, -32.0]) * np.pi / 180.0
@@ -149,10 +149,10 @@ def main():
     last_obs_pos = []
     last_obs_vel = []
     
-    print(f"Starting Simulation. Duration: 60s.")
+    print(f"Starting Simulation. Duration: 20s.")
 
     try:
-        while t < 60.0:
+        while t < 20.0:
             loop_start = time.perf_counter()
 
             ### NUOVO: Lettura dal sensore protetta da try-except
