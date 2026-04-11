@@ -67,6 +67,8 @@ class QPSolver:
             [zeros_dq, P_delta,  zeros_ds],
             [P_sq,     zeros_sd, P_ss    ]
         ])
+
+        self.P = self.P + np.eye(self.P.shape[0]) * 1e-6  # Regolarizzazione per stabilità numerica
         self.b = np.concatenate([b_q, b_delta, b_s])
 
     def add_tracking_and_state_constraints(self, Jlin, dJlin, dq, translation_bt, next_x_des_base, v_nom_lin, delta_prev, s_dot):
