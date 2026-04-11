@@ -335,7 +335,7 @@ if __name__ == "__main__":
     
     print("Starting Multi-Objective Optimization...")
     
-    study.optimize(objective, n_trials=3000, show_progress_bar=True, n_jobs=30) 
+    study.optimize(objective, n_trials=3000, show_progress_bar=True, n_jobs=15) 
     
     pareto_front = study.best_trials
 
