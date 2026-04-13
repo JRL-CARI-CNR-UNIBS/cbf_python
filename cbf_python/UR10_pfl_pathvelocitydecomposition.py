@@ -19,16 +19,24 @@ from VisualizationClass import LogPlotter
 from QPSolver import QPSolver
 
 # CONFIGURATION
-USE_BRIDGE = True  
+USE_BRIDGE = False  # Set to True to use the real robot bridge, False for fake data from CSV  
 
-# QP constraints Parameters
-gamma_param = 10.0
+# Optimal Parameters
+gamma_param = 3.0
+k_s_param = 20.0
+d_safe_param = 0.1
+omega_n_param = 170.0
+xi_param = 0.7
+w_delta_param = 500.0
+w_dds_param = 100.0
+
+# Limits
 Dq_MAX = np.pi * np.array([1,1,1,1,1,1], dtype=np.float64) * np.pi
 DDq_MAX = np.pi**2*5
 
 # MAIN
 def main():
-    safety_utilis = PFLSafetyUtils(Tr=0.15, a_s=2.5, v_pfl=0.25, v_max=2.0, rho=20.0, traj_max_err=0.1)
+    safety_utilis = PFLSafetyUtils(Tr=0.15, a_s=2.5, v_pfl=0.25, v_max=2.0, rho=20.0, traj_max_err=0.04)
     Tc = 2e-3
     a_s = safety_utilis.a_s
     v_pfl = safety_utilis.v_pfl
@@ -48,7 +56,7 @@ def main():
     viz.initViewer(open=True)
     viz.loadViewerModel()
     
-    # Visualizziamo solo le mani (2 ostacoli)
+    #visualizzazione ostacoli
     for i in range(20):
         viz.viewer[f"obstacle_{i}"].set_object(mgeom.Sphere(0.1), mgeom.MeshLambertMaterial(color=0xFF0000))
     viz.viewer["goal"].set_object(mgeom.Box([0.2, 0.2, 0.02]), mgeom.MeshLambertMaterial(color=0x00FF00))
@@ -91,14 +99,15 @@ def main():
     print("Control Mode: Path-Velocity Decomposition QP")
     
     # Guadagni smorzati per un comportamento collaborativo
-    wn = 100
-    xi = 0.7
+    wn = omega_n_param
+    xi = xi_param
     Kp_tra = np.array([1, 1, 1]) * wn ** 2
     Kd_tra = np.array([1, 1, 1]) * 2.0 * xi * wn
     Kp_rot = np.array([1, 1, 1]) * wn ** 2
     Kd_rot = np.array([1, 1, 1]) * 2.0 * xi * wn
     
-    planner_cart = SegmentedSE3Trap(vlin_max=0.6, vang_max=0.8, alin_max=0.6, aang_max=1.0)
+    planner_cart = SegmentedSE3Trap(vlin_max=1.5, vang_max=0.6, alin_max=0.6, aang_max=0.8)
+    
     
     q_start = first_joint_position.copy()
     q10 = np.array([31.0, -78.0, 115.0, -127.0, 86.0, -32.0]) * np.pi / 180.0
@@ -123,7 +132,7 @@ def main():
     renderer.publishPath(planner_cart.publishPath())
 
     # Initialization QPclass
-    qp_solver = QPSolver(model.nq, Tc, DDq_MAX, Dq_MAX, eps_track, w_delta=100.0, w_dds=1.0)
+    qp_solver = QPSolver(model.nq, Tc, DDq_MAX, Dq_MAX, eps_track, w_delta=w_delta_param, w_dds=w_dds_param)
     qp_solver.enable_velocity_limits = True
     qp_solver.enable_delta_dynamics = True
     qp_solver.enable_scaling_dynamics = True
@@ -149,46 +158,27 @@ def main():
     last_obs_pos = []
     last_obs_vel = []
     
-    print(f"Starting Simulation. Duration: 20s.")
+    print(f"Starting Simulation. Duration: 50s.")
 
     try:
-        while t < 20.0:
+        while t < 50.0:
             loop_start = time.perf_counter()
 
             ### NUOVO: Lettura dal sensore protetta da try-except
-            try:
-                if USE_BRIDGE:
-                    obs_pos_raw, obs_vel_raw, obs_acc_raw = bridge.getObstacles()
-                else:
-                    obs_pos_raw, obs_vel_raw, obs_acc_raw = bridge.getObstacles(elapsed=t)
-            except Exception as e:
-                obs_pos_raw, obs_vel_raw, obs_acc_raw = [], [], []
-
             
-            obs_pos = []
-            obs_vel = []
-            
-            if len(obs_pos_raw) > 0:
-                if len(last_obs_pos) != len(obs_pos_raw):
-                    last_obs_pos = [p.copy() for p in obs_pos_raw]
-                    last_obs_vel = [v.copy() for v in obs_vel_raw]
-                    
-                for i in range(len(obs_pos_raw)):
-                    dist_from_memory = np.linalg.norm(obs_pos_raw[i] - last_obs_pos[i])
-                    
-                    if dist_from_memory > 1e-4: 
-                        last_obs_pos[i] = obs_pos_raw[i].copy()
-                        last_obs_vel[i] = obs_vel_raw[i].copy()
-                    else:
-                        last_obs_pos[i] += last_obs_vel[i] * Tc
-                    
-                    obs_pos.append(last_obs_pos[i].copy())
-                    obs_vel.append(last_obs_vel[i].copy())
+            if USE_BRIDGE:
+                obs_pos, obs_vel, obs_acc = bridge.getObstacles()
             else:
-                obs_pos = [np.array([10.0, 10.0, 10.0])]
+                obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=t)
+
+            if len(obs_pos) == 0:
+                # add a dummy obstacle far away to avoid empty lists
+                obs_pos = [np.array([1.0, 1.0, 1.0])]
                 obs_vel = [np.zeros(3)]
-                last_obs_pos = []  
-                last_obs_vel = []
+                obs_acc = [np.zeros(3)]
+            
+            
+            
 
             # Lettura Task Nominale
             goal_pose, nom_twist, nom_d_twist = planner_cart.getMotionLaw(trajectory_time % T_total)
@@ -231,8 +221,8 @@ def main():
             Jlin = J[:3, :]
             dJlin = dJ[:3, :]
 
-            ks = 5.0
-            d_safe = 0.1
+            ks = k_s_param
+            d_safe = d_safe_param
             s_dot_target = 1.0 / (1.0 + np.exp(-100 * (current_dist_min - d_safe)))
             s_ddot_des = ks * (s_dot_target - Dtrajectory_time)
 
@@ -357,7 +347,5 @@ def main():
             }
             plotter = LogPlotter(logs, config)
             plotter.show_all_plots()
-            
-            plotter.plot_jerk_analysis()
 if __name__ == "__main__":
     main()

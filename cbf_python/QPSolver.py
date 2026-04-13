@@ -14,10 +14,10 @@ class QPSolver:
         self.w_delta = w_delta
         self.w_dds = w_dds
         
-        self.s_ddot_decel_max = -15.0
-        self.s_ddot_accel_max = 0.5
+        self.s_ddot_decel_max = -10.0
+        self.s_ddot_accel_max = 1.0
         self.delta_growth_max = 5.0
-        self.delta_decay_max = 0.1
+        self.delta_decay_max = 0.06
         
         # === TOGGLES PER I VINCOLI ===
         self.enable_velocity_limits = True
