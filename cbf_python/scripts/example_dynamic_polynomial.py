@@ -53,7 +53,7 @@ from scripts.util.bcf_utils import plot_lambdas
 stop_event = threading.Event()
 
 params_filename = "../parameters_set.csv"
-test_name = "Polynomial_convex_h_-0.1"
+test_name = "Polynomial_convex_recorded_skeleton"
 set_ID = "3083_no_delta"
 duration = 15000.0
 
@@ -62,7 +62,7 @@ LOG_DATA = False
 
 SHOW_DATA = False
 SAVE_DATA = True
-test_type = "O"
+test_type = "P"
 
 PLOT_MEAN = False
 PLOT_LAMBDAS = False
@@ -309,15 +309,15 @@ def main():
 
     planner.addWayPoint(q)
     planner.addWayPoint(q10)
-    # planner.addWayPoint(q20)
-    # planner.addWayPoint(q10)
+    planner.addWayPoint(q20)
+    planner.addWayPoint(q10)
     planner.addWayPoint(q22)
     planner.addWayPoint(q25)
     planner.addWayPoint(q30)
-    # planner.addWayPoint(q40)
-    # planner.addWayPoint(q30)
+    planner.addWayPoint(q40)
+    planner.addWayPoint(q30)
     planner.addWayPoint(q)
-    n_wp = 6
+    n_wp = 10
     configs = {
         "q": q,
         "q10": q10,
