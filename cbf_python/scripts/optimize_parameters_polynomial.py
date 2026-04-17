@@ -104,7 +104,11 @@ def make_objective():
         cfg.delta_q_max[0:2] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)
         cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*2
         cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*4
-
+        cfg.normalize_parameters()
+        if not cfg.check_config_integrity():
+            print("Invalid configuration, skipping trial")
+            print(cfg)
+            raise optuna.TrialPruned()
         try:
               viol_rate, mean_scale, mean_traj_err, low_scale_rate, lap_count,  = run_episode_with_timeout(
                 cfg = cfg, Tc=2e-3, duration=trial_duration,
