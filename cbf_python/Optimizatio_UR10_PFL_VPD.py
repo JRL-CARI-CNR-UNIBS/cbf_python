@@ -1,5 +1,9 @@
+# -*- coding: utf-8 -*-
+"""
+Script di Ottimizzazione UR10 PFL - Versione Definitiva (NSGA-II)
+"""
+
 import optuna
-import optunahub
 import numpy as np
 import pinocchio as pin
 import time
@@ -23,7 +27,11 @@ Dq_MAX = np.pi * np.array([1,1,1,1,1,1], dtype=np.float64) * np.pi
 # Pesi per le funzioni di costo Multi-Obiettivo
 BETA_DELTA = 10.0        
 OMEGA_VIOL = 10000.0     
-OMEGA_FAILS = 50.0  # RIDOTTO: Un fail locale del QP non deve distruggere la fitness     
+OMEGA_FAILS = 50.0       
+
+# Pesi per chiudere i "loopholes" matematici in J2
+W_TRACK = 100.0   # Punisce severamente chi non insegue rigidamente il target cartesiano
+W_SMOOTH = 1.0    # Punisce accelerazioni fittizie violente (ks troppo alto)
 
 # ----------------- SIMULAZIONE EPISODIO -----------------
 def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_delta_param, w_dds_param):
@@ -51,7 +59,7 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
     R = quat.toRotationMatrix()
     T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
 
-    # CSV Allineato con la simulazione
+    # CSV path esattamente come nel tuo ambiente
     csv_path = "/home/nyquist/projects/tesisti/agnelli/cbf_python/skeletons_csv/skeleton_agnelli_1.csv"
     bridge = FakeCommandBridge(UR10E_JOINTS, csv_path=csv_path, Tworld_to_cam=T_wc, slowdown_factor=1.0, t0=0.0)
     
@@ -99,8 +107,12 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
     qp_fails = 0
     min_h_softmax_viol = 0.0
     min_h_vmax_viol = 0.0
+    
+    # Metriche cumulative per J2
     sum_sq_scale_penalty = 0.0  
     sum_delta = 0.0             
+    sum_pos_error = 0.0
+    sum_s_ddot = 0.0
     
     max_duration = 30.0 
     max_simulation_steps = int(max_duration / Tc) 
@@ -108,37 +120,32 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
     stuck_time = 0.0
     real_start_time = time.time()  
     task_completed = False         
-    abort_reason = None # NUOVO: Tiene traccia del motivo per pesare le penalità
+    abort_reason = "Completed"
     
     try:
         while t < max_duration:
             
-            # --- KILL-SWITCH HARDWARE ---
-            if time.time() - real_start_time > 60.0: # 300s bloccava optuna troppo a lungo
-                abort_reason = "timeout_hardware"
+            if time.time() - real_start_time > 60.0:
+                abort_reason = "Timeout_Hardware"
                 break
             
-            # --- KILL-SWITCH ITERAZIONI ---
             if steps >= max_simulation_steps:
-                abort_reason = "max_steps"
+                abort_reason = "Max_Steps_Reached"
                 break
             
-            # --- CHECK VITTORIA ---
             if trajectory_time >= T_total:
                 task_completed = True
+                abort_reason = "Success"
                 break
             
-            # Perception
             obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=t)
             if len(obs_pos) == 0:
                 obs_pos, obs_vel, obs_acc = [np.array([10.0, 10.0, 10.0])], [np.zeros(3)], [np.zeros(3)]
             
-            # Task Nominale
             goal_pose, nom_twist, nom_d_twist = planner_cart.getMotionLaw(trajectory_time % T_total)
             twist_goal = nom_twist * Dtrajectory_time
             goal_dtwist_base = nom_d_twist * Dtrajectory_time ** 2.0 
             
-            # FK & Jacobians
             pin.framesForwardKinematics(model, data, q)
             pin.computeForwardKinematicsDerivatives(model, data, q, dq, np.zeros(model.nq))
             
@@ -151,8 +158,12 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
             dJ = pin.frameJacobianTimeVariation(model, data, q, dq, tool_frame_id, pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)
             Jlin = J[:3, :]; dJlin = dJ[:3, :]
             
-            # Saturazione Errori PD
-            error_pos = goal_pose.translation - x_curr
+            # --- Calcolo Tracking Error Reale (per la J2) ---
+            error_pos_unclamped = goal_pose.translation - x_curr
+            sum_pos_error += np.linalg.norm(error_pos_unclamped)
+
+            # Saturazione Errori PD per il controllore
+            error_pos = error_pos_unclamped.copy()
             err_norm = np.linalg.norm(error_pos)
             if err_norm > 0.04: error_pos = error_pos * (0.04 / err_norm)
                 
@@ -160,16 +171,16 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
             err_rot_norm = np.linalg.norm(error_rot)
             if err_rot_norm > 0.2: error_rot = error_rot * (0.2 / err_rot_norm)
 
-            # Base PD Acceleration
             acc_lin = Kp_tra * error_pos + Kd_tra * (twist_goal[:3] - twist_curr.linear) + goal_dtwist_base[:3]
             acc_ang = Kp_rot * error_rot + Kd_rot * (twist_goal[3:] - twist_curr.angular) + goal_dtwist_base[3:]
             dtwist_base = np.hstack([acc_lin, acc_ang])
             
-            # SSM Target
             dist_min_all = min([np.linalg.norm(x_curr - p) for p in obs_pos]) if len(obs_pos) > 0 else 10.0
             s_dot_target = 1.0 / (1.0 + np.exp(-100.0 * (dist_min_all - d_safe_param)))
+            
             s_ddot_des = ks_param * (s_dot_target - Dtrajectory_time)
-
+            sum_s_ddot += s_ddot_des**2 # Metrica penalità scatti
+            
             qp_solver.reset_constraints()
             qp_solver.set_cost_function(J, dJ, dq, dtwist_base, nom_twist, s_ddot_des)
 
@@ -217,11 +228,21 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
                 qp_solver.add_custom_constraint(Apfl, Bpfl)
                 qp_solver.add_custom_constraint(Avmax, Bvmax)
 
-            # Integrazione
-            ddq, delta_val, DDtrajectory_time, success = qp_solver.solve(fallback_dq=dq)
+            # --- Controllo di Sicurezza Anti-Crash C++ ---
+            if np.any(np.isnan(dq)) or np.any(np.isnan(dtwist_base)):
+                abort_reason = "NaN_Inf_Pre_Solver"
+                break
+
+            try:
+                ddq, delta_val, DDtrajectory_time, success = qp_solver.solve(fallback_dq=dq)
+            except Exception as e:
+                success = False
+                ddq = np.zeros(model.nq)
+                delta_val = 0.0
+                DDtrajectory_time = 0.0
             
             if not success:
-                qp_fails += 1 # Contiamo solo i fallimenti reali, niente pesi arbitrari qui
+                qp_fails += 1 
                 ddq = -10.0 * dq 
                 delta_val = 0.0
                 DDtrajectory_time = 0.0
@@ -233,9 +254,8 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
             q += dq * Tc + 0.5 * ddq * Tc**2
             dq += ddq * Tc
             
-            # --- KILL-SWITCH NaN/INF ---
             if np.any(np.isnan(q)) or np.any(np.isnan(dq)) or np.any(np.isnan(ddq)) or np.any(np.isinf(ddq)):
-                abort_reason = "nan_inf"
+                abort_reason = "NaN_Inf_Post_Solver"
                 break
                 
             dq.clip(-Dq_MAX, Dq_MAX, out=dq)
@@ -245,7 +265,6 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
             trajectory_time += Dtrajectory_time * Tc + 0.5 * DDtrajectory_time * Tc**2
             Dtrajectory_time = np.clip(Dtrajectory_time + DDtrajectory_time * Tc, 0.0, 1.0)
             
-            # --- KILL-SWITCH PROGRESSIONE ---
             progress = trajectory_time - last_traj_time
             if progress < (Tc * 0.01): 
                 stuck_time += Tc
@@ -255,68 +274,74 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
             last_traj_time = trajectory_time
             
             if stuck_time >= 3.0: 
-                abort_reason = "stuck"
+                abort_reason = "Stuck"
                 break
 
             steps += 1
 
     except Exception as e:
-        abort_reason = f"crash_{e}"
+        abort_reason = f"Crash_Python"
 
-    # ----------------- COSTRUZIONE FUNZIONI DI COSTO (J1, J2, J3) CON GRADIENTI -----------------
+    # ----------------- COSTRUZIONE FUNZIONI DI COSTO -----------------
     
-    # Calcolo la percentuale di completamento del task [0.0, 1.0]
-    completion_ratio = min(1.0, trajectory_time / T_total)
+    completion_ratio = min(1.0, trajectory_time / T_total) if T_total > 0 else 0.0
     missed_task_penalty = 1.0 - completion_ratio
 
-    # J1: Tempo di Esecuzione (Makespan)
+    # J1: Makespan
     if task_completed:
         J1_makespan = steps * Tc
     else:
-        # Se non finisce, diamo il tempo max + una penalità PROPORZIONALE a quanto mancava.
-        # Chi è arrivato al 90% avrà un J1 molto più basso di chi si è fermato al 10%.
         J1_makespan = max_duration + (missed_task_penalty * 30.0) 
     
-    # J2: Qualità dello Scaling e Deviazione
+    # J2: Qualità, Slack, Tracciamento e Smoothness
     if steps > 0:
         avg_sq_scale_penalty = sum_sq_scale_penalty / steps
         avg_delta = sum_delta / steps
+        avg_pos_error = sum_pos_error / steps
+        avg_s_ddot = sum_s_ddot / steps
     else:
         avg_sq_scale_penalty = 1.0
-        avg_delta = 1.0 # Normalizzato invece di 100.0
-
-    J2_quality = avg_sq_scale_penalty + (BETA_DELTA * avg_delta)
+        avg_delta = 1.0
+        avg_pos_error = 1.0
+        avg_s_ddot = 100.0
+        
+    J2_quality = avg_sq_scale_penalty + (BETA_DELTA * avg_delta) + (W_TRACK * avg_pos_error) + (W_SMOOTH * avg_s_ddot)
     
     if not task_completed:
-        # Penalizziamo la qualità in base a quanto non è stato completato
         J2_quality += (missed_task_penalty * 10.0)
 
-    # J3: Sicurezza e Stabilità
+    # J3: Sicurezza
     viol_score = abs(min_h_softmax_viol) + abs(min_h_vmax_viol)
     J3_safety_stability = (OMEGA_VIOL * viol_score) + (OMEGA_FAILS * qp_fails)
 
-    # Aggiungiamo penalità finali continue basate sul motivo dell'interruzione
-    if abort_reason == "nan_inf" or str(abort_reason).startswith("crash"):
-        J3_safety_stability += 5000.0 # Puniamo duramente ma senza esplodere a 100000.0
-    elif abort_reason == "stuck":
-        J2_quality += 5.0 # Lo stallo prolungato punisce la fluidità/qualità
+    if str(abort_reason).startswith("NaN_Inf") or str(abort_reason).startswith("Crash"):
+        J3_safety_stability += 5000.0 
+    elif abort_reason == "Stuck":
+        J2_quality += 5.0 
 
-    return J1_makespan, J2_quality, J3_safety_stability
+    return J1_makespan, J2_quality, J3_safety_stability, completion_ratio, steps, abort_reason
 
 # ----------------- OPTUNA OBJECTIVE -----------------
 def objective(trial):
     gamma_param_trial = trial.suggest_float("gamma", 1.0, 50.0)
     ks_param_trial = trial.suggest_float("k_s", 1.0, 50.0)
     d_safe_trial = trial.suggest_float("d_safe", 0.05, 1.0) 
-    wn_trial = trial.suggest_float("omega_n", 20.0, 200.0)
+    
+    # FORZATURA OMEGA_N: Limite inferiore alzato a 100.0 per garantire rigidità del robot
+    wn_trial = trial.suggest_float("omega_n", 100.0, 200.0)
     xi_trial = trial.suggest_float("xi", 0.5, 1.2)
     w_delta_trial = trial.suggest_float("w_delta", 10.0, 5000.0, log=True) 
     w_dds_trial = trial.suggest_float("w_dds", 10.0, 1000.0)
     
-    J1, J2, J3 = run_simulation(
+    J1, J2, J3, comp_ratio, steps, abort_reason = run_simulation(
         gamma_param_trial, ks_param_trial, d_safe_trial, 
         wn_trial, xi_trial, w_delta_trial, w_dds_trial
     )
+    
+    # Salvataggio attributi custom nel database per la dashboard Optuna
+    trial.set_user_attr("Completion_Ratio", comp_ratio)
+    trial.set_user_attr("Real_Steps", steps)
+    trial.set_user_attr("Abort_Reason", str(abort_reason))
     
     return J1, J2, J3
 
@@ -334,20 +359,22 @@ if __name__ == "__main__":
         grace_period=120,
     )
 
+    # Utilizzo NSGA-II: Algoritmo standard industriale per Multi-Obiettivo (genera Frontiere ampie e distribuite)
     study = optuna.create_study(
         directions=["minimize", "minimize", "minimize"],
-        sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
+        sampler=optuna.samplers.NSGAIISampler(population_size=50),
         storage=storage,
         load_if_exists=True,
-        study_name=f"PFL.AGNELLI_FIXED_{time.strftime('%Y%m%d-%H%M%S')}",
+        study_name=f"PFL.AGNELLI{time.strftime('%Y%m%d-%H%M%S')}",
     )
     
+    # Trial di partenza ragionevole
     study.enqueue_trial({
         "gamma": 10.0, "k_s": 5.0, "d_safe": 0.2,
-        "omega_n": 100.0, "xi": 0.7, "w_delta": 100.0, "w_dds": 50.0
+        "omega_n": 150.0, "xi": 0.7, "w_delta": 100.0, "w_dds": 50.0
     })
     
-    print("Starting Multi-Objective Optimization...")
+    print("Avvio Ottimizzazione Multi-Obiettivo (NSGA-II) - Profilo Rigido e Veloce...")
     study.optimize(objective, n_trials=3000, show_progress_bar=True, n_jobs=15) 
     
     pareto_front = study.best_trials
