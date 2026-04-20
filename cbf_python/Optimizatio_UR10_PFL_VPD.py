@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Apr 11 00:55:04 2026
+
+@author: Pietro
+"""
+
 import optuna
 import optunahub
 import numpy as np
@@ -6,11 +13,9 @@ import time
 import math
 from pinocchio import SE3
 
-
 from sharework import loadSharework
 from fake_command_bridge import FakeCommandBridge
 from interpolator import SegmentedSE3Trap
-
 
 from PFLSafetyUtils_Class import PFLSafetyUtils
 from QPSolver import QPSolver
@@ -25,7 +30,7 @@ Dq_MAX = np.pi * np.array([1,1,1,1,1,1], dtype=np.float64) * np.pi
 # Pesi per le funzioni di costo Multi-Obiettivo
 BETA_DELTA = 10.0        
 OMEGA_VIOL = 10000.0     
-OMEGA_FAILS = 500.0      
+OMEGA_FAILS = 50.0  # Mantenuto basso per evitare plateau      
 
 # ----------------- SIMULAZIONE EPISODIO -----------------
 def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_delta_param, w_dds_param):
@@ -91,7 +96,7 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
     # Variabili Loop e metriche
     t = 0.0
     trajectory_time = 0.0
-    last_traj_time = 0.0  # NUOVO: Memoria per valutare l'avanzamento
+    last_traj_time = 0.0  
     Dtrajectory_time = 1.0
     DDtrajectory_time = 0.0
     delta_prev = 0.0
@@ -107,22 +112,23 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
     max_simulation_steps = int(max_duration / Tc) 
     
     stuck_time = 0.0
-    real_start_time = time.time()  # NUOVO: Timeout hardware
-    task_completed = False         # NUOVO: Flag di completamento
+    real_start_time = time.time()  
+    task_completed = False         
+    abort_reason = None # Tracciamento cause di interruzione
     
     try:
         while t < max_duration:
             
-            # --- 1. KILL-SWITCH HARDWARE (Se il PC è bloccato da 60s) ---
-            if time.time() - real_start_time > 300.0:
+            # --- 1. KILL-SWITCH HARDWARE ---
+            if time.time() - real_start_time > 60.0:
                 print("Timeout hardware superato. CPU in stallo.")
-                qp_fails += 1000.0
+                abort_reason = "timeout_hardware"
                 break
             
-            # --- 2. KILL-SWITCH ITERAZIONI (Hard Cap) ---
+            # --- 2. KILL-SWITCH ITERAZIONI ---
             if steps >= max_simulation_steps:
                 print("Raggiunto il numero massimo di iterazioni.")
-                qp_fails += 500.0
+                abort_reason = "max_steps"
                 break
             
             # --- 3. CHECK VITTORIA ---
@@ -223,7 +229,7 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
             ddq, delta_val, DDtrajectory_time, success = qp_solver.solve(fallback_dq=dq)
             
             if not success:
-                qp_fails += 1
+                qp_fails += 1 # Conta solo i fail effettivi del solutore
                 ddq = -10.0 * dq 
                 delta_val = 0.0
                 DDtrajectory_time = 0.0
@@ -238,7 +244,7 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
             # --- 4. KILL-SWITCH NaN/INF ---
             if np.any(np.isnan(q)) or np.any(np.isnan(dq)) or np.any(np.isnan(ddq)) or np.any(np.isinf(ddq)):
                 print("Instabilità numerica (NaN/Inf). Abortisco.")
-                qp_fails += 500.0
+                abort_reason = "nan_inf"
                 break
                 
             dq.clip(-Dq_MAX, Dq_MAX, out=dq)
@@ -248,7 +254,7 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
             trajectory_time += Dtrajectory_time * Tc + 0.5 * DDtrajectory_time * Tc**2
             Dtrajectory_time = np.clip(Dtrajectory_time + DDtrajectory_time * Tc, 0.0, 1.0)
             
-            # --- 5. KILL-SWITCH PROGRESSIONE (Anti-vibrante) ---
+            # --- 5. KILL-SWITCH PROGRESSIONE ---
             progress = trajectory_time - last_traj_time
             if progress < (Tc * 0.01): 
                 stuck_time += Tc
@@ -259,32 +265,48 @@ def run_simulation(gamma_param, ks_param, d_safe_param, wn_param, xi_param, w_de
             
             if stuck_time >= 3.0: 
                 print("Stallo di progressione (Robot non avanza da 3s). Abortisco.")
-                qp_fails += 500.0
+                abort_reason = "stuck"
                 break
 
             steps += 1
 
     except Exception as e:
         print(f"Simulation crashed: {e}")
-        return 100.0, 1000.0, 100000.0  # Penalità gravissime su tutto
+        abort_reason = f"crash_{e}"
 
-    # ----------------- COSTRUZIONE FUNZIONI DI COSTO (J1, J2, J3) -----------------
-    # J1 corretto: se non hai finito il task, ti becchi una penalità di 100 secondi
+    # ----------------- COSTRUZIONE FUNZIONI DI COSTO (J1, J2, J3) CON GRADIENTI -----------------
+    
+    completion_ratio = min(1.0, trajectory_time / T_total)
+    missed_task_penalty = 1.0 - completion_ratio
+
+    # J1: Tempo di Esecuzione (Makespan)
     if task_completed:
         J1_makespan = steps * Tc
     else:
-        J1_makespan = max_duration + 100.0 
+        J1_makespan = max_duration + (missed_task_penalty * 30.0) 
     
+    # J2: Qualità dello Scaling e Deviazione
     if steps > 0:
         avg_sq_scale_penalty = sum_sq_scale_penalty / steps
         avg_delta = sum_delta / steps
     else:
         avg_sq_scale_penalty = 1.0
-        avg_delta = 100.0
+        avg_delta = 1.0
         
     J2_quality = avg_sq_scale_penalty + (BETA_DELTA * avg_delta)
+    
+    if not task_completed:
+        J2_quality += (missed_task_penalty * 10.0)
+
+    # J3: Sicurezza e Stabilità
     viol_score = abs(min_h_softmax_viol) + abs(min_h_vmax_viol)
     J3_safety_stability = (OMEGA_VIOL * viol_score) + (OMEGA_FAILS * qp_fails)
+
+    # Aggiunta penalità basate sul motivo dell'interruzione
+    if abort_reason == "nan_inf" or (abort_reason and str(abort_reason).startswith("crash")):
+        J3_safety_stability += 5000.0 
+    elif abort_reason == "stuck":
+        J2_quality += 5.0 
 
     return J1_makespan, J2_quality, J3_safety_stability
 
@@ -305,45 +327,23 @@ def objective(trial):
     
     return J1, J2, J3
 
-# ----------------- MAIN EXECUTION -----------------
+# ----------------- MAIN EXECUTION (DEBUG MODE) -----------------
 if __name__ == "__main__":
+    print("Avvio singolo trial (Sanity Check)...")
+    print("Utilizzo i parametri estratti dallo script di simulazione standalone.")
     
-    storage = optuna.storages.RDBStorage(
-        url=POSTGRES_URL,
-        engine_kwargs={
-            "pool_pre_ping": True,
-            "pool_size": 40,
-            "max_overflow": 20,
-        },
-        heartbeat_interval=30,
-        grace_period=120,
-    )
-
-    study = optuna.create_study(
-        directions=["minimize", "minimize", "minimize"],
-        sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
-        storage=storage,
-        load_if_exists=True,
-        study_name=f"PFL.AGNELLI_{time.strftime('%Y%m%d-%H%M%S')}",
+    # Parametri esatti presi da UR10_pfl_pathvelocitydecomposition.py
+    J1, J2, J3 = run_simulation(
+        gamma_param=10.0, 
+        ks_param=5.0, 
+        d_safe_param=0.1, 
+        wn_param=100.0, 
+        xi_param=0.7, 
+        w_delta_param=100.0, 
+        w_dds_param=1.0
     )
     
-    # NUOVO: Diamo a Optuna un punto di partenza ragionevole per non fargli sprecare tempo
-    study.enqueue_trial({
-        "gamma": 10.0, "k_s": 5.0, "d_safe": 0.2,
-        "omega_n": 100.0, "xi": 0.7, "w_delta": 100.0, "w_dds": 50.0
-    })
-    
-    print("Starting Multi-Objective Optimization...")
-    
-    study.optimize(objective, n_trials=3000, show_progress_bar=True, n_jobs=15) 
-    
-    pareto_front = study.best_trials
-
-    print(f"\nNumero di trial sulla frontiera di Pareto: {len(pareto_front)}")
-    for trial in pareto_front:
-        print(f"Trial ID: {trial.number}")
-        print(f"J1 (Makespan): {trial.values[0]:.3f}s")
-        print(f"J2 (Quality) : {trial.values[1]:.5f}")
-        print(f"J3 (Safety)  : {trial.values[2]:.2f}")
-        print(f"Parametri: {trial.params}")
-        print("-" * 30)
+    print(f"\n--- RISULTATO FINALE DEL TRIAL ---")
+    print(f"J1 (Makespan): {J1:.3f} s")
+    print(f"J2 (Quality): {J2:.3f}")
+    print(f"J3 (Safety): {J3:.3f}")
