@@ -210,8 +210,8 @@ def main():
     v_lin_max = 26.6586*0.1*0.055  # linear velocity [m/s]
     w_max = (44.1351 *0.1*0.055) # angular velocity [rad/s]
 
-    a_lin_max = 650*0.1*0.1  # linear acceleration [m/s^2]
-    alpha_max = 750 *0.1*0.1 # angular acceleration [rad/s^2]
+    a_lin_max = 650*0.1*0.01  # linear acceleration [m/s^2]
+    alpha_max = 750 *0.1*0.01 # angular acceleration [rad/s^2]
 
     print(f"v_lin_max: {v_lin_max}")
     print(f"w_max: {w_max}")
@@ -508,17 +508,17 @@ def main():
 
             vizualization_string = f"h = {h_min:.2f} m, err={out['trajectory_error']:.2f}"
             if rest > 0:
-                time.sleep(0.0001)
-                # renderer.push_state(
-                #     q,
-                #     goal_pose,
-                #     obstacle_positions,
-                #     vizualization_string,
-                # )
-                # # account for visualization time as well
-                # elapsed = time.perf_counter() - loop_start
-                # rest = max(0.0, Tc - elapsed)
-                # time.sleep(rest)
+                # time.sleep(0.0001)
+                renderer.push_state(
+                    q,
+                    goal_pose,
+                    obstacle_positions,
+                    vizualization_string,
+                )
+                # account for visualization time as well
+                elapsed = time.perf_counter() - loop_start
+                rest = max(0.0, Tc - elapsed)
+                time.sleep(rest)
                 pass
             else:
                 print(f"TIMEOUT, elapsed:{elapsed:.4f}")
