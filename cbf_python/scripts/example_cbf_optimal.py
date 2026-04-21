@@ -480,13 +480,7 @@ def main():
     print(f"MEAN TRAJECTORY ERROR: {mean_trajectory_error}")
     print(f"LOW SCALE RATE: {low_scale_rate*100}")
     visualizer.compute_mean_cov(True)
-    # CREATING CARTESIAN REFERENCE CSV FILE
-    if LOG_DATA:
-        if USE_BRIDGE:
-            folder_name = "/home/nyquist/projects/python/cbf_python/resullts/20260421_113953"
-        else:
-            folder_name = test_path
-        generate_cartesian_trajectory(folder_name+"/")
+
 
     # SAVING RESuLTS
     if SAVE_DATA:
@@ -539,5 +533,13 @@ def main():
 
             # Aggiungiamo la riga con i risultati
             writer.writerow(row_data)
+        # CREATING CARTESIAN REFERENCE CSV FILE
+    if LOG_DATA:
+        if USE_BRIDGE:
+            folder_name = "/home/nyquist/projects/python/cbf_python/resullts/20260421_113953"
+        else:
+            folder_name = test_path
+        generate_cartesian_trajectory(folder_name+"/")
+
 if __name__ == "__main__":
     main()
