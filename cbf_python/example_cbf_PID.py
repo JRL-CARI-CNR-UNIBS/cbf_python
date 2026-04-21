@@ -29,11 +29,11 @@ import test_publish_utils as pub_utils
 from PID_cbf_task_controller import UR10CBFController
 import csv_publishers
 import threading
-USE_BRIDGE = False
-LOG_DATA = False
+USE_BRIDGE = True
+LOG_DATA = True
 log_path = "resullts/simulation/PID"
 stop_event = threading.Event()
-duration  = 150.0
+duration  = 90.0
 def _on_sigint_with_bridge(bridge, signum, frame):
     stop_event.set()
     try:
@@ -269,7 +269,7 @@ def main():
                 obstacle_positions=obstacle_positions,
                 obstacle_velocities=obstacle_velocities,
                 obstacle_accelerations=obstacle_accelerations,
-                cbf_enabled=True,
+                #cbf_enabled=True,
             )
 
             q = out["q"]
