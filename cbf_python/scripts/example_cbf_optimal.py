@@ -50,11 +50,11 @@ from scripts.util.gaussian_process_util import read_config_data_from_csv
 
 params_filename = "../parameters_set.csv"
 set_ID = "0"
-duration = 15000.0
+duration = 90.0
 
-SHOW_DATA = False
-USE_BRIDGE = False
-LOG_DATA = False
+SHOW_DATA = True
+USE_BRIDGE = True
+LOG_DATA = True
 SAVE_DATA = True
 
 parameters_type = "0"
@@ -63,10 +63,10 @@ stop_event = threading.Event()
 
 
 
-# h_cfg = "article"
-# v_cfg = "article"
-h_cfg = -0.1
-v_cfg = 1
+h_cfg = "article"
+v_cfg = "article"
+# h_cfg = -0.1
+# v_cfg = 1
 
 
 
@@ -110,15 +110,17 @@ def main():
     cfg = ControllerConfig(Tc=Tc)
     delta = 4.5
 
-    read_config_data_from_csv(cfg,h_mean=h_cfg, v_mean=v_cfg, filename="../log_best_trials.csv")
+    read_config_data_from_csv(cfg,h_mean=h_cfg, v_mean=v_cfg, filename = "log_best_trials.csv")
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta)
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
-    ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
+    ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=7)
     print(cfg)
 
     cfg.Dq_max = cfg.Dq_max*0.15
     cfg.DDq_max = cfg.DDq_max*0.1
+    cfg.lambda_acc = cfg.lambda_acc*10
+    cfg.lambda_pos = cfg.lambda_pos*0.1
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log = -1)
 
     target_name = "ur10e_wrist_3_joint"
@@ -248,7 +250,9 @@ def main():
     q = first_joint_position.copy()
 
 
-    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.5, DDq_max=cfg.DDq_max*0.25)
+    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max.copy()*0.5, DDq_max=cfg.DDq_max.copy()*0.25)
+    # cfg.Dq_max = cfg.Dq_max*0.25
+    # cfg.DDq_max = cfg.DDq_max*0.25
     print("Computing trajectory...")
     # BRING THE ROBOT AT HOME BEFORE STARTING THE TEST
     if USE_BRIDGE:
@@ -479,14 +483,14 @@ def main():
     # CREATING CARTESIAN REFERENCE CSV FILE
     if LOG_DATA:
         if USE_BRIDGE:
-            folder_name = "" # UPDATE WITH THE PATH THE TRAJECTORY LOGGER NODE USES
+            folder_name = "/home/nyquist/projects/python/cbf_python/resullts/20260421_113953"
         else:
             folder_name = test_path
         generate_cartesian_trajectory(folder_name+"/")
 
     # SAVING RESuLTS
     if SAVE_DATA:
-        file_path = '../resullts/simulation_data.csv'
+        file_path = "resullts/simulation_data.csv"
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
         # Intestazioni delle colonne (headers)

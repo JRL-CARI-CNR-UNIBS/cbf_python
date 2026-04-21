@@ -22,7 +22,7 @@ class ControllerConfig:
         default_factory=lambda: np.deg2rad(np.array([1,1,1,1,1,1], dtype=np.float64) * 5)
     )
     Dq_max: np.ndarray = field(
-        default_factory=lambda: np.pi * np.array([1,1,1,1,1,1], dtype=np.float64) * np.pi
+        default_factory=lambda: np.pi * np.array([1,1,1,1,1,1], dtype=np.float64) * np.pi*0.5
     )
     DDq_max: np.ndarray = field(
         default_factory=lambda: np.pi * np.array([1,1,1,1,1,1], dtype=np.float64) * np.pi*5.0
