@@ -2,6 +2,14 @@ import pandas as pd
 import numpy as np
 import pinocchio as pin
 from sharework import loadSharework
+import os
+import glob
+
+def find_file(folder, prefix, suffix=".csv"):
+    """Finds a file in 'folder' starting with 'prefix' and ending with 'suffix'."""
+    pattern = os.path.join(folder, f"{prefix}*{suffix}")
+    matches = glob.glob(pattern)
+    return matches[0] if matches else None
 
 
 def generate_cartesian_trajectory(data_folder):
@@ -19,8 +27,9 @@ def generate_cartesian_trajectory(data_folder):
     data = model.createData()
     # Load joint states CSV
     # data_folder = "resullts/simulation/scaling/20260106_194258_OPTIMAL_SM/"
+    csv_path = find_file(data_folder, "reference_trajectory")
     joint_state_df = pd.read_csv(
-        data_folder + "reference_trajectory.csv", header=0, index_col=False)
+        csv_path, header=0, index_col=False)
 
 
     # Function to compute the Cartesian state for the wrist joint
@@ -61,3 +70,5 @@ def generate_cartesian_trajectory(data_folder):
     cartesian_df.to_csv(data_folder + "ur10e_wrist_3_cartesian_state.csv", index=False)
 
     print("Cartesian data for wrist 3 joint saved to 'ur10e_wrist_3_cartesian_state.csv'")
+
+generate_cartesian_trajectory("/home/galileo/projects/cbf_python_ws/cbf_python/cbf_python/resullts/simulation/scaling/OPT_2/")

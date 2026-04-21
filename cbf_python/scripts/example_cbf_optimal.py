@@ -117,8 +117,8 @@ def main():
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
     print(cfg)
 
-    cfg.Dq_max = cfg.Dq_max*0.15
-    cfg.DDq_max = cfg.DDq_max*0.1
+    cfg.Dq_max = cfg.Dq_max*0.25
+    cfg.DDq_max = cfg.DDq_max*0.2
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log = -1)
 
     target_name = "ur10e_wrist_3_joint"
@@ -248,7 +248,7 @@ def main():
     q = first_joint_position.copy()
 
 
-    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.5, DDq_max=cfg.DDq_max*0.25)
+    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.25, DDq_max=cfg.DDq_max*0.25)
     print("Computing trajectory...")
     # BRING THE ROBOT AT HOME BEFORE STARTING THE TEST
     if USE_BRIDGE:
