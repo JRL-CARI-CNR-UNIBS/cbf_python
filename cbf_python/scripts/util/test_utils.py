@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from Controller.gaussian_controller import GaussianController, GaussianControllerConfig, GaussianSet
 import time
-from util.joint_interpolator import SegmentedJointTrap
+from scripts.util.joint_interpolator import SegmentedJointTrap
 from Controller.optimal_cbf_task_controller import ControllerConfig
 # ---------------------------TEST WAYPOINTS ------------------------------
 q10 = np.array([31.0, -78.0, 115.0, -127.0, 86.0, -32.0]) * np.pi / 180.0
