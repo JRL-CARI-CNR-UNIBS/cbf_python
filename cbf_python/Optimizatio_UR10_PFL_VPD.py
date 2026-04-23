@@ -328,7 +328,7 @@ def objective(trial):
     d_safe_trial = trial.suggest_float("d_safe", 0.05, 1.0) 
     
     # FORZATURA OMEGA_N: Limite inferiore alzato a 100.0 per garantire rigidità del robot
-    wn_trial = trial.suggest_float("omega_n", 100.0, 200.0)
+    wn_trial = trial.suggest_float("omega_n", 100.0, 300.0)
     xi_trial = trial.suggest_float("xi", 0.5, 1.2)
     w_delta_trial = trial.suggest_float("w_delta", 10.0, 5000.0, log=True) 
     w_dds_trial = trial.suggest_float("w_dds", 10.0, 1000.0)
@@ -374,8 +374,8 @@ if __name__ == "__main__":
         "omega_n": 150.0, "xi": 0.7, "w_delta": 100.0, "w_dds": 50.0
     })
     
-    print("Avvio Ottimizzazione Multi-Obiettivo (NSGA-II) - Profilo Rigido e Veloce...")
-    study.optimize(objective, n_trials=3000, show_progress_bar=True, n_jobs=15) 
+    print("Avvio Ottimizzazione Multi-Obiettivo (NSGA-II)")
+    study.optimize(objective, n_trials=3000, show_progress_bar=True, n_jobs=30) 
     
     pareto_front = study.best_trials
 

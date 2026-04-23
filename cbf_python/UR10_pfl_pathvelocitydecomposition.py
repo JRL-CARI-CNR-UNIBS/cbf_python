@@ -19,16 +19,32 @@ from VisualizationClass import LogPlotter
 from QPSolver import QPSolver
 
 # CONFIGURATION
-USE_BRIDGE = False  # Set to True to use the real robot bridge, False for fake data from CSV  
+USE_BRIDGE = True  # Set to True to use the real robot bridge, False for fake data from CSV  
 
-# Optimal Parameters
-gamma_param = 3.0
-k_s_param = 20.0
-d_safe_param = 0.1
-omega_n_param = 170.0
-xi_param = 0.7
-w_delta_param = 500.0
-w_dds_param = 100.0
+# Optimal Parameters trial 1
+#gamma_param = 3.0
+#k_s_param = 20.0
+#d_safe_param = 0.1
+#omega_n_param = 170.0
+#xi_param = 0.7
+#w_delta_param = 500.0
+#w_dds_param = 100.0
+
+
+#optimal parameters trial 2 
+gamma_param = 12.23121268627893
+
+k_s_param = 21.19553747908057
+
+d_safe_param = 0.07567787352906322
+
+omega_n_param = 217.0218790798104
+
+xi_param = 0.7313318685539321
+
+w_dds_param =  11.726611774604084
+
+w_delta_param = 716.760716291634
 
 # Limits
 Dq_MAX = np.pi * np.array([1,1,1,1,1,1], dtype=np.float64) * np.pi
@@ -161,7 +177,7 @@ def main():
     print(f"Starting Simulation. Duration: 50s.")
 
     try:
-        while t < 50.0:
+        while t < 70.0:
             loop_start = time.perf_counter()
 
             ### NUOVO: Lettura dal sensore protetta da try-except
