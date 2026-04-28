@@ -52,20 +52,22 @@ from scripts.util.bcf_utils import plot_lambdas
 
 stop_event = threading.Event()
 
-params_filename = "../parameters_set.csv"
-test_name = "Polynomial_convex_recorded_skeleton"
+
+params_filename = "../dynamics_par_general_top_10.csv" #FILE WITH PARAMETERS
+trial_name = "dynamic_params_polynomial_general_case"
+test_name = "Polynomial_convex_recorded_skeleton"  #TEST NAME IN THE RESULTS FILE
 set_ID = "3083_no_delta"
-duration = 15000.0
+duration = 150.0
 
 USE_BRIDGE = False
 LOG_DATA = False
 
 SHOW_DATA = False
-SAVE_DATA = True
+SAVE_DATA = False
 test_type = "P"
 
 PLOT_MEAN = False
-PLOT_LAMBDAS = False
+PLOT_LAMBDAS = True
 h_mean_ref = -0.1
 h_std_dev = 0.15
 v_ref = 1.0
@@ -109,9 +111,8 @@ def main():
 
     cfg.h_t = 1.0
 
-    df = pd.read_csv(params_filename)
 
-    read_poly_config_data_from_csv(cfg=cfg, filename = "../Dynamic_parameters_results.csv", trial_name= "dynamic_params_polynomial_convex")
+    read_poly_config_data_from_csv(cfg=cfg, filename = params_filename, trial_name= trial_name)
 
     delta = 4.5
 

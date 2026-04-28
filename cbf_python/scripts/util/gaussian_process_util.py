@@ -301,29 +301,35 @@ def save_data_multiobj(study, filename="log_best_trials.csv", n_samples = 5):
             (weight_m_err * norm_m_err) +
             (weight_l_count * norm_l_count)
     )
+    # --- NEW LOGIC: Sort, Drop Duplicates, THEN take top n_samples ---
+    df_sorted = df_success.sort_values(by="calculated_cost", ascending=False)
 
-    # ... Proceed with your existing sorting and saving logic ...
-    top_5 = df_success.sort_values(by="calculated_cost", ascending=False).head(n_samples).copy()
-    # ...
+    # Identify columns to check for uniqueness (both metrics and parameters)
+    cols_for_uniqueness = [c for c in df_sorted.columns if c.startswith('values_') or c.startswith('params_')]
+
+    # Drop duplicates keeping the first occurrence (which is the highest cost since it's sorted)
+    top_samples = df_sorted.drop_duplicates(subset=cols_for_uniqueness, keep='first').head(n_samples).copy()
+    # -----------------------------------------------------------------
+
     # 4. Aggiungi timestamp e nome studio per tracciabilità
-    top_5.insert(0, 'timestamp', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    top_5.insert(1, 'study_name', study.study_name)
+    top_samples.insert(0, 'timestamp', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    top_samples.insert(1, 'study_name', study.study_name)
 
     # 5. Seleziona le colonne da salvare (dinamicamente)
     cols_to_keep = (
             ['timestamp', 'study_name', 'number', 'calculated_cost'] +
-            [c for c in top_5.columns if c.startswith('values_')] +  # I tuoi 3 obiettivi
-            [c for c in top_5.columns if c.startswith('params_')] +  # I parametri
-            [c for c in top_5.columns if c.startswith('user_attrs_')]  # Attributi (matrici incluse)
+            [c for c in top_samples.columns if c.startswith('values_')] +  # I tuoi obiettivi
+            [c for c in top_samples.columns if c.startswith('params_')] +  # I parametri
+            [c for c in top_samples.columns if c.startswith('user_attrs_')]  # Attributi (matrici incluse)
     )
-    top_5_clean = top_5[cols_to_keep]
+    top_samples_clean = top_samples[cols_to_keep]
 
     # 6. SALVATAGGIO INTELLIGENTE
     # Controlla se il file esiste
     file_exists = os.path.isfile(filename)
 
     # Scrivi in append. Se il file NON esiste, scrivi l'header. Se esiste, no.
-    top_5_clean.to_csv(filename, mode='a', header=not file_exists, index=False)
+    top_samples_clean.to_csv(filename, mode='a', header=not file_exists, index=False)
 
     action = "Creato nuovo file" if not file_exists else "Aggiornato file esistente"
-    print(f"{action}: {filename} con i 5 migliori record.")
+    print(f"{action}: {filename} con i {len(top_samples_clean)} migliori record unici.")
