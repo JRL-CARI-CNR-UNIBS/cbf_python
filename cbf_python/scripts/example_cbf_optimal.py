@@ -50,11 +50,11 @@ from scripts.util.gaussian_process_util import read_config_data_from_csv
 
 params_filename = "../parameters_set.csv"
 set_ID = "0"
-duration = 15000.0
+duration = 90.0
 
-SHOW_DATA = False
-USE_BRIDGE = False
-LOG_DATA = False
+SHOW_DATA = True
+USE_BRIDGE = True
+LOG_DATA = True
 SAVE_DATA = True
 
 parameters_type = "0"
@@ -110,7 +110,7 @@ def main():
     cfg = ControllerConfig(Tc=Tc)
     delta = 4.5
 
-    read_config_data_from_csv(cfg,h_mean=h_cfg, v_mean=v_cfg, filename="../log_best_trials.csv")
+    read_config_data_from_csv(cfg,h_mean=h_cfg, v_mean=v_cfg, filename="log_best_trials.csv")
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta)
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4

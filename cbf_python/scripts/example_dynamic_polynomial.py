@@ -53,13 +53,13 @@ from scripts.util.bcf_utils import plot_lambdas
 stop_event = threading.Event()
 
 
-params_filename = "../dynamics_par_general_top_10.csv" #FILE WITH PARAMETERS
-trial_name = "dynamic_params_polynomial_general_case"
-test_name = "Polynomial_convex_recorded_skeleton"  #TEST NAME IN THE RESULTS FILE
+params_filename = "din_par.csv" #FILE WITH PARAMETERS
+trial_name = "dynamic_params_polynomial_general_case_20260402"
+test_name = "dynamic_params_polynomial_general_case_20260402"  #TEST NAME IN THE RESULTS FILE
 set_ID = "3083_no_delta"
 duration = 150.0
 
-USE_BRIDGE = False
+USE_BRIDGE = True
 LOG_DATA = False
 
 SHOW_DATA = True
@@ -120,7 +120,7 @@ def main():
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
     print(f"config: {cfg}")
-    ctrl = PolynomialOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
+    ctrl = PolynomialOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=7)
     gamma_list = []
     lambda_pos_list = []
     lambda_vel_list = []
@@ -152,7 +152,7 @@ def main():
 
         T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
 
-        csv_path= "../skeleton_vectors/skeleton_vectors_22.csv"
+        csv_path= "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_23.csv"
         # csv_path= "../skeleton_vectors/skeleton_vectors_22.csv"
         bridge = FakeCommandBridge(
             UR10E_JOINTS,

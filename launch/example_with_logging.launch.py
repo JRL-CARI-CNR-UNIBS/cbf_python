@@ -71,7 +71,7 @@ def generate_launch_description():
     )
     # ---- 3) python example_cbf_optimal.py ----
     cbf_process = ExecuteProcess(
-        cmd=['python3', '-m', 'scripts.example_cbf_optimal'],
+        cmd=['python3', '-m', 'scripts.example_dynamic_polynomial'],
         output='screen',
     )
 
