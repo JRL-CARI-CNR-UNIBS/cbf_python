@@ -62,7 +62,7 @@ duration = 150.0
 USE_BRIDGE = False
 LOG_DATA = False
 
-SHOW_DATA = False
+SHOW_DATA = True
 SAVE_DATA = False
 test_type = "P"
 
@@ -518,7 +518,7 @@ def main():
                 if SHOW_DATA:
                     vizualization_string =f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  err={out['trajectory_error']:.2f} ctrl_state:{unfeasible_string}"
 
-                    renderer.push_state(out["q"], out["Tbt_nominal"], obstacle_positions, obstacle_velocities,vizualization_string)
+                    renderer.push_state(out["q"], out["Tbt_nominal"], obstacle_positions, None,vizualization_string)
                     elapsed = time.perf_counter() - loop_start
                     rest = max(0.0,Tc - elapsed)
                     time.sleep(rest)
