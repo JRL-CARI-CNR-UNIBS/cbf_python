@@ -214,6 +214,8 @@ def read_config_data_from_csv(cfg: GaussianControllerConfig, filename: str = "..
 
 def read_poly_config_data_from_csv(cfg: PolynomialControllerConfig, filename: str = "../../log_best_trials.csv", trial_name: str = ""):
     df = pd.read_csv(filename)
+    print(f"DEBUG: Loaded {len(df)} rows from {filename}")
+    print(df)
     df = df[df['study_name'].str.contains(trial_name)]
     df = df.sort_values(by="calculated_cost", ascending=False).head(1)
 

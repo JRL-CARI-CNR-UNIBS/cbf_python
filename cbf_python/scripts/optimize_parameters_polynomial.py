@@ -5,7 +5,7 @@ import optunahub
 import numpy as np
 import time
 import pinocchio as pin
-from util.joint_interpolator import SegmentedJointTrap
+from scripts.util.joint_interpolator import SegmentedJointTrap
 from sharework import loadSharework
 from Command_bridge.fake_command_bridge import FakeCommandBridge
 from Controller.optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
@@ -13,11 +13,11 @@ from multiprocessing import Process, Queue
 from queue import Empty
 from Controller.dynamic_params_controllers import (PolynomialControllerConfig, PolynomialOptimalController,
                                               )
-from util.test_utils import compute_ee_pose
-from util.gaussian_process_util import save_data_multiobj
+from scripts.util.test_utils import compute_ee_pose
+from scripts.util.gaussian_process_util import save_data_multiobj
 from pathlib import Path
 import pandas as pd
-from util.gaussian_process_util import generate_obs_state_h_fixed, compute_required_d, generate_target_h, save_data_multiobj
+from scripts.util.gaussian_process_util import generate_obs_state_h_fixed, compute_required_d, generate_target_h, save_data_multiobj
 spawn_freq = 10
 trial_duration = 1500.0
 n_trials = 6000
@@ -207,13 +207,7 @@ def run_episode(Tc=2e-3, duration=500.0, cfg = PolynomialControllerConfig() ):
     ctrl = PolynomialOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
    
     
-    bridge = FakeCommandBridge(
-        UR10E_JOINTS,
-        csv_path="/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv",
-        Tworld_to_cam=T_wc,
-        slowdown_factor=1.0,
-        t0=0.0
-    )
+    
 
     ctrl.reset_state(q)
     t = 0.0
@@ -237,13 +231,21 @@ def run_episode(Tc=2e-3, duration=500.0, cfg = PolynomialControllerConfig() ):
     ee_vel = np.zeros(3)
     count_move = 0
     Dtrajectory_time = 1.0
+    bridge = FakeCommandBridge(
+        UR10E_JOINTS,
+        csv_path= "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_23.csv",
+        Tworld_to_cam=T_wc,
+        slowdown_factor=1.0,
+        t0=0.0
+    )
     while t < duration:
         # obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles(elapsed = t)
         nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
         
-        h_objective = generate_target_h(h_mean_ref, ref_std_dev)
-        d_objective = compute_required_d(h_objective, vr_min, v_ref, np.linalg.norm(obstacle_accelerations) )
-        obstacle_positions, obstacle_velocities, enable_spawn, count_move = generate_obs_state_h_fixed(obstacle_positions, obstacle_velocities, nsteps, enable_spawn, ctrl.model, ctrl.data, tool_frame_id, ee_pos, Dtrajectory_time, count_move, d_objective, v_ref, spawn_freq, ee_vel)#nominal_q, nominal_Dq, nominal_DDq)
+        # h_objective = generate_target_h(h_mean_ref, ref_std_dev)
+        # d_objective = compute_required_d(h_objective, vr_min, v_ref, np.linalg.norm(obstacle_accelerations) )
+        # obstacle_positions, obstacle_velocities, enable_spawn, count_move = generate_obs_state_h_fixed(obstacle_positions, obstacle_velocities, nsteps, enable_spawn, ctrl.model, ctrl.data, tool_frame_id, ee_pos, Dtrajectory_time, count_move, d_objective, v_ref, spawn_freq, ee_vel)#nominal_q, nominal_Dq, nominal_DDq)
+        obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
 
 
         try:
@@ -361,7 +363,7 @@ study = optuna.create_study(
     storage=storage,
     #load_if_exists=True,
     #study_name=f"dynamic_params_polynomial_{time.strftime('%Y%m%d-%H%M%S')}",
-    study_name=f"dynamic_params_polynomial_general_case_{time.strftime('%Y%m%d-%H%M%S')}",
+    study_name=f"dynamic_params_polynomial_general_case_SV_23_{time.strftime('%Y%m%d-%H%M%S')}",
     load_if_exists=True,
 
 )

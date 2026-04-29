@@ -71,4 +71,4 @@ def generate_cartesian_trajectory(data_folder):
 
     print("Cartesian data for wrist 3 joint saved to 'ur10e_wrist_3_cartesian_state.csv'")
 
-generate_cartesian_trajectory("/home/galileo/projects/cbf_python_ws/cbf_python/cbf_python/resullts/simulation/scaling/OPT_5/")
+# generate_cartesian_trajectory("/home/galileo/projects/cbf_python_ws/cbf_python/cbf_python/resullts/simulation/scaling/OPT_5/")
