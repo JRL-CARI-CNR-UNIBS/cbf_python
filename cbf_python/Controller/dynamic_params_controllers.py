@@ -82,7 +82,7 @@ class PolynomialControllerConfig(ControllerConfig):
         ht = self.h_t if self.h_t != 0.0 else 1.0
 
         # Range extended slightly to visualize the flat regions clearly
-        h_vals = np.linspace(-0.2, ht + 0.2, 5000)
+        h_vals = np.linspace(-0.2, ht + 0.2, 50000)
 
         fig, axes = plt.subplots(3, 2, figsize=(14, 10))
         axes = axes.flatten()

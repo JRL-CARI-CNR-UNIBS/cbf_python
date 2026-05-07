@@ -53,17 +53,19 @@ from scripts.util.bcf_utils import plot_lambdas
 stop_event = threading.Event()
 
 
-params_filename = "din_par.csv" #FILE WITH PARAMETERS
-trial_name = "dynamic_params_polynomial_general_case_20260402"
-test_name = "dynamic_params_polynomial_general_case_20260402"  #TEST NAME IN THE RESULTS FILE
-set_ID = "3083_no_delta"
-duration = 150.0
+# params_filename = "din_par.csv" #FILE WITH PARAMETERS
+params_filename = "../dynamics_par_SV_23_top_10.csv" #FILE WITH PARAMETERS
 
-USE_BRIDGE = True
+trial_name = "dynamic_params"
+test_name = "GENERAL_TEST_HUMAN_SKELETON_22"  #TEST NAME IN THE RESULTS FILE
+set_ID = "3083_no_delta"
+duration = 15000.0
+
+USE_BRIDGE = False
 LOG_DATA = False
 
-SHOW_DATA = True
-SAVE_DATA = False
+SHOW_DATA = False
+SAVE_DATA = True
 test_type = "P"
 
 PLOT_MEAN = False
@@ -120,7 +122,7 @@ def main():
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
     print(f"config: {cfg}")
-    ctrl = PolynomialOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=7)
+    ctrl = PolynomialOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
     gamma_list = []
     lambda_pos_list = []
     lambda_vel_list = []
@@ -150,10 +152,10 @@ def main():
 
         R = quat.toRotationMatrix()
 
-        T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
+        T_wc = pin.SE3(R, np.array([-0.094, -0.93, 2.309]))
 
-        csv_path= "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_23.csv"
-        # csv_path= "../skeleton_vectors/skeleton_vectors_22.csv"
+        # csv_path= "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_23.csv"
+        csv_path= "../skeleton_vectors/skeleton_vectors_22.csv"
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
             csv_path=csv_path,
@@ -589,7 +591,7 @@ def main():
 
     # SAVING RESULTS
     if SAVE_DATA:
-        file_path = '../resullts/simulation_data.csv'
+        file_path = '../resullts/simulation_data_dynamic_params.csv'
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
         # Intestazioni delle colonne (headers)
