@@ -66,11 +66,11 @@ LOG_DATA = False
 
 SHOW_DATA = False
 SAVE_DATA = True
-test_type = "O"
+test_type = "P"
 
 PLOT_MEAN = False
 PLOT_LAMBDAS = True
-h_mean_ref =1
+h_mean_ref = -0.1
 h_std_dev = 0.15
 v_ref = 1.0
 spawn_freq = 10
@@ -219,9 +219,10 @@ def main():
 
 
     model = model_wrapper.model
-    viz = MeshcatVisualizer(model, model_wrapper.collision_model, model_wrapper.visual_model)
-    viz.initViewer(open=True)
-    viz.loadViewerModel()
+    if SHOW_DATA:
+        viz = MeshcatVisualizer(model, model_wrapper.collision_model, model_wrapper.visual_model)
+        viz.initViewer(open=True)
+        viz.loadViewerModel()
 
     tmp = np.array([-300, 0., 0.])
     obstacle_positions = [tmp.copy() for _ in range(18*5)]
@@ -230,21 +231,21 @@ def main():
     obstacle_accelerations = np.array([20.0, 20.0, 20.0]) * 0.0
     obstacle_accelerations = obstacle_accelerations.reshape(1, 3)
 
-    for i, pos in enumerate(obstacle_positions):
-        if i == 7:
-            viz.viewer[f"obstacle_{i}"].set_object(
-                mgeom.Sphere(0.1), mgeom.MeshLambertMaterial(color=0x000000)
-            )
-        else:
-            viz.viewer[f"obstacle_{i}"].set_object(
-                mgeom.Sphere(0.1), mgeom.MeshLambertMaterial(color=0xFF0000)
-            )
-
-    # Goal box (green)
-    side = 0.2
-    viz.viewer["goal"].set_object(
-        mgeom.Box([side, side, side / 10]), mgeom.MeshLambertMaterial(color=0x00FF00)
-    )
+    if SHOW_DATA:
+        for i, pos in enumerate(obstacle_positions):
+            if i == 7:
+                viz.viewer[f"obstacle_{i}"].set_object(
+                    mgeom.Sphere(0.1), mgeom.MeshLambertMaterial(color=0x000000)
+                )
+            else:
+                viz.viewer[f"obstacle_{i}"].set_object(
+                    mgeom.Sphere(0.1), mgeom.MeshLambertMaterial(color=0xFF0000)
+                )
+        # Goal box (green)
+        side = 0.2
+        viz.viewer["goal"].set_object(
+            mgeom.Box([side, side, side / 10]), mgeom.MeshLambertMaterial(color=0x00FF00)
+        )
 
     # HUD text node
     renderer = VisualizationDaemon(viz)  # default 60 Hz
@@ -349,7 +350,8 @@ def main():
     T_total = planner.computeTime()
     print(f"Total time: {T_total}")
     min_dist = []
-    renderer.publishPath(planner.publishPath())
+    if SHOW_DATA:
+        renderer.publishPath(planner.publishPath())
 
     ct, ct_qp, ct_ssm, ct_planner, ct_pin, h_log, trj_error_log, scaling_log = [], [], [], [], [], [], [], []
 
@@ -523,6 +525,8 @@ def main():
                     renderer.push_state(out["q"], out["Tbt_nominal"], obstacle_positions, None,vizualization_string)
                     elapsed = time.perf_counter() - loop_start
                     rest = max(0.0,Tc - elapsed)
+                    time.sleep(rest)
+                elif USE_BRIDGE:
                     time.sleep(rest)
                 else:
                     time.sleep(0.0001)
