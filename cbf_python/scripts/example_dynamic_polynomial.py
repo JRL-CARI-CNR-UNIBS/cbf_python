@@ -247,8 +247,8 @@ def main():
             mgeom.Box([side, side, side / 10]), mgeom.MeshLambertMaterial(color=0x00FF00)
         )
 
-    # HUD text node
-    renderer = VisualizationDaemon(viz)  # default 60 Hz
+        # HUD text node
+        renderer = VisualizationDaemon(viz)  # default 60 Hz
 
     # --------------------------- CONTROL INITIALISATION --------------------------
     q = first_joint_position.copy()

@@ -45,11 +45,11 @@ import csv
 from scripts.util.gaussian_process_util import generate_d_value, generate_obs_state_h_fixed, compute_required_d, generate_target_h, read_config_data_from_csv
 from scripts.util.mean_visualizer import StochasticCBFVisualizer
 set_ID = "0"
-duration = 150.0
+duration = 15000.0
 
-SHOW_DATA = True
+SHOW_DATA = False
 LOG_DATA = False
-SAVE_DATA = False
+SAVE_DATA = True
 parameters_type = "0"
 stop_event = threading.Event()
 
