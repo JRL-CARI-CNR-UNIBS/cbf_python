@@ -50,11 +50,11 @@ from scripts.util.gaussian_process_util import read_config_data_from_csv
 
 params_filename = "../parameters_set.csv"
 set_ID = "0"
-duration = 90.0
+duration = 15000.0
 
-SHOW_DATA = True
-USE_BRIDGE = True
-LOG_DATA = True
+SHOW_DATA = False
+USE_BRIDGE = False
+LOG_DATA = False
 SAVE_DATA = True
 
 parameters_type = "0"
@@ -65,12 +65,12 @@ stop_event = threading.Event()
 
 # h_cfg = "article"
 # v_cfg = "article"
-h_cfg = -0.1
+h_cfg = 1
 v_cfg = 1
 
 
 
-test_name= "recorded_skeleton_low_par"
+test_name= "recorded_skeleton_23_h_-0.1_par"
 # d_objective = 0.1
 
 def _on_sigint_with_bridge(bridge, signum, frame):
@@ -110,7 +110,7 @@ def main():
     cfg = ControllerConfig(Tc=Tc)
     delta = 4.5
 
-    read_config_data_from_csv(cfg,h_mean=h_cfg, v_mean=v_cfg, filename="log_best_trials.csv")
+    read_config_data_from_csv(cfg,h_mean=h_cfg, v_mean=v_cfg, filename="../log_best_trials.csv")
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta)
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
@@ -144,11 +144,11 @@ def main():
 
         R = quat.toRotationMatrix()
         if parameters_type == "0":
-            T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
+            T_wc = pin.SE3(R, np.array([-0.094, -0.93, 2.309]))
         else:
             T_wc = pin.SE3(R, np.array([1.04, -0.93, 2.309]))
 
-        csv_path= "../skeleton_vectors/skeleton_vectors_22.csv"        #csv_publishers.swap_csv(csv_in_path, csv_out_path, 7, 17)
+        csv_path= ("../skeleton_vectors/skeleton_vectors_23.csv")        #csv_publishers.swap_csv(csv_in_path, csv_out_path, 7, 17)
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
             csv_path=csv_path,

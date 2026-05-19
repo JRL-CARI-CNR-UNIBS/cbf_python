@@ -57,7 +57,7 @@ stop_event = threading.Event()
 params_filename = "../dynamics_par_SV_23_top_10.csv" #FILE WITH PARAMETERS
 
 trial_name = "dynamic_params"
-test_name = "GENERAL_TEST_HUMAN_SKELETON_22"  #TEST NAME IN THE RESULTS FILE
+test_name = "GENERAL_TEST_h_-0.1_v_1.0"  #TEST NAME IN THE RESULTS FILE
 set_ID = "3083_no_delta"
 duration = 15000.0
 
@@ -66,11 +66,11 @@ LOG_DATA = False
 
 SHOW_DATA = False
 SAVE_DATA = True
-test_type = "P"
+test_type = "O"
 
 PLOT_MEAN = False
 PLOT_LAMBDAS = True
-h_mean_ref = -0.1
+h_mean_ref =1
 h_std_dev = 0.15
 v_ref = 1.0
 spawn_freq = 10
@@ -155,7 +155,7 @@ def main():
         T_wc = pin.SE3(R, np.array([-0.094, -0.93, 2.309]))
 
         # csv_path= "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_23.csv"
-        csv_path= "../skeleton_vectors/skeleton_vectors_22.csv"
+        csv_path= "../skeleton_vectors/skeleton_vectors_23.csv"
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
             csv_path=csv_path,
