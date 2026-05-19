@@ -245,7 +245,7 @@ def run_episode(Tc=2e-3, duration=500.0, cfg = PolynomialControllerConfig() ):
         # h_objective = generate_target_h(h_mean_ref, ref_std_dev)
         # d_objective = compute_required_d(h_objective, vr_min, v_ref, np.linalg.norm(obstacle_accelerations) )
         # obstacle_positions, obstacle_velocities, enable_spawn, count_move = generate_obs_state_h_fixed(obstacle_positions, obstacle_velocities, nsteps, enable_spawn, ctrl.model, ctrl.data, tool_frame_id, ee_pos, Dtrajectory_time, count_move, d_objective, v_ref, spawn_freq, ee_vel)#nominal_q, nominal_Dq, nominal_DDq)
-        obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
+        obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles(elapsed=t)
 
 
         try:
@@ -302,7 +302,13 @@ def run_episode(Tc=2e-3, duration=500.0, cfg = PolynomialControllerConfig() ):
     mean_scale = sum_scale / max(1, nsteps)
     mean_trajectory_error = trajectory_error_sum / max(1, nsteps)
     low_scale_rate = low_scale_count / max(1, nsteps)
-    return viol_rate, mean_scale, mean_trajectory_error, low_scale_rate, lap_count
+    return (
+            float(viol_rate), 
+            float(mean_scale), 
+            float(mean_trajectory_error), 
+            float(low_scale_rate), 
+            float(lap_count)
+        )
 
 
 def _run_episode_worker(args, kwargs, q):
