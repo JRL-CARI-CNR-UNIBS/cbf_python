@@ -127,8 +127,9 @@ class PolynomialControllerConfig(ControllerConfig):
         axes[5].set_visible(False)
         plt.tight_layout()
 
-    """ Function to check that all lambdas are positive in the interval [0, h_t]"""
     def check_config_integrity(self):
+        """ Function to check that all lambdas are positive and there is no jump in the interval [0, h_t]"""
+
         self.generate_poly_dict()
         
         for index in self.polynomial_dict.keys():
@@ -137,21 +138,37 @@ class PolynomialControllerConfig(ControllerConfig):
             n = self.polynomial_dict[index][2]
             m = self.polynomial_dict[index][3]
             w = self.polynomial_dict[index][4]
-            
-            # 1. Prevent ZeroDivisionError (constant weight)
+
+            MAX_JUMP_TOLERANCE = 1e-3*abs(l_0)
+
+            # Relaxed slope constraint (Prevent LARGE vertical walls at h=0)
+            if n < 1.0:
+                # Calculate the approximate magnitude of the instant step
+                jump_magnitude = abs((l_f - l_0) * w)
+                if jump_magnitude > MAX_JUMP_TOLERANCE:
+                    return {"res" : False,
+                            "cause": "jump",
+                            "magnitude": jump_magnitude,
+                            "tolerance": MAX_JUMP_TOLERANCE
+                            }# The jump is too large, reject it.
+
+            # Prevent ZeroDivisionError (constant weight)
             if l_f == l_0:
                 if l_0 < 0:
-                    return False # The constant weight is already negative!
+                    return {"res": False,
+                            "cause": "negative weight",
+                            "magnitude": l_0
+                            } # The constant weight is already negative!
                 continue # Everything is fine, proceed to the next parameter
 
-            # 2. Safety check on exponents
+            # Safety check on exponents
             if m == n:
                 continue # Avoid zero division if m and n are equal
                 
             # Upper limit for w beyond which an overshoot occurs
             w_upper_limit = m / (m - n)
             
-            # 3. Calculate the extremum ONLY if w creates an undershoot or an overshoot
+            # Calculate the extremum ONLY if w creates an undershoot or an overshoot
             if w < 0 or w > w_upper_limit:
                 base = (w * n) / ((w - 1) * m)
                 
@@ -165,13 +182,17 @@ class PolynomialControllerConfig(ControllerConfig):
                     if l_f > l_0:
                         # Increasing transition: risk of undershoot
                         if y_ext < comparison_term:
-                            return False
+                            return {"res": False,
+                                    "cause": "Increasing transition: risk of undershoot",
+                                    }
                     else:
                         # Decreasing transition: risk of overshoot
                         if y_ext > comparison_term:
-                            return False
+                            return {"res": False,
+                                    "cause": "Decreasing transition: risk of overshoot",
+                                    }
                             
-        return True
+        return {"res":True}
     
     def normalize_parameters(self):
         """

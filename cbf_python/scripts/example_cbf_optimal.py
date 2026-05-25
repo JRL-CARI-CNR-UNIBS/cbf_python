@@ -50,12 +50,12 @@ from scripts.util.gaussian_process_util import read_config_data_from_csv
 
 params_filename = "../parameters_set.csv"
 set_ID = "0"
-duration = 15000.0
+duration = 500.0
 
 SHOW_DATA = False
 USE_BRIDGE = False
 LOG_DATA = False
-SAVE_DATA = True
+SAVE_DATA = False
 
 parameters_type = "0"
 
@@ -63,10 +63,10 @@ stop_event = threading.Event()
 
 
 
-# h_cfg = "article"
-# v_cfg = "article"
-h_cfg = 1
-v_cfg = 1
+h_cfg = "article"
+v_cfg = "article"
+# h_cfg = 1
+# v_cfg = 1
 
 
 

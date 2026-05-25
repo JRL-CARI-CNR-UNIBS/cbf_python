@@ -44,7 +44,7 @@ import threading
 from scripts.util import csv_publishers, test_publish_utils as pub_utils
 from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
 from Controller.dynamic_params_controllers import (PolynomialControllerConfig, PolynomialOptimalController,)
-from scripts.util.test_utils import compute_ee_pose
+from scripts.util.test_utils import compute_ee_pose, plan_path
 import pandas as pd
 from scripts.util.mean_visualizer import StochasticCBFVisualizer
 from scripts.util.bcf_utils import plot_lambdas
@@ -54,10 +54,11 @@ stop_event = threading.Event()
 
 
 # params_filename = "din_par.csv" #FILE WITH PARAMETERS
-params_filename = "../dynamics_par_SV_23_top_10.csv" #FILE WITH PARAMETERS
+params_filename = "../dynamics_par_multicase_top_10.csv" #FILE WITH PARAMETERS
+
 
 trial_name = "dynamic_params"
-test_name = "GENERAL_TEST_h_-0.1_v_1.0"  #TEST NAME IN THE RESULTS FILE
+test_name = "GENERAL_TEST_h_high"  #TEST NAME IN THE RESULTS FILE
 set_ID = "3083_no_delta"
 duration = 15000.0
 
@@ -65,13 +66,13 @@ USE_BRIDGE = False
 LOG_DATA = False
 
 SHOW_DATA = False
-SAVE_DATA = True
-test_type = "P"
+SAVE_DATA = False
+test_type = "O"
 
 PLOT_MEAN = False
 PLOT_LAMBDAS = True
-h_mean_ref = -0.1
-h_std_dev = 0.15
+h_mean_ref = -0.10
+h_std_dev = 0.2
 v_ref = 1.0
 spawn_freq = 10
 
@@ -310,17 +311,7 @@ def main():
 
         q = home.copy()
     # 2 · add way‑points -------------------------------------------
-
-    planner.addWayPoint(q)
-    planner.addWayPoint(q10)
-    planner.addWayPoint(q20)
-    planner.addWayPoint(q10)
-    planner.addWayPoint(q22)
-    planner.addWayPoint(q25)
-    planner.addWayPoint(q30)
-    planner.addWayPoint(q40)
-    planner.addWayPoint(q30)
-    planner.addWayPoint(q)
+    plan_path(planner, q)
     n_wp = 10
     configs = {
         "q": q,

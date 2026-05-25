@@ -6,7 +6,8 @@ from sqlalchemy import create_engine, text
 import pandas as pd
 import os
 from datetime import datetime
-storage_url = "postgresql+psycopg2://optuna:optuna_pw@192.168.66.100:5432/optuna_db"
+import numpy as np
+storage_url = "postgresql+psycopg2://optuna:optuna_pw@192.168.66.106:5432/optuna_db"
 engine = create_engine(storage_url)
 
 n_samples = 10
@@ -86,6 +87,89 @@ def save_data_multiobj(study, filename="log_best_trials.csv", n_samples = 5):
     action = "Creato nuovo file" if not file_exists else "Aggiornato file esistente"
     print(f"{action}: {filename} con i {len(top_samples_clean)} migliori record unici.")
 
+
+def save_data_multitrial(study, filename="log_best_trials.csv", n_samples=5):
+    df = study.trials_dataframe()
+    df_success = df[df["state"] == "COMPLETE"].copy()
+
+    if df_success.empty or len(df_success) < 2:
+        print("Non ci sono abbastanza trial completati per normalizzare e salvare.")
+        return
+
+    # Funzione di normalizzazione orientata al COSTO (0.0 = Ottimo, 1.0 = Pessimo)
+    def normalize_to_cost(series, maximize=False):
+        s_min, s_max = series.min(), series.max()
+        if s_max == s_min:
+            return pd.Series(0.0, index=series.index)  # Se sono tutti uguali, costo 0
+
+        if maximize:
+            # Se vogliamo massimizzare (es. lap count), il max ha costo 0
+            return (s_max - series) / (s_max - s_min)
+        else:
+            # Se vogliamo minimizzare (es. error), il min ha costo 0
+            return (series - s_min) / (s_max - s_min)
+
+    # Pesi stabiliti
+    weights = {
+        "viol_rate": 1.0,  # Da minimizzare
+        "mean_scale": 2.0,  # Da massimizzare
+        "traj_err": 1.5,  # Da minimizzare
+        "lap_count": 1.0 # Da massimizzare
+    }
+
+    scenarios = ["h_high", "h_low", "sv"]
+
+    # Calcolo dei 3 costi separati
+    for sc in scenarios:
+        c_viol = normalize_to_cost(df_success[f"user_attrs_{sc}_viol_rate"], maximize=False)
+        c_scale = normalize_to_cost(df_success[f"user_attrs_{sc}_mean_scale"], maximize=True)
+        c_err = normalize_to_cost(df_success[f"user_attrs_{sc}_traj_err"], maximize=False)
+        c_lap = normalize_to_cost(df_success[f"user_attrs_{sc}_lap_count"], maximize=True)
+
+        df_success[f"cost_{sc}"] = (
+                (weights["viol_rate"] * c_viol) +
+                (weights["mean_scale"] * c_scale) +
+                (weights["traj_err"] * c_err) +
+                (weights["lap_count"] * c_lap)
+        )
+
+    # Calcolo della distanza Euclidea dal punto (0,0,0)
+    df_success["calculated_cost"] = np.sqrt(
+        df_success["cost_h_high"] ** 2 +
+        df_success["cost_h_low"] ** 2 +
+        df_success["cost_sv"] ** 2
+    )
+
+    # Ordino in modo crescente (distanza minore = migliore)
+    df_sorted = df_success.sort_values(by="calculated_cost", ascending=True)
+
+    # Identifico le colonne per l'unicità
+    cols_for_uniqueness = [c for c in df_sorted.columns if c.startswith('user_attrs_') or c.startswith('params_')]
+
+    # Rimuovo i duplicati tenendo il primo (che ora è il costo più basso)
+    top_samples = df_sorted.drop_duplicates(subset=cols_for_uniqueness, keep='first').head(n_samples).copy()
+
+    # Aggiunta metadati
+    top_samples.insert(0, 'timestamp', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    top_samples.insert(1, 'study_name', study.study_name)
+
+    # Selezione colonne finali dinamica
+    cols_to_keep = (
+            ['timestamp', 'study_name', 'number', 'calculated_cost', 'cost_h_high', 'cost_h_low', 'cost_sv'] +
+            [c for c in top_samples.columns if c.startswith('user_attrs_')] +
+            [c for c in top_samples.columns if c.startswith('params_')]
+    )
+
+    # Gestisco il caso in cui ci siano colonne non presenti per evitare errori
+    cols_to_keep = [c for c in cols_to_keep if c in top_samples.columns]
+    top_samples_clean = top_samples[cols_to_keep]
+
+    # Salvataggio
+    file_exists = os.path.isfile(filename)
+    top_samples_clean.to_csv(filename, mode='a', header=not file_exists, index=False)
+
+    action = "Creato nuovo file" if not file_exists else "Aggiornato file esistente"
+    print(f"{action}: {filename} con i {len(top_samples_clean)} migliori record unici.")
 def rebuild_gpr_ds():
     # First value: -0.1 to 1.0 (step 0.05)
     val1_list = [round(-0.1 + i * 0.05, 2) for i in range(23)]  # 23 steps reach 1.0
@@ -153,7 +237,7 @@ def rebuild_generic_ds(prefix = f"dynamic_params_polynomial_general_case_%"):
     # Verify by printing the best parameters found so far
     print(f"Study {study_name} loaded successfully.")
 
-    save_data_multiobj(study=study, filename=f"../dynamics_par_SV_23_top_{n_samples}.csv", n_samples=n_samples)
+    save_data_multitrial(study=study, filename=f"../dynamics_par_multicase_top_{n_samples}.csv", n_samples=n_samples)
 
-rebuild_generic_ds(prefix = "dynamic_params_polynomial_general_case_SV_23_20260430%")
+rebuild_generic_ds(prefix = "dynamic_params_polynomial_multicase%")
 # rebuild_gpr_ds()
