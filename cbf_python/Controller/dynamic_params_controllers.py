@@ -139,7 +139,7 @@ class PolynomialControllerConfig(ControllerConfig):
             m = self.polynomial_dict[index][3]
             w = self.polynomial_dict[index][4]
 
-            MAX_JUMP_TOLERANCE = 1e-3*abs(l_0)
+            MAX_JUMP_TOLERANCE = max(1e-3*abs(l_0), 1e-10)
 
             # Relaxed slope constraint (Prevent LARGE vertical walls at h=0)
             if n < 1.0:

@@ -14,13 +14,13 @@ from queue import Empty
 from Controller.dynamic_params_controllers import (PolynomialControllerConfig, PolynomialOptimalController,
                                               )
 from scripts.util.test_utils import compute_ee_pose
-from scripts.util.gaussian_process_util import save_data_multiobj
+from scripts.util.gaussian_process_util import save_data_multiobj, save_data_multitrial
 from pathlib import Path
 import pandas as pd
 from scripts.util.gaussian_process_util import generate_obs_state_h_fixed, compute_required_d, generate_target_h, save_data_multiobj
 spawn_freq = 10
 trial_duration = 1500.0
-n_trials = 6000
+n_trials = 10000
 # std_dev= 0.1
 # h_mean_ref = 0.5
 # ref_std_dev = 0.5
@@ -30,10 +30,10 @@ def compute_scenario_cost(viol_rate, mean_scale, traj_err, lap_count):
     norm_viol = viol_rate / 0.1 # Assuming 20 is worst-case
     norm_scale = 1.0 - mean_scale  # 1 is best, 0 is worst
     norm_err = traj_err / 0.05  # Assuming 0.05 is worst-case error
-    norm_lap = 1.0 - (lap_count / 200.0)  # Assuming 200 is best-case laps
+    norm_lap = 1.0 - (lap_count / 25.0)  # Assuming 25 is best-case laps
 
     # 2. Define importance weights (Tune these based on what you care about most)
-    w_viol = 5.0
+    w_viol = 3.0
     w_scale = 2.0
     w_err = 1.0
     w_lap = 0.2
@@ -74,11 +74,11 @@ def make_objective():
         cfg.m_scaling = trial.suggest_float("m_scaling", 1, 10, log=True)
         cfg.m_gamma = trial.suggest_float("m_gamma", 1, 10, log=True)
 
-        cfg.n_pos = trial.suggest_float("n_pos", 1e-4, 10, log=True)
-        cfg.n_vel= trial.suggest_float("n_vel", 1e-4, 10, log=True)
-        cfg.n_acc = trial.suggest_float("n_acc", 1e-4, 10, log=True)
-        cfg.n_scaling = trial.suggest_float("n_scaling", 1e-4, 10, log=True)
-        cfg.n_gamma = trial.suggest_float("n_gamma", 1e-4, 10, log=True)
+        cfg.n_pos = trial.suggest_float("n_pos", 1e-3, 10, log=True)
+        cfg.n_vel= trial.suggest_float("n_vel", 1e-3, 10, log=True)
+        cfg.n_acc = trial.suggest_float("n_acc", 1e-3, 10, log=True)
+        cfg.n_scaling = trial.suggest_float("n_scaling", 1e-3, 10, log=True)
+        cfg.n_gamma = trial.suggest_float("n_gamma", 1e-3, 10, log=True)
 
         cfg.w_pos = trial.suggest_float("w_pos", 1e-9, 10, log = True)
         cfg.w_vel = trial.suggest_float("w_vel", 1e-9, 10, log = True)
@@ -97,8 +97,10 @@ def make_objective():
         cfg.delta_q_max[2:4] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*2
         cfg.delta_q_max[4:6] = np.deg2rad(np.array([1,1], dtype=np.float64) * delta)*4
         cfg.normalize_parameters()
-        if not cfg.check_config_integrity():
+        integrity_dict = cfg.check_config_integrity()
+        if not integrity_dict["res"]:
             print("Invalid configuration, skipping trial")
+            print(integrity_dict)
             print(cfg)
             raise optuna.TrialPruned()
         try:
@@ -320,7 +322,6 @@ def run_episode(Tc=2e-3, duration=500.0, cfg = PolynomialControllerConfig() ):
                 float(viol_rate),
                 float(mean_scale),
                 float(mean_trajectory_error),
-                float(low_scale_rate),
                 float(lap_count)
             )
 
@@ -391,11 +392,11 @@ study = optuna.create_study(
     storage=storage,
     #load_if_exists=True,
     #study_name=f"dynamic_params_polynomial_{time.strftime('%Y%m%d-%H%M%S')}",
-    study_name=f"dynamic_params_polynomial_multicase_{time.strftime('%Y%m%d-%H%M%S')}",
+    study_name=f"dynamic_params_polynomial_multicase_no_jump_{time.strftime('%Y%m%d-%H%M%S')}",
     load_if_exists=True,
 
 )
 study.set_metric_names(["cost_sv", "cost_low", "cost_high"])
 study.optimize(make_objective(), n_trials=n_trials, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
-save_data_multiobj(study, filename="Dynamic_parameters_general_case_results.csv")
+save_data_multitrial(study, filename="Dynamic_parameters_multitrial_results.csv")
     # print (run_episode(1e3,1e3,1e3,1e-3,5,1))

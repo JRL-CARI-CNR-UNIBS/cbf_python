@@ -54,27 +54,26 @@ stop_event = threading.Event()
 
 
 # params_filename = "din_par.csv" #FILE WITH PARAMETERS
-params_filename = "../dynamics_par_multicase_no_jump_top_10.csv" #FILE WITH PARAMETERS
-# params_filename = "../dynamics_par_multicase_top_10.csv" #FILE WITH PARAMETERS
+params_filename = "dynamics_par_multicase_no_jump_top_10.csv" #FILE WITH PARAMETERS
 
 
 trial_name = "dynamic_params"
-test_name = ("GENERAL_TEST_SV")  #TEST NAME IN THE RESULTS FILE
+test_name = "GENERAL_TEST_h_high"  #TEST NAME IN THE RESULTS FILE
 set_ID = "3083_no_delta"
-duration = 500.0
+duration = 15000.0
 
-USE_BRIDGE = False
+USE_BRIDGE = True
 LOG_DATA = False
 
 SHOW_DATA = False
-SAVE_DATA = True
+SAVE_DATA = False
 test_type = "O"
 
 PLOT_MEAN = False
 PLOT_LAMBDAS = True
-h_mean_ref = 0.50
-h_std_dev = 0.5
-v_ref = 0.5
+h_mean_ref = -0.10
+h_std_dev = 0.2
+v_ref = 1.0
 spawn_freq = 10
 
 def _on_sigint_with_bridge(bridge, signum, frame):
@@ -154,7 +153,7 @@ def main():
 
         R = quat.toRotationMatrix()
 
-        T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
+        T_wc = pin.SE3(R, np.array([-0.094, -0.93, 2.309]))
 
         # csv_path= "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_23.csv"
         csv_path= "../skeleton_vectors/skeleton_vectors_23.csv"
@@ -444,7 +443,6 @@ def main():
                 # print(f"actual lap: {int(trajectory_time % T_total)}")
             elapsed = time.perf_counter() - loop_start
             ct_qp.append(elapsed)
-            visualizer.update_vectors(out["h_min"], out["d_min"], out["vr_min"] - out["vh_min"], t,)
 
             # --------------------------- INTEGRATION ----------------------------
             t += Tc
@@ -642,8 +640,6 @@ def main():
     if PLOT_LAMBDAS:
         plot_lambdas(t_list, gamma_list, lambda_pos_list, lambda_vel_list, lambda_acc_list, lambda_scaling_list)
         cfg.plot_lambdas()
-        visualizer.compute_mean_cov(True)
-        visualizer.plot_mean_std(0,0)
         plt.show()
 if __name__ == "__main__":
     main()
