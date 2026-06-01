@@ -29,6 +29,8 @@ def plot_multiple_gaussians(cfg:GaussianControllerConfig):
 
     # 2. Calculate and plot each Gaussian PDF
     for i, (mean, std_dev) in enumerate(params_list):
+
+        std_dev *= 1.5
         # The mathematical formula for the Gaussian PDF
         pdf = (1 / (std_dev * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((x - mean) / std_dev) ** 2)
 
@@ -44,7 +46,7 @@ def plot_multiple_gaussians(cfg:GaussianControllerConfig):
     plt.xlabel('Value of $h$', fontsize=12)
     plt.ylabel('Probability Density', fontsize=12)
     plt.grid(True, linestyle='--', alpha=0.7)
-    plt.legend(fontsize=11)
+    plt.legend(fontsize=11, loc= "upper left")
 
     # Display the plot
     plt.tight_layout()

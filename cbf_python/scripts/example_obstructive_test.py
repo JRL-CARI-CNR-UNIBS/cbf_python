@@ -362,16 +362,16 @@ def main():
                 scaling_log.append(Dtrajectory_time)
                 h_log.append(out["h_min"])
                 trj_error_log.append(out["trajectory_error"])
-            if (out["h_min"] < (h_objective + 1.5 * h_std_dev) and out["h_min"] > (h_objective - 1.5 * h_std_dev)) or SAVE_DATA:
-                if out["h_min"] < 0 and out["vr_min"] < -1e-3:
-                    violations += 1
-                sum_scale += out["Dtrajectory_time"]
-                trajectory_error_sum += out["trajectory_error"]
+            # if (out["h_min"] < (h_objective + 1.5 * h_std_dev) and out["h_min"] > (h_objective - 1.5 * h_std_dev)) or SAVE_DATA:
+            if out["h_min"] < 0 and out["vr_min"] < -1e-3:
+                violations += 1
+            sum_scale += out["Dtrajectory_time"]
+            trajectory_error_sum += out["trajectory_error"]
 
-                if out["Dtrajectory_time"] < scaling_threshold:
-                    low_scale_count += 1
+            if out["Dtrajectory_time"] < scaling_threshold:
+                low_scale_count += 1
 
-                visualizer.update_vectors(out["h_min"], out["d_min"], out["vr_min"] - out["vh_min"], t,)
+            visualizer.update_vectors(out["h_min"], out["d_min"], out["vr_min"] - out["vh_min"], t,)
             elapsed = time.perf_counter() - loop_start
 
             rest = Tc - elapsed

@@ -237,7 +237,7 @@ def rebuild_generic_ds(prefix = f"dynamic_params_polynomial_general_case_%"):
     # Verify by printing the best parameters found so far
     print(f"Study {study_name} loaded successfully.")
 
-    save_data_multitrial(study=study, filename=f"../dynamics_par_multicase_top_{n_samples}.csv", n_samples=n_samples)
+    save_data_multitrial(study=study, filename=f"../dynamics_par_multicase_no_jump_top_{n_samples}.csv", n_samples=n_samples)
 
-rebuild_generic_ds(prefix = "dynamic_params_polynomial_multicase%")
+rebuild_generic_ds(prefix = "dynamic_params_polynomial_multicase_no_jump_%")
 # rebuild_gpr_ds()
