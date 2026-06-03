@@ -336,7 +336,8 @@ def save_data_multiobj(study, filename="log_best_trials.csv", n_samples = 5):
     action = "Creato nuovo file" if not file_exists else "Aggiornato file esistente"
     print(f"{action}: {filename} con i {len(top_samples_clean)} migliori record unici.")
 
-def save_data_multitrial(study, filename="log_best_trials.csv", n_samples=5):
+def save_data_multitrial(study, filename="log_best_trials.csv", n_samples=5, scenarios = ["h_high", "h_low", "h_025", "h_05"]
+):
     df = study.trials_dataframe()
     df_success = df[df["state"] == "COMPLETE"].copy()
 
@@ -365,7 +366,6 @@ def save_data_multitrial(study, filename="log_best_trials.csv", n_samples=5):
         "lap_count": 1.0 # Da massimizzare
     }
 
-    scenarios = ["h_high", "h_low", "sv"]
 
     # Calcolo dei 3 costi separati
     for sc in scenarios:

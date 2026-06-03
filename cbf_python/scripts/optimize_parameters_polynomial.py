@@ -104,16 +104,11 @@ def make_objective():
             print(cfg)
             raise optuna.TrialPruned()
         try:
-              sv_metrics, h_low_metrics, h_high_metrics  = run_episode_with_timeout(
+              h_low_metrics, h_025_metrics, h_05_metrics, h_high_metrics  = run_episode_with_timeout(
                 cfg = cfg, Tc=2e-3, duration=trial_duration,
                 timeout=6000
               )
               # 3. Save the raw metrics to the trial
-              # Standard Scenario
-              trial.set_user_attr("sv_viol_rate", sv_metrics[0])
-              trial.set_user_attr("sv_mean_scale", sv_metrics[1])
-              trial.set_user_attr("sv_traj_err", sv_metrics[2])
-              trial.set_user_attr("sv_lap_count", sv_metrics[3])
 
               # High-Low Scenario
               trial.set_user_attr("h_low_viol_rate", h_low_metrics[0])
@@ -121,6 +116,15 @@ def make_objective():
               trial.set_user_attr("h_low_traj_err", h_low_metrics[2])
               trial.set_user_attr("h_low_lap_count", h_low_metrics[3])
 
+              trial.set_user_attr("h_025_viol_rate", h_025_metrics[0])
+              trial.set_user_attr("h_025_mean_scale", h_025_metrics[1])
+              trial.set_user_attr("h_025_traj_err", h_025_metrics[2])
+              trial.set_user_attr("h_025_lap_count", h_025_metrics[3])
+
+              trial.set_user_attr("h_05_viol_rate", h_05_metrics[0])
+              trial.set_user_attr("h_05_mean_scale", h_05_metrics[1])
+              trial.set_user_attr("h_05_traj_err", h_05_metrics[2])
+              trial.set_user_attr("h_05_lap_count", h_05_metrics[3])
               # High-High Scenario
               trial.set_user_attr("h_high_viol_rate", h_high_metrics[0])
               trial.set_user_attr("h_high_mean_scale", h_high_metrics[1])
@@ -128,14 +132,15 @@ def make_objective():
               trial.set_user_attr("h_high_lap_count", h_high_metrics[3])
 
               # 4. Compute composite costs using your function
-              cost_sv = compute_scenario_cost(*sv_metrics)
               cost_h_low = compute_scenario_cost(*h_low_metrics)
+              cost_h_025 = compute_scenario_cost(*h_025_metrics)
+              cost_h_05 = compute_scenario_cost(*h_05_metrics)
               cost_h_high = compute_scenario_cost(*h_high_metrics)
         except TimeoutError:
             # For directions: [minimize, maximize, minimize, minimize]
             raise optuna.TrialPruned()
 
-        return cost_sv, cost_h_low, cost_h_high
+        return cost_h_low, cost_h_025, cost_h_05, cost_h_high
     return objective
 
 # Camera and bridge
@@ -249,7 +254,7 @@ def run_episode(Tc=2e-3, duration=500.0, cfg = PolynomialControllerConfig() ):
         Dtrajectory_time = 1.0
         bridge = FakeCommandBridge(
             UR10E_JOINTS,
-            csv_path= "/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_23.csv",
+            csv_path= "/home/galileo_gal/projects/python/cbf_python_ws/cbf_python/cbf_python/skeleton_vectors/skeleton_vectors_23.csv",
             Tworld_to_cam=T_wc,
             slowdown_factor=1.0,
             t0=0.0
@@ -325,10 +330,11 @@ def run_episode(Tc=2e-3, duration=500.0, cfg = PolynomialControllerConfig() ):
                 float(lap_count)
             )
 
-    sv_params = run_subepisode(True, duration/3 )
-    h_low_params = run_subepisode(False, duration/3, -0.1, 0.2, 1.0 )
-    h_high_params = run_subepisode(False, duration/3, 0.9, 0.2, 1.0)
-    return [sv_params, h_low_params, h_high_params]
+    h_low_params = run_subepisode(False, duration / 3, -0.1, 0.1, 1.0 )
+    h_025_params = run_subepisode(False, duration / 3, 0.25, 0.1, 1.0)
+    h_05_params = run_subepisode(False, duration / 3, 0.5, 0.1, 1.0)
+    h_high_params = run_subepisode(False, duration/3, 0.9, 0.1, 1.0)
+    return [h_low_params, h_025_params, h_05_params, h_high_params]
 
 def _run_episode_worker(args, kwargs, q):
     """Runs run_episode and returns either ('ok', result) or ('err', repr(exception))."""
@@ -387,16 +393,16 @@ sampler = optuna.samplers.NSGAIISampler(
     mutation_prob=0.15    # Slightly higher mutation to prevent local minima over 6000 trials
 )
 study = optuna.create_study(
-    directions=["minimize", "minimize", "minimize"],
+    directions=["minimize", "minimize", "minimize", "minimize"],
     sampler=sampler,
     storage=storage,
     #load_if_exists=True,
     #study_name=f"dynamic_params_polynomial_{time.strftime('%Y%m%d-%H%M%S')}",
-    study_name=f"dynamic_params_polynomial_multicase_no_jump_{time.strftime('%Y%m%d-%H%M%S')}",
+    study_name=f"dynamic_params_polynomial_multicase_no_jump_h_mixed_{time.strftime('%Y%m%d-%H%M%S')}",
     load_if_exists=True,
 
 )
-study.set_metric_names(["cost_sv", "cost_low", "cost_high"])
+study.set_metric_names(["cost_low", "cost_025", "cost_05", "cost_high"])
 study.optimize(make_objective(), n_trials=n_trials, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
 save_data_multitrial(study, filename="Dynamic_parameters_multitrial_results.csv")
     # print (run_episode(1e3,1e3,1e3,1e-3,5,1))
