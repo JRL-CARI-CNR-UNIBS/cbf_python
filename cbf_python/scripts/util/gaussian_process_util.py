@@ -366,7 +366,7 @@ def save_data_multitrial(study, filename="log_best_trials.csv", n_samples=5, sce
         "lap_count": 1.0 # Da massimizzare
     }
 
-
+    cost_sum = 0.0
     # Calcolo dei 3 costi separati
     for sc in scenarios:
         c_viol = normalize_to_cost(df_success[f"user_attrs_{sc}_viol_rate"], maximize=False)
@@ -374,19 +374,16 @@ def save_data_multitrial(study, filename="log_best_trials.csv", n_samples=5, sce
         c_err = normalize_to_cost(df_success[f"user_attrs_{sc}_traj_err"], maximize=False)
         c_lap = normalize_to_cost(df_success[f"user_attrs_{sc}_lap_count"], maximize=True)
 
-        df_success[f"cost_{sc}"] = (
+        single_cost = (
                 (weights["viol_rate"] * c_viol) +
                 (weights["mean_scale"] * c_scale) +
                 (weights["traj_err"] * c_err) +
                 (weights["lap_count"] * c_lap)
         )
-
-    # Calcolo della distanza Euclidea dal punto (0,0,0)
-    df_success["calculated_cost"] = np.sqrt(
-        df_success["cost_h_high"] ** 2 +
-        df_success["cost_h_low"] ** 2 +
-        df_success["cost_sv"] ** 2
-    )
+        df_success[f"cost_{sc}"] = single_cost
+        cost_sum += single_cost**2
+        # Calcolo della distanza Euclidea dal punto (0,0,0)
+    df_success["calculated_cost"] = np.sqrt( cost_sum )
 
     # Ordino in modo crescente (distanza minore = migliore)
     df_sorted = df_success.sort_values(by="calculated_cost", ascending=True)
