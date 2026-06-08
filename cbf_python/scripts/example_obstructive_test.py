@@ -44,16 +44,16 @@ from scripts.util.test_utils import generate_obs_state, compute_ee_pose, generat
 import csv
 from scripts.util.gaussian_process_util import generate_d_value, generate_obs_state_h_fixed, compute_required_d, generate_target_h, read_config_data_from_csv
 from scripts.util.mean_visualizer import StochasticCBFVisualizer
-duration = 15000.0
+duration = 1000.0
 
 SHOW_DATA = False
 LOG_DATA = False
-SAVE_DATA = True
+SAVE_DATA = False
 stop_event = threading.Event()
 
 # h_cfg = "article"
 # v_cfg = "article"
-h_cfg = 1
+h_cfg = -0.1
 v_cfg = 1
 
 
@@ -61,7 +61,7 @@ v_cfg = 1
 h_mean_ref = -0.1
 v_ref = 1
 spawn_freq = 10
-h_std_dev = 0.15
+h_std_dev = 0.1
 test_name= f"TEST_OBSTRUCTIVE_h_mean_{h_mean_ref:.2f}_v_mean_{v_ref:.2f}_par_h_{h_cfg}_v_{v_cfg}"
 # test_name= f"TEST_OBSTRUCTIVE_h_mean_{h_mean_ref:.2f}_v_mean_{v_ref:.2f}_paper_par"
 # d_objective = 0.1

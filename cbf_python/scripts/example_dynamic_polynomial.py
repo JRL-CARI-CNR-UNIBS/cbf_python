@@ -54,15 +54,15 @@ stop_event = threading.Event()
 
 
 # params_filename = "din_par.csv" #FILE WITH PARAMETERS
-params_filename = "dynamics_par_multicase_no_jump_top_10.csv" #FILE WITH PARAMETERS
+params_filename = "../dynamics_par_multicase_no_jump_h_mixed_top_10.csv" #FILE WITH PARAMETERS
 
 
 trial_name = "dynamic_params"
 test_name = "GENERAL_TEST_h_high"  #TEST NAME IN THE RESULTS FILE
 set_ID = "3083_no_delta"
-duration = 15000.0
+duration = 1000.0
 
-USE_BRIDGE = True
+USE_BRIDGE = False
 LOG_DATA = False
 
 SHOW_DATA = False
@@ -71,8 +71,8 @@ test_type = "O"
 
 PLOT_MEAN = False
 PLOT_LAMBDAS = True
-h_mean_ref = -0.10
-h_std_dev = 0.2
+h_mean_ref = 0.25
+h_std_dev = 0.1
 v_ref = 1.0
 spawn_freq = 10
 

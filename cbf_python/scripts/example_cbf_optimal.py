@@ -50,7 +50,7 @@ from scripts.util.gaussian_process_util import read_config_data_from_csv
 
 params_filename = "../parameters_set.csv"
 set_ID = "0"
-duration = 500.0
+duration = 1000.0
 
 SHOW_DATA = False
 USE_BRIDGE = False
@@ -63,10 +63,10 @@ stop_event = threading.Event()
 
 
 
-h_cfg = "article"
-v_cfg = "article"
-# h_cfg = 1
-# v_cfg = 1
+# h_cfg = "article"
+# v_cfg = "article"
+h_cfg = 1
+v_cfg = 1
 
 
 
@@ -114,11 +114,11 @@ def main():
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta)
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
-    ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
     print(cfg)
 
     cfg.Dq_max = cfg.Dq_max*0.25
     cfg.DDq_max = cfg.DDq_max*0.2
+
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log = -1)
 
     target_name = "ur10e_wrist_3_joint"

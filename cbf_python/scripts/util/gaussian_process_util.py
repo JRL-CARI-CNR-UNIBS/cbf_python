@@ -188,6 +188,7 @@ def import_optuna_csv(file_path, h_mean, v_mean,):
 def read_config_data_from_csv(cfg: GaussianControllerConfig, filename: str = "../../log_best_trials.csv", h_mean =0.0, v_mean = 0.0):
 
     df = import_optuna_csv(filename, h_mean, v_mean, )
+    print("Found configuration with name: "+ df.iloc[0]['study_name'])
     cfg.lambda_pos = float(df.iloc[0]['params_lambda_pos'])
     cfg.lambda_vel = float(df.iloc[0]['params_lambda_vel'])
     cfg.lambda_acc = float(df.iloc[0]['params_lambda_acc'])
@@ -217,7 +218,7 @@ def read_poly_config_data_from_csv(cfg: PolynomialControllerConfig, filename: st
     print(f"DEBUG: Loaded {len(df)} rows from {filename}")
     print(df)
     df = df[df['study_name'].str.contains(trial_name)]
-    df = df.sort_values(by="calculated_cost", ascending=False).head(1)
+    df = df.sort_values(by="calculated_cost", ascending=True).head(1)
 
     cfg.lambda_0_pos = float(df.iloc[0]['params_lambda_0_pos'])
     cfg.lambda_0_vel = float(df.iloc[0]['params_lambda_0_vel'])
@@ -261,7 +262,7 @@ def read_poly_config_data_from_csv(cfg: PolynomialControllerConfig, filename: st
     cfg.gamma = cfg.gamma_0
     
 
-def save_data_multiobj(study, filename="log_best_trials.csv", n_samples = 5):
+def save_data_multiobj(study, filename="log_best_trials.csv", n_samples = 5, ):
     df = study.trials_dataframe()
     df_success = df[df["state"] == "COMPLETE"].copy()
 
@@ -336,7 +337,7 @@ def save_data_multiobj(study, filename="log_best_trials.csv", n_samples = 5):
     action = "Creato nuovo file" if not file_exists else "Aggiornato file esistente"
     print(f"{action}: {filename} con i {len(top_samples_clean)} migliori record unici.")
 
-def save_data_multitrial(study, filename="log_best_trials.csv", n_samples=5, scenarios = ["h_high", "h_low", "h_025", "h_05"]
+def save_data_multitrial(study, filename="log_best_trials.csv", n_samples=5, weights =  [1.0, 2.0, 1.5, 1.0], scenarios = ["h_high", "h_low", "h_025", "h_05"]
 ):
     df = study.trials_dataframe()
     df_success = df[df["state"] == "COMPLETE"].copy()
@@ -357,13 +358,13 @@ def save_data_multitrial(study, filename="log_best_trials.csv", n_samples=5, sce
         else:
             # Se vogliamo minimizzare (es. error), il min ha costo 0
             return (series - s_min) / (s_max - s_min)
-
+    print(f"weights {weights}")
     # Pesi stabiliti
     weights = {
-        "viol_rate": 1.0,  # Da minimizzare
-        "mean_scale": 2.0,  # Da massimizzare
-        "traj_err": 1.5,  # Da minimizzare
-        "lap_count": 1.0 # Da massimizzare
+        "viol_rate": weights[0],  # Da minimizzare
+        "mean_scale": weights[1],  # Da massimizzare
+        "traj_err": weights[2],  # Da minimizzare
+        "lap_count": weights[3]# Da massimizzare
     }
 
     cost_sum = 0.0
@@ -373,14 +374,21 @@ def save_data_multitrial(study, filename="log_best_trials.csv", n_samples=5, sce
         c_scale = normalize_to_cost(df_success[f"user_attrs_{sc}_mean_scale"], maximize=True)
         c_err = normalize_to_cost(df_success[f"user_attrs_{sc}_traj_err"], maximize=False)
         c_lap = normalize_to_cost(df_success[f"user_attrs_{sc}_lap_count"], maximize=True)
-
+        print(f"scenario {sc}: ")
+        print(f"minimum c_viol: {min(c_viol)}")
+        print(f"minimum c_scale: {min(c_scale)}")
+        print(f"minimum c_err: {min(c_err)}")
+        print(f"minimum c_lap: {min(c_lap)}")
         single_cost = (
                 (weights["viol_rate"] * c_viol) +
                 (weights["mean_scale"] * c_scale) +
                 (weights["traj_err"] * c_err) +
                 (weights["lap_count"] * c_lap)
         )
+        # print (single_cost)
         df_success[f"cost_{sc}"] = single_cost
+        print(f"minimum cost for scenario {sc}: {min(df_success[f"cost_{sc}"])}" )
+
         cost_sum += single_cost**2
         # Calcolo della distanza Euclidea dal punto (0,0,0)
     df_success["calculated_cost"] = np.sqrt( cost_sum )
@@ -400,7 +408,8 @@ def save_data_multitrial(study, filename="log_best_trials.csv", n_samples=5, sce
 
     # Selezione colonne finali dinamica
     cols_to_keep = (
-            ['timestamp', 'study_name', 'number', 'calculated_cost', 'cost_h_high', 'cost_h_low', 'cost_sv'] +
+            ['timestamp', 'study_name', 'number', 'calculated_cost'] +
+            [c for c in top_samples.columns if c.startswith('cost_')] +
             [c for c in top_samples.columns if c.startswith('user_attrs_')] +
             [c for c in top_samples.columns if c.startswith('params_')]
     )
