@@ -213,14 +213,23 @@ def run_episode(Tc=2e-3, duration=500.0, cfg = PolynomialControllerConfig() ):
     cfg.DDq_max = cfg.DDq_max * 0.2
     planner = SegmentedJointTrap(Dq_max=gen_cfg.Dq_max * 0.25, DDq_max=gen_cfg.DDq_max * 0.25)
     # CONFIG 1
+    # planner.addWayPoint(q)
+    # planner.addWayPoint(q10)
+    # planner.addWayPoint(q22)
+    # planner.addWayPoint(q25)
+    # planner.addWayPoint(q30)
+    # planner.addWayPoint(q)
+
     planner.addWayPoint(q)
+    planner.addWayPoint(q10)
+    planner.addWayPoint(q20)
     planner.addWayPoint(q10)
     planner.addWayPoint(q22)
     planner.addWayPoint(q25)
     planner.addWayPoint(q30)
+    planner.addWayPoint(q40)
+    planner.addWayPoint(q30)
     planner.addWayPoint(q)
-
-
     T_total = planner.computeTime()
     model_wrapper = loadSharework(UR10E_JOINTS)
     model = model_wrapper.model
