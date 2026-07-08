@@ -106,7 +106,7 @@ def main():
 
     delta = 4.5
 
-    read_config_data_from_csv(cfg,h_mean=h_cfg, v_mean=v_cfg, filename="../log_best_trials.csv")
+    read_config_data_from_csv(cfg, h_mean=h_cfg, v_mean=v_cfg, filename="../params_csv/log_best_trials.csv")
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta)
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4

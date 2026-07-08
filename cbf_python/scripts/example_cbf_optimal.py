@@ -48,13 +48,13 @@ from scripts.util import csv_publishers, test_publish_utils as pub_utils
 from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
 from scripts.util.gaussian_process_util import read_config_data_from_csv
 
-params_filename = "../parameters_set.csv"
+params_filename = "../params_csv/parameters_set.csv"
 set_ID = "0"
 duration = 1000.0
 
-SHOW_DATA = False
+SHOW_DATA = True
 USE_BRIDGE = False
-LOG_DATA = False
+LOG_DATA = True
 SAVE_DATA = False
 
 parameters_type = "0"
@@ -63,10 +63,10 @@ stop_event = threading.Event()
 
 
 
-# h_cfg = "article"
-# v_cfg = "article"
-h_cfg = 1
-v_cfg = 1
+h_cfg = "article"
+v_cfg = "article"
+# h_cfg = 1
+# v_cfg = 1
 
 
 
@@ -110,16 +110,16 @@ def main():
     cfg = ControllerConfig(Tc=Tc)
     delta = 4.5
 
-    read_config_data_from_csv(cfg,h_mean=h_cfg, v_mean=v_cfg, filename="../log_best_trials.csv")
+    read_config_data_from_csv(cfg, h_mean=h_cfg, v_mean=v_cfg, filename="../params_csv/log_best_trials.csv")
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta)
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
+
+    # cfg.Dq_max = cfg.Dq_max*0.25
+    # cfg.DDq_max = cfg.DDq_max*0.2
     print(cfg)
 
-    cfg.Dq_max = cfg.Dq_max*0.25
-    cfg.DDq_max = cfg.DDq_max*0.2
-
-    ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log = -1)
+    ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log = 7)
 
     target_name = "ur10e_wrist_3_joint"
     idx = UR10E_JOINTS.index(target_name)
@@ -179,6 +179,10 @@ def main():
             human_pos_publisher = pub_utils.DoubleArrayPublisher(
                 topic='human_pos_keypoints',
                 node_name='human_pos_publisher',)
+
+            unfeasible_publisher =  pub_utils.DoubleArrayPublisher(
+                topic='controller_status',
+                node_name='ctrl_status_publisher',)
         else:
             now = datetime.now().strftime("%Y%m%d_%H%M%S")
             test_path = log_path+"/"+str(now)
@@ -209,37 +213,41 @@ def main():
                 csv_path=test_path + "/human_positions.csv",
                 column_names="time,human_keypoint_0_x,human_keypoint_0_y,human_keypoint_0_z,human_keypoint_1_x,human_keypoint_1_y,human_keypoint_1_z,human_keypoint_2_x,human_keypoint_2_y,human_keypoint_2_z,human_keypoint_3_x,human_keypoint_3_y,human_keypoint_3_z,human_keypoint_4_x,human_keypoint_4_y,human_keypoint_4_z,human_keypoint_5_x,human_keypoint_5_y,human_keypoint_5_z,human_keypoint_6_x,human_keypoint_6_y,human_keypoint_6_z,human_keypoint_7_x,human_keypoint_7_y,human_keypoint_7_z,human_keypoint_8_x,human_keypoint_8_y,human_keypoint_8_z,human_keypoint_9_x,human_keypoint_9_y,human_keypoint_9_z,human_keypoint_10_x,human_keypoint_10_y,human_keypoint_10_z,human_keypoint_11_x,human_keypoint_11_y,human_keypoint_11_z,human_keypoint_12_x,human_keypoint_12_y,human_keypoint_12_z,human_keypoint_13_x,human_keypoint_13_y,human_keypoint_13_z,human_keypoint_14_x,human_keypoint_14_y,human_keypoint_14_z,human_keypoint_15_x,human_keypoint_15_y,human_keypoint_15_z,human_keypoint_16_x,human_keypoint_16_y,human_keypoint_16_z,human_keypoint_17_x,human_keypoint_17_y,human_keypoint_17_z"
             )
+            unfeasible_publisher = csv_publishers.DoubleArrayCsvPublisher(
+                csv_path=test_path+'/controller_status.csv',
+                column_names='tmim,status', )
 
 
     model = model_wrapper.model
-    viz = MeshcatVisualizer(model, model_wrapper.collision_model, model_wrapper.visual_model)
-    viz.initViewer(open=True)
-    viz.loadViewerModel()
+    if SHOW_DATA:
+        viz = MeshcatVisualizer(model, model_wrapper.collision_model, model_wrapper.visual_model)
+        viz.initViewer(open=True)
+        viz.loadViewerModel()
 
     tmp = np.array([-300, 0., 0.])
     obstacle_positions = [tmp.copy() for _ in range(18*5)]
     tmp = np.array([0, 0., 0.])
     obstacle_velocities = [tmp.copy() for _ in range(18*5)]
     obstacle_accelerations = obstacle_velocities.copy()
+    if SHOW_DATA:
+        for i, pos in enumerate(obstacle_positions):
+            if i == 7:
+                viz.viewer[f"obstacle_{i}"].set_object(
+                    mgeom.Sphere(0.1), mgeom.MeshLambertMaterial(color=0x000000)
+                )
+            else:
+                viz.viewer[f"obstacle_{i}"].set_object(
+                    mgeom.Sphere(0.1), mgeom.MeshLambertMaterial(color=0xFF0000)
+                )
 
-    for i, pos in enumerate(obstacle_positions):
-        if i == 7:
-            viz.viewer[f"obstacle_{i}"].set_object(
-                mgeom.Sphere(0.1), mgeom.MeshLambertMaterial(color=0x000000)
-            )
-        else:
-            viz.viewer[f"obstacle_{i}"].set_object(
-                mgeom.Sphere(0.1), mgeom.MeshLambertMaterial(color=0xFF0000)
-            )
+        # Goal box (green)
+        side = 0.2
+        viz.viewer["goal"].set_object(
+            mgeom.Box([side, side, side / 10]), mgeom.MeshLambertMaterial(color=0x00FF00)
+        )
 
-    # Goal box (green)
-    side = 0.2
-    viz.viewer["goal"].set_object(
-        mgeom.Box([side, side, side / 10]), mgeom.MeshLambertMaterial(color=0x00FF00)
-    )
-
-    # HUD text node
-    renderer = VisualizationDaemon(viz)  # default 60 Hz
+        # HUD text node
+        renderer = VisualizationDaemon(viz)  # default 60 Hz
 
     # --------------------------- CONTROL INITIALISATION --------------------------
     q = first_joint_position.copy()
@@ -248,7 +256,7 @@ def main():
     q = first_joint_position.copy()
 
 
-    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.25, DDq_max=cfg.DDq_max*0.25)
+    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.5, DDq_max=cfg.DDq_max*0.25)
     print("Computing trajectory...")
     # BRING THE ROBOT AT HOME BEFORE STARTING THE TEST
     if USE_BRIDGE:
@@ -262,7 +270,8 @@ def main():
     T_total = planner.computeTime()
     print(f"Total time: {T_total}")
     min_dist = []
-    renderer.publishPath(planner.publishPath())
+    if SHOW_DATA:
+        renderer.publishPath(planner.publishPath())
 
     ct, ct_qp, ct_ssm, ct_planner, ct_pin, h_log, trj_error_log, scaling_log = [], [], [], [], [], [], [], []
 
@@ -302,7 +311,7 @@ def main():
                 obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles()
             else:
                 obstacle_positions, obstacle_velocities, obstacle_accelerations = bridge.getObstacles(elapsed=t)
-            # print ("obstacle_positions:", obstacle_positions)
+            # print ("obstacle_positions:", obstacle_positions[7])
             # print ("type(obstacle_positions):", type(obstacle_positions))
             # print("size(obstacle_positions): ", obstacle_positions.shape)
             cycles += 1
@@ -310,9 +319,9 @@ def main():
             nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
 
             out = ctrl.step(
-                obs_pos=obstacle_positions,
-                obs_vel=obstacle_velocities,
-                obs_acc=obstacle_accelerations,
+                obs_pos=obstacle_positions[7].reshape(1,3),
+                obs_vel=obstacle_velocities[7].reshape(1,3),
+                obs_acc=obstacle_accelerations[7].reshape(1,3),
                 nominal_q=nominal_q,
                 nominal_Dq=nominal_Dq, 
                 nominal_DDq=nominal_DDq
@@ -373,7 +382,15 @@ def main():
                         scaling,
                     ]
                 ) # pyright: ignore[reportPossiblyUnboundVariable]
-                human_pos_publisher.publish_once(t, obstacle_positions)
+                # human_pos_publisher.publish_once(t, obstacle_positions)
+                ctrl_status_code = -99999
+                if unfeasible_string == "FEASIBLE":
+                    ctrl_status_code = 0
+                elif unfeasible_string == "RECOVERING":
+                    ctrl_status_code = 1
+                elif unfeasible_string == "UNFEASIBLE":
+                    ctrl_status_code = 2
+                unfeasible_publisher.publish_once(t, [ctrl_status_code])
             if not USE_BRIDGE and LOG_DATA:
                 joint_state_publisher.publish_once(t, q, dq, ddq)
             # ----------------------------- TIMING -------------------------------

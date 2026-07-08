@@ -6,7 +6,7 @@ import seaborn as sns
 df = pd.read_csv('../resullts/simulation_data_dynamic_params_comparison.csv')
 
 # 2. Ordina i dati per l'asse X per evitare linee a zigzag
-df = df.sort_values(by=['h_mean_test'])
+# df = df.sort_values(by=['h_mean_test'])
 x_values = [0.2681242732904403, -0.1600670502627323, 0.8291488806255026]
 legend_vertical_values=["optimization value for paper params", "optimization value for h = -0.1", "optimization value for h = 1.0"]
 # 3. Riorganizza il DataFrame per portare 'dynamic_params' in fondo.
@@ -35,7 +35,7 @@ for i, metric in enumerate(metrics):
         x='h_mean_test',
         y=metric,
         hue='test_type',
-        palette=colors_palette,
+       # palette=colors_palette,
         marker='o',
         ax=ax
     )

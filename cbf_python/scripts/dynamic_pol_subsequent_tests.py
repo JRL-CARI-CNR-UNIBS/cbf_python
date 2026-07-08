@@ -14,7 +14,7 @@ from scripts.util.gaussian_process_util import generate_obs_state_h_fixed, compu
 import matplotlib.pyplot as plt
 
 
-import rclpy
+# import rclpy
 
 import threading
 
@@ -28,7 +28,6 @@ stop_event = threading.Event()
 
 
 # params_filename = "din_par.csv" #FILE WITH PARAMETERS
-params_filename = "../dynamics_par_multicase_no_jump_h_mixed_top_10.csv"  # FILE WITH PARAMETERS
 trial_name = "dynamic_params"
 SAVE_DATA = True
 PLOT_MEAN = True
@@ -52,7 +51,9 @@ def run_experiment(test_type = "O",
                     test_code = "",
                    controller_type = 0,
                    h_cfg = 0,
-                   v_cfg = 0):
+                   v_cfg = 0,
+                   params_filename="../dyn_par_9705.csv"  # FILE WITH PARAMETERS
+                   ):
     # --------------------------- MODEL & VISUALS ---------------------------------
 
     print(f"test type: {test_type}")
@@ -81,14 +82,14 @@ def run_experiment(test_type = "O",
     if controller_type == 0:
         cfg = ControllerConfig(Tc=Tc)
 
-        read_config_data_from_csv(cfg, h_mean=h_cfg, v_mean=v_cfg, filename="../log_best_trials.csv")
+        read_config_data_from_csv(cfg, h_mean=h_cfg, v_mean=v_cfg, filename=params_filename)
         cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta)
         cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
         cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
         print(cfg)
 
         ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
-    if controller_type == 1:
+    elif controller_type == 1:
         cfg = PolynomialControllerConfig(Tc=Tc)
         # PAPER PARAMETERS
 
@@ -413,18 +414,18 @@ def run_experiment(test_type = "O",
         plot_lambdas(t_list, gamma_list, lambda_pos_list, lambda_vel_list, lambda_acc_list, lambda_scaling_list)
         cfg.plot_lambdas()
         plt.show()
-rclpy.init()
 
-test_type = ["P"]
-controller_type = [1, 0, 0, 0]
+# test_type = ["P"]
+controller_type = [1, 1, 0, 0, 0, 0]
+# controller_type = [1, 0, 0, 0]
 duration = 1000.0
 
 # test_code = ["paper", "h_-0.1", "h_0.1", "h_0.25", "h_0.5",  "h_1.0"]
 h_mean_ref = [0, -0.10, 0.10, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0]
-for i in range(len(h_mean_ref)-1):
-    test_type.append("O")
-h_cfg = ["", "article", "1", "-0.1"]
-v_cfg = ["", "article", "1", "1"]
+# for i in range(len(h_mean_ref)-1):
+#     test_type.append("O")
+h_cfg = ["", "", "article", "-0.1", "0.2", "0.4"]
+v_cfg = ["", "", "article", "1.1", "1.1", "1.1"]
 
 
 
@@ -432,13 +433,20 @@ h_std_dev = 0.1
 
 v_ref = 1.0
 spawn_freq = 10
-
-test_name = ["dynamic_params", "Paper_params",  "params_1.0", "params_-0.1"] # TEST NAME IN THE RESULTS FILE
+params_filenames = ["../params_csv/dyn_par_9858.csv","../params_csv/dyn_par_9705.csv"]
+test_name = ["dyn_params_9858", "params_9705", "Paper_params",  "params_-0.1", "params_0.2", "params_0.4"] # TEST NAME IN THE RESULTS FILE
+# test_name = ["dyn_params_9858", "params_9705"] # TEST NAME IN THE RESULTS FILE
 test_code = test_name.copy()
-for i in range(0, len(controller_type)):
-    for j in range(len(test_type)):
-     run_experiment(test_type[j],duration, h_mean_ref[j],h_std_dev,v_ref,spawn_freq,test_name[i], test_code[i],
-                   controller_type[i], h_cfg[i], v_cfg[i])
+for i in range(3, len(controller_type)):
+    filename = ""
+    if i < 2:
+        filename = params_filenames[i]
+    else:
+        filename = "../params_csv/GPR_optimization_results_top_10_2.csv"
+    for j in range(len(h_mean_ref)):
+
+        run_experiment("O",duration, h_mean_ref[j],h_std_dev,v_ref,spawn_freq,test_name[i], test_code[i],
+                   controller_type[i], h_cfg[i], v_cfg[i], filename)
 
 
 

@@ -12,8 +12,8 @@ from Controller import compute_velocity_scaling_for_human_proximity as ext_scali
 class ControllerConfig:
     Tc: float = 2e-3
     C: float = 0.25
-    Tr: float = 0.5
-    a_s: float = 4.5
+    Tr: float = 0.15
+    a_s: float = 2.5
     gamma: float = 5.0
     max_obstacles: int = 18 * 5
 
@@ -22,10 +22,10 @@ class ControllerConfig:
         default_factory=lambda: np.deg2rad(np.array([1,1,1,1,1,1], dtype=np.float64) * 5)
     )
     Dq_max: np.ndarray = field(
-        default_factory=lambda: np.pi * np.array([1,1,1,1,1,1], dtype=np.float64) * np.pi*0.5
+        default_factory=lambda: np.pi * np.array([1,1,1,1,1,1], dtype=np.float64)
     )
     DDq_max: np.ndarray = field(
-        default_factory=lambda: np.pi * np.array([1,1,1,1,1,1], dtype=np.float64) * np.pi*5.0
+        default_factory=lambda:  12.7 * np.array([1,1,1,1,1,1], dtype=np.float64)
     )
 
     # Dq_max: np.ndarray = field(

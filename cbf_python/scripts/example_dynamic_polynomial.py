@@ -54,24 +54,24 @@ stop_event = threading.Event()
 
 
 # params_filename = "din_par.csv" #FILE WITH PARAMETERS
-params_filename = "../dynamics_par_multicase_no_jump_h_mixed_top_10.csv" #FILE WITH PARAMETERS
+params_filename = "../params_csv/dyn_par_9705.csv"  #FILE WITH PARAMETERS
 
 
 trial_name = "dynamic_params"
 test_name = "GENERAL_TEST_h_high"  #TEST NAME IN THE RESULTS FILE
 set_ID = "3083_no_delta"
-duration = 1000.0
+duration =0.1
 
 USE_BRIDGE = False
 LOG_DATA = False
 
-SHOW_DATA = False
+SHOW_DATA = True
 SAVE_DATA = False
 test_type = "O"
 
 PLOT_MEAN = False
 PLOT_LAMBDAS = True
-h_mean_ref = 0.25
+h_mean_ref = -0.1
 h_std_dev = 0.1
 v_ref = 1.0
 spawn_freq = 10
@@ -639,7 +639,7 @@ def main():
 
     if PLOT_LAMBDAS:
         plot_lambdas(t_list, gamma_list, lambda_pos_list, lambda_vel_list, lambda_acc_list, lambda_scaling_list)
-        cfg.plot_lambdas()
+        cfg.plot_lambdas(save_fig=True)
         plt.show()
 if __name__ == "__main__":
     main()

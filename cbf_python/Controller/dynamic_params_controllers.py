@@ -76,17 +76,26 @@ class PolynomialControllerConfig(ControllerConfig):
 
         return base_str + poly_str
 
-    def plot_lambdas(self):
+    def plot_lambdas(self, save_fig=False):
         """Plots the piecewise polynomial evolution of all parameters as a function of h."""
+
+        # --- Parameterized Font Dimensions ---
+        title_fontsize = 20
+        label_fontsize = 14
+        tick_fontsize = 12
+        legend_fontsize = 12
+        # -------------------------------------
+
         self.generate_poly_dict()
         ht = self.h_t if self.h_t != 0.0 else 1.0
 
         # Range extended slightly to visualize the flat regions clearly
         h_vals = np.linspace(-0.2, ht + 0.2, 50000)
 
-        fig, axes = plt.subplots(3, 2, figsize=(14, 10))
+        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+        # fig, axes = plt.subplots(3, 2, figsize=(14, 10))
         axes = axes.flatten()
-        categories = ["pos", "vel", "acc", "scaling", "gamma"]
+        categories = ["pos", "vel", "acc", "scaling"]  # , "gamma"]
 
         for i, cat in enumerate(categories):
             l0, lf, n, m, w = self.polynomial_dict[cat]
@@ -115,18 +124,24 @@ class PolynomialControllerConfig(ControllerConfig):
 
             # Plotting
             axes[i].plot(h_vals, y_vals, color='#1f77b4', linewidth=2.5)
-            axes[i].axvline(0, color='red', linestyle='--', alpha=0.6, label='h=0 (Boundary)')
-            axes[i].axvline(ht, color='green', linestyle='--', alpha=0.6, label='h=h_t (Target)')
+            axes[i].axvline(0, color='red', linestyle='--', alpha=0.6, label='$h_{inf} = 0$')
+            axes[i].axvline(ht, color='green', linestyle='--', alpha=0.6, label='$h_{sup} = 1$')
 
-            axes[i].set_title(f"Parameter: {cat.upper()}", fontweight='bold')
-            axes[i].set_xlabel("h (CBF Value)")
-            axes[i].set_ylabel("Weight Value")
+            # Applied the font size variables here:
+            axes[i].set_title(f"Parameter: $\lambda_{{{cat.lower()}}}$", fontweight='bold', fontsize=title_fontsize)
+            axes[i].set_xlabel("h[m]", fontsize=label_fontsize)
+            axes[i].set_ylabel("Weight Value", fontsize=label_fontsize)
+
+            # Tick parameters for axis numbers:
+            axes[i].tick_params(axis='both', which='major', labelsize=tick_fontsize)
+
             axes[i].grid(True, linestyle=':', alpha=0.7)
-            axes[i].legend(loc="best", fontsize="small")
+            axes[i].legend(loc="best", fontsize=legend_fontsize)
 
-        axes[5].set_visible(False)
+        # axes[5].set_visible(False)
         plt.tight_layout()
-
+        if save_fig:
+            plt.savefig("Controller_weights_plot.pdf")
     def check_config_integrity(self):
         """ Function to check that all lambdas are positive and there is no jump in the interval [0, h_t]"""
 

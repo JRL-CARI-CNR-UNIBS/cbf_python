@@ -36,7 +36,7 @@ from scripts.util.mean_visualizer import StochasticCBFVisualizer
 from scripts.util.gaussian_process_util import read_config_data_from_csv
 stop_event = threading.Event()
 
-params_filename = "../parameters_set.csv"
+params_filename = "../params_csv/parameters_set.csv"
 set_IDs = ["3083_no_delta"]
 duration = 15000.0
 

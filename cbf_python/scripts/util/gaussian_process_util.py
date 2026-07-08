@@ -295,8 +295,9 @@ def save_data_multiobj(study, filename="log_best_trials.csv", n_samples = 5, ):
     # Now, a weight of "1" means "these are equally important relative to their own variance"
     weight_v_rate = 0.5  # Penalize violations a bit more heavily
     weight_m_scale = 2.0
-    weight_m_err = 1.0
-    weight_l_count = 0.3
+    weight_m_err = 2.0
+    weight_l_count = 0.0
+
 
     df_success["calculated_cost"] = (
             (weight_m_scale * norm_m_scale) +
