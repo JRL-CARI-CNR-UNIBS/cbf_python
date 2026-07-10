@@ -264,14 +264,14 @@ def read_poly_config_data_from_csv(cfg: PolynomialControllerConfig, filename: st
 
 def save_data_multiobj(study, filename="log_best_trials.csv", n_samples = 5, weights = [] ):
     df = study.trials_dataframe()
-    df_success = df[df["state"] == "COMPLETE"].copy()
+    df_success = df[(df["state"] == "COMPLETE") & (df["number"] <= 2000)].copy()
 
     if df_success.empty or len(df_success) < 2:
         print("Non ci sono abbastanza trial completati per normalizzare e salvare.")
         return
 
     # 1. Isolate the metrics
-    v_rate = df_success["values_viol_rate"]
+    v_rate = df_success["values_mean_tv_cartesian"]
     m_scale = df_success["values_mean_scaling"]
     m_err = df_success["values_mean_trajectory_error"]
     # l_count = df_success["values_lap count"]

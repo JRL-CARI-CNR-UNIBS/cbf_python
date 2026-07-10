@@ -128,13 +128,16 @@ def rebuild_gpr_ds():
             study_name=study_names[0],
             storage=storage_url
         )
+        #select studies with number inferior to 2000
+        # study = study[study.trials_dataframe()["number"] < 2000]
+
 
         # Verify by printing the best parameters found so far
         print(f"Study {study_name} loaded successfully.")
 
         save_data_multiobj(study=study, filename=f"GPR_optimization_results_top_{n_samples}_2.csv", n_samples=n_samples)
 
-def rebuild_generic_ds(prefix = f"params_optimal_20260709-191517",  weights =  [0.0, 1.0, 1.0]):
+def rebuild_generic_ds(prefix = f"params_optimal_20260710-141705",  weights =  [1.5, 2.0, 1.0]):
 
     query = text("SELECT study_name FROM studies WHERE study_name LIKE :prefix")
 
@@ -158,7 +161,7 @@ def rebuild_generic_ds(prefix = f"params_optimal_20260709-191517",  weights =  [
     # Verify by printing the best parameters found so far
     print(f"Study {study_name} loaded successfully.")
 
-    save_data_multiobj(study=study, filename=f"../optimal_parameters", n_samples=n_samples, weights=weights)
+    save_data_multiobj(study=study, filename=f"../optimal_parameters.csv", n_samples=n_samples, weights=weights)
 
 # w_viol_rate = 1.0  # Da minimizzare
 # w_mean_scale= 10.0  # Da massimizzare
