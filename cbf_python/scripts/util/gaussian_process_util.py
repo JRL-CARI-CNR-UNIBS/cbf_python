@@ -262,7 +262,7 @@ def read_poly_config_data_from_csv(cfg: PolynomialControllerConfig, filename: st
     cfg.gamma = cfg.gamma_0
     
 
-def save_data_multiobj(study, filename="log_best_trials.csv", n_samples = 5, ):
+def save_data_multiobj(study, filename="log_best_trials.csv", n_samples = 5, weights = [] ):
     df = study.trials_dataframe()
     df_success = df[df["state"] == "COMPLETE"].copy()
 
@@ -271,10 +271,10 @@ def save_data_multiobj(study, filename="log_best_trials.csv", n_samples = 5, ):
         return
 
     # 1. Isolate the metrics
-    v_rate = df_success["values_violation_rate"]
+    v_rate = df_success["values_viol_rate"]
     m_scale = df_success["values_mean_scaling"]
     m_err = df_success["values_mean_trajectory_error"]
-    l_count = df_success["values_lap count"]
+    # l_count = df_success["values_lap count"]
 
     # 2. Min-Max Normalization (Safe against division by zero)
     def normalize(series, minimize=False):
@@ -289,21 +289,21 @@ def save_data_multiobj(study, filename="log_best_trials.csv", n_samples = 5, ):
     norm_v_rate = normalize(v_rate, minimize=True)
     norm_m_scale = normalize(m_scale, minimize=False)
     norm_m_err = normalize(m_err, minimize=True)
-    norm_l_count = normalize(l_count, minimize=False)
+    # norm_l_count = normalize(l_count, minimize=False)
 
     # 4. Apply weights to the NORMALIZED values
     # Now, a weight of "1" means "these are equally important relative to their own variance"
-    weight_v_rate = 0.5  # Penalize violations a bit more heavily
-    weight_m_scale = 2.0
-    weight_m_err = 2.0
-    weight_l_count = 0.0
+    weight_v_rate = weights[0]
+    weight_m_scale = weights[1]
+    weight_m_err = weights[2]
+    # weight_l_count = 0.0
 
 
     df_success["calculated_cost"] = (
             (weight_m_scale * norm_m_scale) +
             (weight_v_rate * norm_v_rate) +
-            (weight_m_err * norm_m_err) +
-            (weight_l_count * norm_l_count)
+            (weight_m_err * norm_m_err)
+            # (weight_l_count * norm_l_count)
     )
     # --- NEW LOGIC: Sort, Drop Duplicates, THEN take top n_samples ---
     df_sorted = df_success.sort_values(by="calculated_cost", ascending=False)

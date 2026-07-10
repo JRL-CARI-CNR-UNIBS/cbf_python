@@ -7,7 +7,7 @@ import pandas as pd
 import os
 from datetime import datetime
 import numpy as np
-storage_url = "postgresql+psycopg2://optuna:optuna_pw@192.168.66.106:5432/optuna_db"
+storage_url = "postgresql+psycopg2://optuna:optuna_pw@192.168.1.16:5432/optuna_db"
 # storage_url = "postgresql+psycopg2://optuna:optuna_pw@192.168.66.109:5432/optuna_db"
 
 engine = create_engine(storage_url)
@@ -134,7 +134,7 @@ def rebuild_gpr_ds():
 
         save_data_multiobj(study=study, filename=f"GPR_optimization_results_top_{n_samples}_2.csv", n_samples=n_samples)
 
-def rebuild_generic_ds(prefix = f"dynamic_params_polynomial_general_case_%",  weights =  [1.0, 2.0, 1.5, 1.0]):
+def rebuild_generic_ds(prefix = f"params_optimal_20260709-191517",  weights =  [0.0, 1.0, 1.0]):
 
     query = text("SELECT study_name FROM studies WHERE study_name LIKE :prefix")
 
@@ -158,7 +158,7 @@ def rebuild_generic_ds(prefix = f"dynamic_params_polynomial_general_case_%",  we
     # Verify by printing the best parameters found so far
     print(f"Study {study_name} loaded successfully.")
 
-    save_data_multitrial(study=study, filename=f"../dynamics_par_multicase_no_jump_h_mixed_top_{n_samples}.csv", n_samples=n_samples, weights=weights)
+    save_data_multiobj(study=study, filename=f"../optimal_parameters", n_samples=n_samples, weights=weights)
 
 # w_viol_rate = 1.0  # Da minimizzare
 # w_mean_scale= 10.0  # Da massimizzare
@@ -166,4 +166,4 @@ def rebuild_generic_ds(prefix = f"dynamic_params_polynomial_general_case_%",  we
 # w_lap_count = 1.0 #da massimizzare
 # weights  = [w_viol_rate, w_mean_scale, w_traj_err, w_lap_count]
 # rebuild_generic_ds(prefix = "dynamic_params_polynomial_multicase_no_jump_h_mixed_%", weights = weights)
-rebuild_gpr_ds()
+rebuild_generic_ds()

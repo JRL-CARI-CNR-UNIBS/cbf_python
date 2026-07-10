@@ -84,16 +84,16 @@ def make_objective():
 
 
         try:
-            viol_rate, mean_scale, mean_traj_err = run_episode_with_timeout(
+            viol_rate, mean_scale, mean_traj_err, mean_tv_cartesian = run_episode_with_timeout(
                 cfg=cfg, Tc=2e-3, duration=150,
                 timeout=6000
             )
-
+            trial.set_user_attr("violation_rate", viol_rate)
         except TimeoutError:
                 # For directions: [minimize, maximize, minimize, minimize]
             return 1.0, 0.0, 1.0
 
-        return viol_rate, mean_scale, mean_traj_err
+        return mean_tv_cartesian, mean_scale, mean_traj_err
 
     return objective
 
@@ -204,7 +204,7 @@ def run_episode(Tc=2e-3, duration=1500.0, cfg=ControllerConfig()):
         slowdown_factor=1.0,
         t0=0.0
     )
-
+    traj_cart_error_log = []
     ctrl.reset_state(q)
     t = 0.0
     trajectory_time = 0.0
@@ -230,6 +230,10 @@ def run_episode(Tc=2e-3, duration=1500.0, cfg=ControllerConfig()):
                 nominal_DDq=nominal_DDq,
             )
             end_eff_pos = out["end_effector_pos"]
+            end_eff_nominal_pos = out["Tbt_nominal"].translation
+            trajectory_cart_err = float(np.linalg.norm(end_eff_pos - end_eff_nominal_pos))
+            traj_cart_error_log.append(trajectory_cart_err)
+
             if (trajectory_time % T_total) < Tc:
                 if enable_lap_count:
                     lap_count += 1
@@ -260,13 +264,21 @@ def run_episode(Tc=2e-3, duration=1500.0, cfg=ControllerConfig()):
 
         time.sleep(1e-4)  # To avoid locking issues in multiprocessing
 
+
+    traj_cart_error_log = np.array(traj_cart_error_log)
+    trajectory_cart_error_diff = np.abs(np.diff(traj_cart_error_log))
+    total_variation_cart_error = np.sum(trajectory_cart_error_diff)
+
+    mean_tv_cartesian = total_variation_cart_error / max(1, nsteps)
+
+    total_variation_cart_error = np.sum(trajectory_cart_error_diff)
     # on_target_rate = on_target_count/(n_wp * ((lap_count)+ ((trajectory_time % T_total)/T_total)))
     lap_count = lap_count + ((trajectory_time % T_total) / T_total)
     viol_rate = violations / max(1, nsteps)
     mean_scale = sum_scale / max(1, nsteps)
     mean_trajectory_error = trajectory_error_sum / max(1, nsteps)
     low_scale_rate = low_scale_count / max(1, nsteps)
-    return viol_rate, mean_scale, mean_trajectory_error
+    return viol_rate, mean_scale, mean_trajectory_error, mean_tv_cartesian
 
 
 def _run_episode_worker(args, kwargs, q):
@@ -331,7 +343,7 @@ study = optuna.create_study(
     load_if_exists=True,
 
 )
-study.set_metric_names(["viol_rate", "mean_scaling", "mean_trajectory_error"])
+study.set_metric_names(["mean_tv_cartesian", "mean_scaling", "mean_trajectory_error"])
 study.optimize(make_objective(), n_trials=5000, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
 save_data(study)
 # print (run_episode(1e3,1e3,1e3,1e-3,5,1))
