@@ -32,7 +32,7 @@ from scripts.util.mean_visualizer import StochasticCBFVisualizer
 # v_ref = 0.8
 
 spawn_freq = 10
-trial_duration = 150.0
+trial_duration = 100.0
 n_trials = 2000
 std_dev= 0.1
 # Esempio di utilizzo:
@@ -159,7 +159,7 @@ scaling_threshold = 0.5
 # -------------------- EVALUATION FUNCTION --------------------
 def run_episode(Tc=2e-3, duration=500.0, cfg=ControllerConfig(), h_mean_ref=0.1, ref_std_dev=0.1, v_ref=0.8):
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
-
+    print(f"h_mean_ref: {h_mean_ref}")
     planner = SegmentedJointTrap(Dq_max=gen_cfg.Dq_max * 0.25, DDq_max=gen_cfg.DDq_max * 0.125)
     # CONFIG 1
     planner.addWayPoint(q)
@@ -176,13 +176,13 @@ def run_episode(Tc=2e-3, duration=500.0, cfg=ControllerConfig(), h_mean_ref=0.1,
     data = model.createData()
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
 
-    bridge = FakeCommandBridge(
-        UR10E_JOINTS,
-        csv_path="/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv",
-        Tworld_to_cam=T_wc,
-        slowdown_factor=1.0,
-        t0=0.0
-    )
+    # bridge = FakeCommandBridge(
+    #     UR10E_JOINTS,
+    #     csv_path="/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv",
+    #     Tworld_to_cam=T_wc,
+    #     slowdown_factor=1.0,
+    #     t0=0.0
+    # )
 
     ctrl.reset_state(q)
     t = 0.0
@@ -215,8 +215,22 @@ def run_episode(Tc=2e-3, duration=500.0, cfg=ControllerConfig(), h_mean_ref=0.1,
 
             # obstacle_positions, obstacle_velocities, enable_spawn, count_move = generate_obs_state(obstacle_positions, obstacle_velocities, cycles, enable_spawn, planner, trajectory_time, T_total, model, data, tool_frame_id, ee_pos, Dtrajectory_time, count_move)
         h_objective = generate_target_h(h_mean_ref, ref_std_dev)
-        d_objective = compute_required_d(h_objective, vr_min, v_ref, np.linalg.norm(obstacle_accelerations) )
-        obstacle_positions, obstacle_velocities, enable_spawn, count_move = generate_obs_state_h_fixed(obstacle_positions, obstacle_velocities, nsteps, enable_spawn, ctrl.model, ctrl.data, tool_frame_id, ee_pos, Dtrajectory_time, count_move, d_objective, v_ref, spawn_freq, ee_vel)#nominal_q, nominal_Dq, nominal_DDq)
+        d_objective = compute_required_d(h_objective, vr_min, v_ref, np.linalg.norm(obstacle_accelerations))
+        obstacle_positions, obstacle_velocities, enable_spawn, count_move = generate_obs_state_h_fixed(obstacle_positions,
+                                                                                                       obstacle_velocities,
+                                                                                                       nsteps, enable_spawn,
+                                                                                                       ctrl.model,
+                                                                                                       ctrl.data,
+                                                                                                       tool_frame_id,
+                                                                                                       ee_pos,
+                                                                                                       Dtrajectory_time,
+                                                                                                       count_move,
+                                                                                                       d_objective, v_ref,
+                                                                                                       spawn_freq,
+                                                                                                       ee_vel)  # nominal_q, nominal_Dq, nominal_DDq)
+
+
+
         try:
             out = ctrl.step(
                 obs_pos=obstacle_positions,
@@ -341,7 +355,7 @@ sampler = optuna.samplers.NSGAIIISampler()
 
 
 # First value: -0.15 to 0.6 (step 0.025)
-val1_list = [round(-0.15 + i * 0.025, 3) for i in range(31)]  # 31 steps reach 0.6
+val1_list = [round(-0.1 + i * 0.025, 3) for i in range(29)]  # 31 steps reach 0.6
 
 # Second value: 0.2      to 1.4 (step 0.1)
 val2_list = [round(0.2 + i * 0.1, 2) for i in range(13)]     # 13 steps reach 1.4
@@ -360,6 +374,7 @@ par_values = {i: list(comb) for i, comb in enumerate(combinations)}
 for key in par_values:
     h_mean = par_values[key][0]
     v_ref = par_values[key][1]
+    print(f"h_mean: {h_mean}, v_ref: {v_ref}")
     study = optuna.create_study(
     directions=["maximize","minimize","minimize"],
     storage=storage,
@@ -372,29 +387,6 @@ for key in par_values:
 
     )
     study.set_metric_names(["mean_scaling", "mean_trajectory_error", "mean_tv_cartesian"])
-    study.optimize(make_objective(h_mean,std_dev, v_ref), n_trials=n_trials, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
+    study.optimize(make_objective(h_mean,std_dev, v_ref), n_trials=n_trials, show_progress_bar=True, n_jobs=1, gc_after_trial=True)
     # save_data_multiobj(study, filename="GPR_optimization_results.csv")
-# print (run_episode())
-
-
-''' 
-TRIAL BELLI delta variabile
-
-4999
-4780
-4789
-4845
-4706
-4630
-4558
-761
-'''
-
-''' 
-TRIAL BELLI delta fisso
-
-3083
-3289
-3978
-4937
-'''
+# print (run_episode(duration=10))
