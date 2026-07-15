@@ -50,10 +50,10 @@ from scripts.util.gaussian_process_util import read_config_data_from_csv
 
 params_filename = "../params_csv/parameters_set.csv"
 set_ID = "0"
-duration = 1000.0
+duration = 180.0
 
 SHOW_DATA = True
-USE_BRIDGE = False
+USE_BRIDGE = True
 LOG_DATA = True
 SAVE_DATA = False
 
@@ -106,11 +106,13 @@ def main():
     # ------------------------ CONTROLLER SETUP -----------------------------------
     Tc =2e-3
     # cfg = create_base_cfg(set_ID, Tc, params_filename)
-
     cfg = ControllerConfig(Tc=Tc)
     delta = 4.5
-
-    read_config_data_from_csv(cfg, h_mean=h_cfg, v_mean=v_cfg, filename="../params_csv/log_best_trials.csv")
+    cfg.gamma = 5.949803744662194
+    cfg.lambda_acc = 1.4551402158959938e-10
+    cfg.lambda_pos =  2098.0150948315577
+    cfg.lambda_scaling = 16.558982747305556
+    cfg.lambda_vel =  0.34298548889519453
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta)
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
@@ -119,7 +121,7 @@ def main():
     # cfg.DDq_max = cfg.DDq_max*0.2
     print(cfg)
 
-    ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log = 7)
+    ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log = -1)
 
     target_name = "ur10e_wrist_3_joint"
     idx = UR10E_JOINTS.index(target_name)
@@ -215,7 +217,7 @@ def main():
             )
             unfeasible_publisher = csv_publishers.DoubleArrayCsvPublisher(
                 csv_path=test_path+'/controller_status.csv',
-                column_names='tmim,status', )
+                column_names='time,status', )
 
 
     model = model_wrapper.model
@@ -256,7 +258,7 @@ def main():
     q = first_joint_position.copy()
 
 
-    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.5, DDq_max=cfg.DDq_max*0.25)
+    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max*0.25, DDq_max=cfg.DDq_max*0.125)
     print("Computing trajectory...")
     # BRING THE ROBOT AT HOME BEFORE STARTING THE TEST
     if USE_BRIDGE:
@@ -317,15 +319,24 @@ def main():
             cycles += 1
 
             nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
-
-            out = ctrl.step(
-                obs_pos=obstacle_positions[7].reshape(1,3),
-                obs_vel=obstacle_velocities[7].reshape(1,3),
-                obs_acc=obstacle_accelerations[7].reshape(1,3),
-                nominal_q=nominal_q,
-                nominal_Dq=nominal_Dq, 
-                nominal_DDq=nominal_DDq
-            )
+            if obstacle_positions.shape[0] > 7:
+                out = ctrl.step(
+                    obs_pos=obstacle_positions[7].reshape(1,3),
+                    obs_vel=obstacle_velocities[7].reshape(1,3),
+                    obs_acc=obstacle_accelerations[7].reshape(1,3),
+                    nominal_q=nominal_q,
+                    nominal_Dq=nominal_Dq, 
+                    nominal_DDq=nominal_DDq
+                )
+            else:   
+                out = ctrl.step(
+                    obs_pos=obstacle_positions,
+                    obs_vel=obstacle_velocities,
+                    obs_acc=obstacle_accelerations,
+                    nominal_q=nominal_q,
+                    nominal_Dq=nominal_Dq, 
+                    nominal_DDq=nominal_DDq
+                )
             unfeasible_string = out["unfeasible_cnt"]
             q = out["q"]
 
@@ -382,7 +393,7 @@ def main():
                         scaling,
                     ]
                 ) # pyright: ignore[reportPossiblyUnboundVariable]
-                # human_pos_publisher.publish_once(t, obstacle_positions)
+                human_pos_publisher.publish_once(t, obstacle_positions)
                 ctrl_status_code = -99999
                 if unfeasible_string == "FEASIBLE":
                     ctrl_status_code = 0

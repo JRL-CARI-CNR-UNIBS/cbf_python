@@ -388,7 +388,7 @@ def save_data_multitrial(study, filename="log_best_trials.csv", n_samples=5, wei
         )
         # print (single_cost)
         df_success[f"cost_{sc}"] = single_cost
-        print(f"minimum cost for scenario {sc}: {min(df_success[f"cost_{sc}"])}" )
+        print(f"minimum cost for scenario {sc}: {min(df_success[f'cost_{sc}'])}" )
 
         cost_sum += single_cost**2
         # Calcolo della distanza Euclidea dal punto (0,0,0)
