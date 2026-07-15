@@ -9,15 +9,18 @@ from Command_bridge.fake_command_bridge import FakeCommandBridge
 from Controller.optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
 from multiprocessing import Process, Queue
 from queue import Empty
-from Controller.dynamic_params_controllers import (PolynomialControllerConfig, PolynomialOptimalController,
-                                                   StocasticalControllerConfig, StocasticalOptimalController)
+# from Controller.dynamic_params_controllers import (PolynomialControllerConfig, PolynomialOptimalController,
+#                                                    StocasticalControllerConfig, StocasticalOptimalController)
+from Controller.optimal_cbf_task_controller import ControllerConfig, BCFOptimalController
 from pathlib import Path
 import pandas as pd
 import os
 from datetime import datetime
-from optuna.samplers import CmaEsSampler 
+from optuna.samplers import CmaEsSampler
+
 # Database connection (for dashboard)
 POSTGRES_URL = "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
+
 
 def save_data(study):
     # ---------------------------------------------------------
@@ -37,13 +40,13 @@ def save_data(study):
     # Aggiungi un timestamp per sapere QUANDO hai salvato questi risultati
     # (Utile visto che aggiungerai righe in coda nel tempo)
     top_5.insert(0, 'timestamp', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    top_5.insert(1, 'study_name', study.study_name) # Opzionale: per tracciare lo studio
+    top_5.insert(1, 'study_name', study.study_name)  # Opzionale: per tracciare lo studio
 
     # Seleziona solo le colonne utili (valore, parametri, user_attributes)
     # Rimuove colonne interne di Optuna come 'datetime_start', 'duration', ecc.
     cols_to_keep = ['timestamp', 'study_name', 'number', 'value'] + \
-                [c for c in top_5.columns if c.startswith('params_')] + \
-                [c for c in top_5.columns if c.startswith('user_attrs_')]
+                   [c for c in top_5.columns if c.startswith('params_')] + \
+                   [c for c in top_5.columns if c.startswith('user_attrs_')]
 
     top_5_clean = top_5[cols_to_keep]
 
@@ -51,7 +54,7 @@ def save_data(study):
     # 2. Salvataggio in Append (Coda)
     # ---------------------------------------------------------
 
-    filename = "log_best_trials.csv"
+    filename = "trials.csv"
 
     # Verifica se il file esiste
     file_exists = os.path.isfile(filename)
@@ -68,7 +71,7 @@ def make_objective():
     def objective(trial):
 
         cfg = ControllerConfig(Tc=2e-3)
-        
+
         cfg.lambda_pos = trial.suggest_float("lambda_pos", 100, 1e5, log=True)
         cfg.lambda_vel = trial.suggest_float("lambda_vel", 1e-3, 1e3, log=True)
         cfg.lambda_acc = trial.suggest_float("lambda_acc", 1e-15, 1e-4, log=True)
@@ -81,20 +84,17 @@ def make_objective():
         cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
         cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
 
-
         try:
-            cost, viol_rate, mean_scale, mean_traj_err = run_episode_with_timeout(
+            viol_rate, mean_scale, mean_traj_err, mean_tv_cartesian = run_episode_with_timeout(
                 cfg=cfg, Tc=2e-3, duration=150,
                 timeout=6000
             )
-            trial.set_user_attr("mean_scale", mean_scale)
-            trial.set_user_attr("viol_rate", viol_rate)
-            trial.set_user_attr("trajectory_error", mean_traj_err)
+            trial.set_user_attr("violation_rate", viol_rate)
         except TimeoutError:
-                # For directions: [minimize, maximize, minimize, minimize]
-            return 0.0
+            # For directions: [minimize, maximize, minimize, minimize]
+            return 1.0, 0.0, 1.0
 
-        return cost
+        return mean_tv_cartesian, mean_scale, mean_traj_err
 
     return objective
 
@@ -122,7 +122,7 @@ quat = pin.Quaternion(0.83, 0.185, 0.513, 0.12)
 quat.normalize()
 R = quat.toRotationMatrix()
 
-T_wc = pin.SE3(R, np.array([0.094, -0.93, 2.309]))
+T_wc = pin.SE3(R, np.array([-0.094, -0.93, 2.309]))
 
 home = np.array([90, -140, 140, -90, 90, 0]) * np.pi / 180.0
 UR10E_JOINTS = [
@@ -144,9 +144,8 @@ q22 = np.array([40.0, -126.0, 141.0, -100.0, 86.0, 45.0]) * np.pi / 180.0
 q25 = np.array([130.0, -100.0, 125.0, -115.0, 94.0, -20.0]) * np.pi / 180.0
 q30 = np.array([136.0, -60.0, 90.0, -122.0, 90.0, 45.0]) * np.pi / 180.0
 q40 = np.array([134.0, -65.0, 70.0, -90.0, 90.0, 45.0]) * np.pi / 180.0
-gen_cfg.Dq_max = gen_cfg.Dq_max * 0.25
-gen_cfg.DDq_max = gen_cfg.DDq_max * 0.2
-planner = SegmentedJointTrap(Dq_max=gen_cfg.Dq_max * 0.25, DDq_max=gen_cfg.DDq_max * 0.25)
+
+planner = SegmentedJointTrap(Dq_max=gen_cfg.Dq_max * 0.25, DDq_max=gen_cfg.DDq_max * 0.125)
 # CONFIG 1
 planner.addWayPoint(q)
 planner.addWayPoint(q10)
@@ -193,21 +192,18 @@ scaling_threshold = 0.5
 
 
 # -------------------- EVALUATION FUNCTION --------------------
-def run_episode(Tc=2e-3, duration=500.0, cfg=PolynomialControllerConfig()):
+def run_episode(Tc=2e-3, duration=1500.0, cfg=ControllerConfig()):
     home = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
-
-    cfg.Dq_max = cfg.Dq_max * 0.25
-    cfg.DDq_max = cfg.DDq_max * 0.2
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
 
     bridge = FakeCommandBridge(
         UR10E_JOINTS,
-        csv_path="/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors_14_NORMAL_TEST1.csv",
+        csv_path="/home/galileo_gal/projects/python/cbf_python_ws/cbf_python/cbf_python/skeleton_vectors/skeleton_vectors_23.csv",
         Tworld_to_cam=T_wc,
         slowdown_factor=1.0,
         t0=0.0
     )
-
+    traj_cart_error_log = []
     ctrl.reset_state(q)
     t = 0.0
     trajectory_time = 0.0
@@ -225,14 +221,19 @@ def run_episode(Tc=2e-3, duration=500.0, cfg=PolynomialControllerConfig()):
         nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
         try:
             out = ctrl.step(
-                obs_pos=obs_pos,
-                obs_vel=obs_vel,
-                obs_acc=obs_acc,
+
+                obs_pos=obs_pos[7].reshape(1, 3),
+                obs_vel=obs_vel[7].reshape(1, 3),
+                obs_acc=obs_acc[7].reshape(1, 3),
                 nominal_q=nominal_q,
                 nominal_Dq=nominal_Dq,
                 nominal_DDq=nominal_DDq,
             )
             end_eff_pos = out["end_effector_pos"]
+            end_eff_nominal_pos = out["Tbt_nominal"].translation
+            trajectory_cart_err = float(np.linalg.norm(end_eff_pos - end_eff_nominal_pos))
+            traj_cart_error_log.append(trajectory_cart_err)
+
             if (trajectory_time % T_total) < Tc:
                 if enable_lap_count:
                     lap_count += 1
@@ -263,14 +264,20 @@ def run_episode(Tc=2e-3, duration=500.0, cfg=PolynomialControllerConfig()):
 
         time.sleep(1e-4)  # To avoid locking issues in multiprocessing
 
+    traj_cart_error_log = np.array(traj_cart_error_log)
+    trajectory_cart_error_diff = np.abs(np.diff(traj_cart_error_log))
+    total_variation_cart_error = np.sum(trajectory_cart_error_diff)
+
+    mean_tv_cartesian = total_variation_cart_error / max(1, nsteps)
+
+    total_variation_cart_error = np.sum(trajectory_cart_error_diff)
     # on_target_rate = on_target_count/(n_wp * ((lap_count)+ ((trajectory_time % T_total)/T_total)))
     lap_count = lap_count + ((trajectory_time % T_total) / T_total)
     viol_rate = violations / max(1, nsteps)
     mean_scale = sum_scale / max(1, nsteps)
     mean_trajectory_error = trajectory_error_sum / max(1, nsteps)
     low_scale_rate = low_scale_count / max(1, nsteps)
-    cost_function = mean_scale - 10*viol_rate -mean_trajectory_error
-    return cost_function, viol_rate, mean_scale, mean_trajectory_error
+    return viol_rate, mean_scale, mean_trajectory_error, mean_tv_cartesian * 1000
 
 
 def _run_episode_worker(args, kwargs, q):
@@ -324,19 +331,19 @@ storage = optuna.storages.RDBStorage(
     grace_period=120,  # declare failed if no ping for 120s
     # failed_trial_callback=RetryFailedTrialCallback(max_retry=1),
 )
-
+sampler = optuna.samplers.NSGAIIISampler()
 study = optuna.create_study(
-    direction="maximize",
+    directions=["minimize", "maximize", "minimize"],
     storage=storage,
     # load_if_exists=True,
-    sampler=CmaEsSampler(restart_strategy="ipop"), # 'ipop' riavvia se si blocca in un minimo locale
-    study_name=f"params_test_{time.strftime('%Y%m%d-%H%M%S')}",
+    sampler=sampler,
+    study_name=f"params_optimal_{time.strftime('%Y%m%d-%H%M%S')}",
     # study_name=f"dynamic_params_polynomial_20260216-094358",
     load_if_exists=True,
 
 )
-study.set_metric_names(["cost function"])
-study.optimize(make_objective(), n_trials=3000, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
+study.set_metric_names(["\", "mean_scaling", "mean_trajectory_error"])
+study.optimize(make_objective(), n_trials=5000, show_progress_bar=True, n_jobs=30, gc_after_trial=True)
 save_data(study)
 # print (run_episode(1e3,1e3,1e3,1e-3,5,1))
 

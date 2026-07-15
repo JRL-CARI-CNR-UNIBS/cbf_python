@@ -50,11 +50,11 @@ from scripts.util.gaussian_process_util import read_config_data_from_csv
 
 params_filename = "../params_csv/parameters_set.csv"
 set_ID = "0"
-duration = 180.0
+duration = 150.0
 
 SHOW_DATA = True
-USE_BRIDGE = True
-LOG_DATA = True
+USE_BRIDGE = False
+LOG_DATA = False
 SAVE_DATA = False
 
 parameters_type = "0"
@@ -108,11 +108,12 @@ def main():
     # cfg = create_base_cfg(set_ID, Tc, params_filename)
     cfg = ControllerConfig(Tc=Tc)
     delta = 4.5
-    cfg.gamma = 5.949803744662194
+    cfg.gamma =5.949803744662194
     cfg.lambda_acc = 1.4551402158959938e-10
     cfg.lambda_pos =  2098.0150948315577
     cfg.lambda_scaling = 16.558982747305556
-    cfg.lambda_vel =  0.34298548889519453
+    cfg.lambda_vel =   0.34298548889519453
+    # read_config_data_from_csv(cfg, h_mean=h_cfg, v_mean=v_cfg, filename="../params_csv/log_best_trials.csv")
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta)
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta) * 4
@@ -275,7 +276,7 @@ def main():
     if SHOW_DATA:
         renderer.publishPath(planner.publishPath())
 
-    ct, ct_qp, ct_ssm, ct_planner, ct_pin, h_log, trj_error_log, scaling_log = [], [], [], [], [], [], [], []
+    ct, ct_qp, ct_ssm, ct_planner, ct_pin, h_log, trj_error_log, scaling_log, traj_cart_error_log = [], [], [], [], [], [], [], [], []
 
     lap_count = 0
     on_target_count = 0
@@ -290,7 +291,7 @@ def main():
         t = 0.0
         trajectory_time = 0.0
         timeout_cycles = cycles = 0
-        violations = sum_scale = trajectory_error_sum = 0
+        violations = sum_scale = trajectory_error_sum = trajectory_cart_error_sum= 0
 
         ctrl.reset_state(q)
         low_scale_count = 0
@@ -363,6 +364,8 @@ def main():
             # --------------------------- INTEGRATION ----------------------------
             t += Tc
             end_eff_pos = out["end_effector_pos"]
+            end_eff_nominal_pos = out["Tbt_nominal"].translation
+            trajectory_cart_err = float(np.linalg.norm(end_eff_pos - end_eff_nominal_pos))
             if cycles % 5000 == 0:
                 print(f"STILL ALIVE! T: {t:.2f}s")
             if USE_BRIDGE and not stop_event.is_set():
@@ -421,6 +424,7 @@ def main():
                 violations += 1
             sum_scale += out["Dtrajectory_time"]
             trajectory_error_sum += out["trajectory_error"]
+            trajectory_cart_error_sum += trajectory_cart_err
             if (Dtrajectory_time) < scaling_threshold:
                 low_scale_count += 1
             visualizer.update_vectors(out["h_min"], out["d_min"], out["vr_min"]-out["vh_min"], t,)
@@ -430,6 +434,7 @@ def main():
                 scaling_log.append(Dtrajectory_time)
                 h_log.append(out["h_min"])
                 trj_error_log.append(out["trajectory_error"])
+                traj_cart_error_log.append(trajectory_cart_err)
             rest = Tc - elapsed
             # print(ctrl.cfg.delta_q_max)
             if rest > 0:
@@ -474,6 +479,7 @@ def main():
     scaling_log = np.array(scaling_log)
     h_log = np.array(h_log)
     trj_error_log = np.array(trj_error_log)
+    traj_cart_error_log = np.array(traj_cart_error_log)
     print(f"LAP COUNT: {lap_count}")
 
     on_target_rate = on_target_count/(n_wp * ((lap_count)+ ((trajectory_time % T_total)/T_total)))
@@ -485,11 +491,23 @@ def main():
         "computation_times": computation_times,
     }
 
+    # 1. Error Oscillation (Total Variation of Tracking Error)
+    # np.dif    f computes e[k+1] - e[k]
+    trj_error_diff = np.abs(np.diff(trj_error_log))
+    total_variation_error = np.sum(trj_error_diff)
+
+    trajectory_cart_error_diff = np.abs(np.diff(traj_cart_error_log))
+    total_variation_cart_error = np.sum(trajectory_cart_error_diff)
+    # Normalize by cycles so longer tests don't naturally score worse
+    mean_tv_error = total_variation_error / max(1, cycles)
+    mean_tv_cartesian = total_variation_cart_error / max(1, cycles)
+
     on_target_rate = on_target_count / (n_wp * ((lap_count) + ((trajectory_time % T_total) / T_total)))
     lap_count = lap_count + ((trajectory_time % T_total) / T_total)
     viol_rate = violations / max(1, cycles)
     mean_scale = sum_scale / max(1, cycles)
     mean_trajectory_error = trajectory_error_sum / max(1, cycles)
+    mean_cartesian_error = trajectory_cart_error_sum / max(1, cycles)
     low_scale_rate = low_scale_count / max(1, cycles)
 
 
@@ -503,6 +521,9 @@ def main():
     print(f"MEAN SCALING: {mean_scale}")
     print(f"MEAN TRAJECTORY ERROR: {mean_trajectory_error}")
     print(f"LOW SCALE RATE: {low_scale_rate*100}")
+    print(f"MEAN CARTESIAN ERROR: {mean_cartesian_error}")
+    print(f"MEAN TV JOINT ERROR: {mean_tv_error*1000}")
+    print(f"MEAN TV CARTESIAN ERROR: {mean_tv_cartesian*1000}")
     visualizer.compute_mean_cov(True)
     # CREATING CARTESIAN REFERENCE CSV FILE
     if LOG_DATA:
@@ -512,7 +533,7 @@ def main():
             folder_name = test_path
         generate_cartesian_trajectory(folder_name+"/")
 
-    # SAVING RESuLTS
+    # SAVING RESULTS
     if SAVE_DATA:
         file_path = '../resullts/simulation_data.csv'
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
