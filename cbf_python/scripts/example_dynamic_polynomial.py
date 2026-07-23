@@ -67,7 +67,7 @@ LOG_DATA = False
 
 SHOW_DATA = True
 SAVE_DATA = False
-test_type = "O"
+test_type = "P"
 
 PLOT_MEAN = False
 PLOT_LAMBDAS = True

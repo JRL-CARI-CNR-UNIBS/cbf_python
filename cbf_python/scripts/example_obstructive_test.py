@@ -44,7 +44,9 @@ from scripts.util.test_utils import generate_obs_state, compute_ee_pose, generat
 import csv
 from scripts.util.gaussian_process_util import generate_d_value, generate_obs_state_h_fixed, compute_required_d, generate_target_h, read_config_data_from_csv
 from scripts.util.mean_visualizer import StochasticCBFVisualizer
-duration = 1000.0
+from scripts.util.statistics_calculator import StatisticsCalculator
+from scripts.util.bcf_utils import compute_dynamic_risk_index
+duration = 50.0
 
 SHOW_DATA = False
 LOG_DATA = False
@@ -59,7 +61,7 @@ v_cfg = 1
 
 
 h_mean_ref = -0.1
-v_ref = 1
+v_ref = 0.2
 spawn_freq = 10
 h_std_dev = 0.1
 test_name= f"TEST_OBSTRUCTIVE_h_mean_{h_mean_ref:.2f}_v_mean_{v_ref:.2f}_par_h_{h_cfg}_v_{v_cfg}"
@@ -71,7 +73,7 @@ def _on_sigint_with_bridge():
 
 
 
-# signal.signal(signal.SIGINT, _on_sigint_with_bridge)
+# signal.signal(rclpy.signal.SIGINT, _on_sigint_with_bridge)
 
 def main():
     # --------------------------- MODEL & VISUALS ---------------------------------
@@ -113,7 +115,7 @@ def main():
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True, keypoint_to_log=-1)
     print(cfg)
     target_name = "ur10e_wrist_3_joint"
-    idx = UR10E_JOINTS.index(target_name)
+    # tool_frame_id = model.getFrameId(target_name)
 
     rclpy.init()
     first_joint_position = home
@@ -185,20 +187,24 @@ def main():
     q25 = np.array([130.0, -100.0, 125.0, -115.0, 94.0, -20.0]) * np.pi / 180.0
     q30 = np.array([136.0, -60.0, 90.0, -122.0, 90.0, 45.0]) * np.pi / 180.0
     q40 = np.array([134.0, -65.0, 70.0, -90.0, 90.0, 45.0]) * np.pi / 180.0
-    cfg.Dq_max = cfg.Dq_max * 0.25
-    cfg.DDq_max = cfg.DDq_max * 0.2
-    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max * 0.25, DDq_max=cfg.DDq_max * 0.25)
 
+    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max * 0.25, DDq_max=cfg.DDq_max * 0.125)
     planner.addWayPoint(q)
-    planner.addWayPoint(q10)
-    planner.addWayPoint(q20)
     planner.addWayPoint(q10)
     planner.addWayPoint(q22)
     planner.addWayPoint(q25)
     planner.addWayPoint(q30)
-    planner.addWayPoint(q40)
-    planner.addWayPoint(q30)
     planner.addWayPoint(q)
+    # planner.addWayPoint(q)
+    # planner.addWayPoint(q10)
+    # planner.addWayPoint(q20)
+    # planner.addWayPoint(q10)
+    # planner.addWayPoint(q22)
+    # planner.addWayPoint(q25)
+    # planner.addWayPoint(q30)
+    # planner.addWayPoint(q40)
+    # planner.addWayPoint(q30)
+    # planner.addWayPoint(q)
     n_wp = 10
     configs = {
         "q": q,
@@ -230,22 +236,36 @@ def main():
     min_dist = []
     renderer.publishPath(planner.publishPath())
 
-    ct, ct_qp, ct_ssm, ct_planner, ct_pin, h_log, trj_error_log, scaling_log = [], [], [], [], [], [], [], []
+    # Instantiate the StatisticsCalculator
+    stats_calculator = StatisticsCalculator(
+        n_wp=n_wp,
+        T_total=T_total,
+        cartesian_configs=cartesian_configs,
+        Tc=Tc,
+        scaling_threshold=0.5 # Use the same default as in the class
+    )
 
-    lap_count = 0
-    on_target_count = 0
+    # Remove old statistics accumulation variables
+    # ct, ct_qp, ct_ssm, ct_planner, ct_pin, h_log, trj_error_log, scaling_log = [], [], [], [], [], [], [], []
+    # lap_count = 0
+    # on_target_count = 0
+    # prec_target = -1
+    # enable_lap_count = True
+    # unfeasible_cnt = 0
+    # timeout_cycles = cycles = 0
+    # violations = sum_scale = trajectory_error_sum = 0
+    # low_scale_count = 0
+    # scaling_threshold = 0.5 # This is now passed to the StatisticsCalculator
+
     # ------------------------------ MAIN LOOP -------------------- ----------------
-    prec_target = -1
-    enable_lap_count = True
     if LOG_DATA:
         test_start_publisher.publish_once(True)  # pyright: ignore[reportPossiblyUnboundVariable]
-    unfeasible_cnt = 0
     try:
 
         t = 0.0
         trajectory_time = 0.0
-        timeout_cycles = cycles = 0
-        violations = sum_scale = trajectory_error_sum = 0
+        # timeout_cycles = cycles = 0 # Handled by stats_calculator
+        # violations = sum_scale = trajectory_error_sum = 0 # Handled by stats_calculator
 
         ctrl.reset_state(q)
         # test_start = True
@@ -256,8 +276,8 @@ def main():
         ee_vel = np.zeros(3)
         count_move = 0
         Dtrajectory_time = 1.0
-        low_scale_count = 0
-        scaling_threshold = 0.5
+        # low_scale_count = 0 # Handled by stats_calculator
+        # scaling_threshold = 0.5 # Handled by stats_calculator
         consecutive_low_scale_cycles = 0
         enable_spawn = True
         obstacle_accelerations = obstacle_accelerations.reshape(1, 3)
@@ -270,13 +290,13 @@ def main():
             # obstacle_positions, obstacle_velocities, enable_spawn, count_move = generate_obs_state(obstacle_positions, obstacle_velocities, cycles, enable_spawn, planner, trajectory_time, T_total, model, data, tool_frame_id, ee_pos, Dtrajectory_time, count_move)
             h_objective = generate_target_h(h_mean_ref, h_std_dev)
             d_objective = compute_required_d(h_objective, vr_min, v_ref, np.linalg.norm(obstacle_accelerations) )
-            obstacle_positions, obstacle_velocities, enable_spawn, count_move = generate_obs_state_h_fixed(obstacle_positions, obstacle_velocities, cycles, enable_spawn, ctrl.model, ctrl.data, tool_frame_id, ee_pos, Dtrajectory_time, count_move, d_objective, v_ref, spawn_freq, ee_vel)#nominal_q, nominal_Dq, nominal_DDq)
+            obstacle_positions, obstacle_velocities, enable_spawn, count_move = generate_obs_state_h_fixed(obstacle_positions, obstacle_velocities, stats_calculator.cycles, enable_spawn, ctrl.model, ctrl.data, tool_frame_id, ee_pos, Dtrajectory_time, count_move, d_objective, v_ref, spawn_freq, ee_vel)#nominal_q, nominal_Dq, nominal_DDq)
             #     # print(obstacle_positions)
             #     print(f"TYPE OF OBSTACLE POSITIONS: {type(obstacle_positions)}")
             #     print(f"TYPE OF OBSTACLE Velocities: {type(obstacle_velocities)}")
 
                 # print(f"SIZE OF OBS POSITIONS: {obstacle_positions.shape}")
-            cycles += 1
+            # cycles += 1 # Handled by stats_calculator
 
 
             out = ctrl.step(
@@ -293,26 +313,27 @@ def main():
             unfeasible_string = out["unfeasible_cnt"]
             q = out["q"]
 
-            if cycles < 5:
+            if stats_calculator.cycles < 5: # Use stats_calculator.cycles for initial prints
                 print(f"q pln={nominal_q.T}\nq act={q.T}")
             dq = out["dq"]
             ddq = out["ddq"]
             trajectory_time = out["trajectory_time"]
             Dtrajectory_time = out["Dtrajectory_time"]
-            if (trajectory_time % T_total) < Tc:
-                if enable_lap_count:
-                    lap_count += 1
-                    prec_target = -1
-                    enable_lap_count = False
-            else:
-                enable_lap_count = True
+            # Old lap count logic removed, now handled by StatisticsCalculator
+            # if (trajectory_time % T_total) < Tc:
+            #     if enable_lap_count:
+            #         lap_count += 1
+            #         prec_target = -1
+            #         enable_lap_count = False
+            # else:
+            #     enable_lap_count = True
                 # print(f"actual lap: {int(trajectory_time % T_total)}")
             elapsed = time.perf_counter() - loop_start
-            ct_qp.append(elapsed)
+            # ct_qp.append(elapsed) # This was for a specific timing, might need to be re-evaluated if still needed
 
             # --------------------------- INTEGRATION ----------------------------
             t += Tc
-            if cycles % 5000 == 0:
+            if stats_calculator.cycles % 5000 == 0: # Use stats_calculator.cycles
                 print(f"STILL ALIVE! T: {t:.2f}s")
             end_eff_pos = out["end_effector_pos"]
             # print(t)
@@ -347,33 +368,52 @@ def main():
             if LOG_DATA:
                 joint_state_publisher.publish_once(t, q, dq, ddq)
             # ----------------------------- TIMING -------------------------------
-            dist = []
-            for i in range(len(cartesian_configs.values())):
-                q_wp = list(cartesian_configs.values())[i]
-                dist.append(np.linalg.norm(q_wp - end_eff_pos))
-                if np.linalg.norm(q_wp - end_eff_pos) < 2e-03 and prec_target != i:
-                    on_target_count += 1
-                    prec_target = i
-                    break
-            if np.min(dist) > 0.0:
-                min_dist.append(np.min(dist))
-            if cycles > 1:
-                ct.append(elapsed)
-                scaling_log.append(Dtrajectory_time)
-                h_log.append(out["h_min"])
-                trj_error_log.append(out["trajectory_error"])
+            # Old min_dist, violations, sum_scale, trajectory_error_sum, low_scale_count logic removed
+            # dist = []
+            # for i in range(len(cartesian_configs.values())):
+            #     q_wp = list(cartesian_configs.values())[i]
+            #     dist.append(np.linalg.norm(q_wp - end_eff_pos))
+            #     if np.linalg.norm(q_wp - end_eff_pos) < 2e-03 and prec_target != i:
+            #         on_target_count += 1
+            #         prec_target = i
+            #         break
+            # if np.min(dist) > 0.0:
+            #     min_dist.append(np.min(dist))
             # if (out["h_min"] < (h_objective + 1.5 * h_std_dev) and out["h_min"] > (h_objective - 1.5 * h_std_dev)) or SAVE_DATA:
-            if out["h_min"] < 0 and out["vr_min"] < -1e-3:
-                violations += 1
-            sum_scale += out["Dtrajectory_time"]
-            trajectory_error_sum += out["trajectory_error"]
+            # if out["h_min"] < 0 and out["vr_min"] < -1e-3:
+            #     violations += 1
+            # sum_scale += out["Dtrajectory_time"]
+            # trajectory_error_sum += out["trajectory_error"]
 
-            if out["Dtrajectory_time"] < scaling_threshold:
-                low_scale_count += 1
+            # if out["Dtrajectory_time"] < scaling_threshold:
+            #     low_scale_count += 1
 
             visualizer.update_vectors(out["h_min"], out["d_min"], out["vr_min"] - out["vh_min"], t,)
             elapsed = time.perf_counter() - loop_start
 
+            s_index = None
+            if stats_calculator.cycles > 1: # s_index requires at least 2 cycles of data
+                s_index = compute_dynamic_risk_index(end_eff_pos=end_eff_pos, end_eff_vel=ee_vel, # Changed ee_vel to end_eff_vel for consistency
+                                                              obs_positions=obstacle_positions, obs_velocities=obstacle_velocities,
+                                                              obs_accelerations=obstacle_accelerations, a_s=cfg.a_s)
+
+            # Update the statistics calculator
+            stats_calculator.update(
+                out=out,
+                trajectory_cart_err=float(np.linalg.norm(end_eff_pos - out["Tbt_nominal"].translation)), # Calculate here
+                s_index=s_index,
+                elapsed_time=elapsed,
+                unfeasible_string=unfeasible_string,
+                end_eff_pos=end_eff_pos
+            )
+
+            # Old ct.append, scaling_log, h_log, trj_error_log removed
+            # if cycles > 1:
+            #     ct.append(elapsed)
+            #     scaling_log.append(Dtrajectory_time)
+            #     h_log.append(out["h_min"])
+            #     trj_error_log.append(out["trajectory_error"])
+            
             rest = Tc - elapsed
             if rest > 0:
                 if SHOW_DATA:
@@ -386,9 +426,9 @@ def main():
                 else:
                     time.sleep(0.0001)
             else:
-                timeout_cycles += 1
-            if unfeasible_string != "FEASIBLE":
-                unfeasible_cnt += 1
+                # Old timeout_cycles increment removed, now handled by StatisticsCalculator
+                pass
+            # Old unfeasible_cnt increment removed, now handled by StatisticsCalculator
         if not stop_event.is_set() and LOG_DATA:
             test_start_publisher.publish_once(False)  # pyright: ignore[reportPossiblyUnboundVariable]
 
@@ -402,39 +442,41 @@ def main():
         except Exception as e:
             print(f"[shutdown] one-shot publish failed: {e}")
 
-    computation_times = np.array(ct)
-    scaling_log = np.array(scaling_log)
+    # Print statistics using the new class
+    print(stats_calculator)
 
+    # Old statistics calculation and printing removed
+    # computation_times = np.array(ct)
+    # scaling_log = np.array(scaling_log)
 
+    # print(f"average scaling = {np.mean(scaling_log)}")
 
-    print(f"average scaling = {np.mean(scaling_log)}")
+    # stats = {
+    #     "computation_times": computation_times,
+    # }
+    # lap_count = lap_count + ((trajectory_time % T_total) / T_total)
+    # on_target_rate = on_target_count / (n_wp * ((lap_count) + ((trajectory_time % T_total) / T_total)))
+    # viol_rate = violations / len(visualizer.h_vec)
+    # mean_scale = sum_scale / len(visualizer.h_vec)
+    # mean_trajectory_error = trajectory_error_sum / len(visualizer.h_vec)
+    # low_scale_rate = low_scale_count / len(visualizer.h_vec)
 
-    # computation_times_others=computation_times-(computation_times_planner+computation_times_pin+computation_times_qp+computation_times_ssm)
-    stats = {
-        "computation_times": computation_times,
-    }
-    lap_count = lap_count + ((trajectory_time % T_total) / T_total)
-    on_target_rate = on_target_count / (n_wp * ((lap_count) + ((trajectory_time % T_total) / T_total)))
-    viol_rate = violations / len(visualizer.h_vec)
-    mean_scale = sum_scale / len(visualizer.h_vec)
-    mean_trajectory_error = trajectory_error_sum / len(visualizer.h_vec)
-    low_scale_rate = low_scale_count / len(visualizer.h_vec)
-
-    print(
-        f"timeout cycles = {timeout_cycles} over {cycles}, percentage = {100.0 * timeout_cycles / cycles}, average = {np.mean(computation_times)}")
-    print(f"unfeasible cycles = {unfeasible_cnt} over {cycles}, percentage = {100.0 * unfeasible_cnt / cycles} %")
-    print(f"LAP COUNT: {lap_count}")
-    print("on target count: ", on_target_count)
-    print(((trajectory_time % T_total) / T_total))
-    print(f"WAYPOINTS REACHING PERCENTAGE: {on_target_rate * 100.0} %")
-    print(f"VIOLATION RATE: {viol_rate}")
-    print(f"MEAN SCALING: {mean_scale}")
-    print(f"MEAN TRAJECTORY ERROR: {mean_trajectory_error}")
-    print(f"LOW SCALE RATE: {low_scale_rate}")
-    # print(f"D OBJECTIVE: {d_objective}")
-    print((f"V REF: {v_ref}"))
-    print(f"Cicli contati: {len(visualizer.h_vec)}, cicli totali: {cycles}")
-    print(f"Percentuale cicli utili: {len(visualizer.h_vec)/cycles}")
+    # print(
+    #     f"timeout cycles = {timeout_cycles} over {cycles}, percentage = {100.0 * timeout_cycles / cycles}, average = {np.mean(computation_times)}")
+    # print(f"unfeasible cycles = {unfeasible_cnt} over {cycles}, percentage = {100.0 * unfeasible_cnt / cycles} %")
+    # print(f"LAP COUNT: {lap_count}")
+    # print("on target count: ", on_target_count)
+    # print(((trajectory_time % T_total) / T_total))
+    # print(f"WAYPOINTS REACHING PERCENTAGE: {on_target_rate * 100.0} %")
+    # print(f"VIOLATION RATE: {viol_rate}")
+    # print(f"MEAN SCALING: {mean_scale}")
+    # print(f"MEAN TRAJECTORY ERROR: {mean_trajectory_error}")
+    # print(f"LOW SCALE RATE: {low_scale_rate}")
+    # # print(f"D OBJECTIVE: {d_objective}")
+    # print((f"V REF: {v_ref}"))
+    # print(f"Cicli contati: {len(visualizer.h_vec)}, cicli totali: {cycles}")
+    # print(f"Percentuale cicli utili: {len(visualizer.h_vec)/cycles}")
+    
     visualizer.compute_mean_cov(True)
     # print_stats_table(stats)
     # _ = make_summary_figure(
@@ -472,6 +514,9 @@ def main():
             'low_scale_rate',
         ]
 
+        # Get stats from the calculator
+        final_stats = stats_calculator._calculate_stats()
+
         # I dati da salvare (calcolati come nel tuo esempio)
         row_data = {
             "test_type": test_name,
@@ -481,12 +526,12 @@ def main():
             "lambda_acc": cfg.lambda_acc,
             "delta": delta,
             "gamma": cfg.gamma,
-            'on_target_rate': on_target_rate,
-            'lap_count': lap_count,
-            'viol_rate': viol_rate,
-            'mean_scale': mean_scale,
-            'mean_trajectory_error': mean_trajectory_error,
-            'low_scale_rate' : low_scale_rate
+            'on_target_rate': final_stats['on_target_rate'],
+            'lap_count': final_stats['lap_count'],
+            'viol_rate': final_stats['violation_rate'],
+            'mean_scale': final_stats['mean_scaling'],
+            'mean_trajectory_error': final_stats['mean_trajectory_error'],
+            'low_scale_rate' : final_stats['low_scale_rate']
         }
 
         # Controllo se il file esiste già per scrivere l'header solo la prima volta

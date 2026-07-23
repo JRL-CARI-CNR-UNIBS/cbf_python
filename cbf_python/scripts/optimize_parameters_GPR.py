@@ -21,7 +21,7 @@ from optuna.samplers import CmaEsSampler
 from optuna.samplers import NSGAIIISampler
 
 # Database connection (for dashboard)
-POSTGRES_URL = "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
+POSTGRES_URL = "postgresql+psycopg2://optuna:optuna_pw@192.168.1.16:5432/optuna_db"
 
 import pandas as pd
 import os

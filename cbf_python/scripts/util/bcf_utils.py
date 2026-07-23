@@ -170,3 +170,83 @@ def plot_lambdas(t_list, gamma_list, lambda_pos_list, lambda_vel_list, lambda_ac
     
     # Adjust layout to prevent overlapping labels
     plt.tight_layout()
+
+
+import numpy as np
+
+
+def compute_dynamic_risk_index(end_eff_pos, end_eff_vel, obs_positions, obs_velocities, obs_accelerations,
+                                            a_s=2.5, T_r=0.15, delta=1.25, D_0=0.25, lambd=1.0):
+    """
+    Calcola l'indice di rischio S_index valutando l'accelerazione umana costante
+    e includendo il tempo di reazione del robot (T_r) nell'orizzonte predittivo.
+
+    Parametri:
+    - end_eff_pos: array (3,) con la posizione del TCP (p_t)
+    - end_eff_vel: array (3,) con la velocità del TCP (v_m)
+    - obs_positions: array (N, 3) con le posizioni dei keypoint umani (p_o)
+    - obs_velocities: array (N, 3) con le velocità dei keypoint umani (v_hand)
+    - obs_accelerations: array (N, 3) con le acc. dei keypoint umani (a_hand)
+    - a_s: decelerazione massima del robot in m/s^2
+    - T_r: tempo di reazione del sistema in secondi
+    - delta: fattore di rischio statico
+    - D_0: incertezza statica/margine minimo (C nel paper)
+    - lambd: fattore di scaling dell'indice
+    """
+
+    # Calcolo del tempo di frenata Tb basato sulla velocità attuale del TCP
+    v_m_norm = np.linalg.norm(end_eff_vel)
+    if v_m_norm < 1e-5:
+        T_b = 0.0
+    else:
+        T_b = v_m_norm / a_s
+
+    # Orizzonte temporale totale
+    T_tot = T_r + T_b
+
+    s_index_max = 0.0
+
+    for i in range(obs_positions.shape[0]):
+        p_o = obs_positions[i]
+        v_hand = obs_velocities[i]
+        a_hand = obs_accelerations[i]
+
+        diff_ot = p_o - end_eff_pos
+        dist_ot = np.linalg.norm(diff_ot)
+
+        # Evita singolarità
+        if dist_ot < 1e-5:
+            return float('inf')
+
+        dir_ot = diff_ot / dist_ot
+
+        # 1. Spostamento del robot (Moto rettilineo uniforme in T_r + Decelerazione in T_b)
+        delta_x_robot = (end_eff_vel * T_r) + (0.5 * end_eff_vel * T_b)
+
+        # 2. Spostamento dell'umano (Moto uniformemente accelerato su tutto T_tot)
+        delta_x_hand = (v_hand * T_tot) + (0.5 * a_hand * (T_tot ** 2))
+
+        # 3. Spostamento relativo complessivo
+        delta_x_tot = delta_x_hand + delta_x_robot
+
+        # 4. Proiezione dello spostamento sulla direzione di avvicinamento
+        integral_val = np.dot(delta_x_tot, dir_ot)
+
+        # 5. Calcolo soglia di rischio accumulata D_{l-h}
+        D_lh = delta * integral_val + D_0
+
+        # Denominatore: velocità relativa istantanea proiettata sulla distanza
+        v_sum = v_hand + end_eff_vel
+        den = np.dot(v_sum, diff_ot)
+
+        if den <= 1e-6:
+            current_s_index = 0.0
+        else:
+            fraction = (dist_ot - D_lh) / den
+            # Sostituiamo T_b con T_tot per coerenza con il nuovo orizzonte esteso
+            current_s_index = lambd * (T_tot + fraction * dist_ot)
+
+        if current_s_index > s_index_max:
+            s_index_max = current_s_index
+
+    return s_index_max

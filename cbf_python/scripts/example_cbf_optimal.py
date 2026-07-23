@@ -45,19 +45,21 @@ import rclpy
 import signal
 import threading
 from scripts.util import csv_publishers, test_publish_utils as pub_utils
-from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
+# from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
 from scripts.util.gaussian_process_util import read_config_data_from_csv
+from scripts.util.bcf_utils import compute_dynamic_risk_index
+from scripts.util.statistics_calculator import StatisticsCalculator
 
 params_filename = "../params_csv/parameters_set.csv"
 set_ID = "0"
-duration = 150.0
+duration = 15
 
 SHOW_DATA = True
 USE_BRIDGE = False
 LOG_DATA = False
 SAVE_DATA = False
 
-parameters_type = "0"
+parameters_type = "1"
 
 stop_event = threading.Event()
 
@@ -276,36 +278,38 @@ def main():
     if SHOW_DATA:
         renderer.publishPath(planner.publishPath())
 
-    ct, ct_qp, ct_ssm, ct_planner, ct_pin, h_log, trj_error_log, scaling_log, traj_cart_error_log = [], [], [], [], [], [], [], [], []
+    # Instantiate the StatisticsCalculator
+    stats_calculator = StatisticsCalculator(
+        n_wp=n_wp,
+        T_total=T_total,
+        cartesian_configs=cartesian_configs,
+        Tc=Tc,
+        scaling_threshold=0.5 # Use the same default as in the class
+    )
 
-    lap_count = 0
-    on_target_count = 0
+    # Remove old statistics accumulation variables
+    # ct, ct_qp, ct_ssm, ct_planner, ct_pin, h_log, trj_error_log, scaling_log, traj_cart_error_log, s_index_log = [], [], [], [], [], [], [], [], [], []
+    # lap_count = 0
+    # on_target_count = 0
+    # prec_target = -1
+    # enable_lap_count = True
+    # unfeasible_cnt = 0
+    # timeout_cycles = cycles = 0
+    # violations = sum_scale = trajectory_error_sum = trajectory_cart_error_sum= 0
+    # low_scale_count = 0
+    # scaling_threshold = 0.5 # This is now passed to the StatisticsCalculator
+
     # ------------------------------ MAIN LOOP -------------------- ----------------
-    prec_target = -1
-    enable_lap_count = True
     if LOG_DATA:
         test_start_publisher.publish_once(True) # pyright: ignore[reportPossiblyUnboundVariable]
-    unfeasible_cnt = 0
     try:
 
         t = 0.0
         trajectory_time = 0.0
-        timeout_cycles = cycles = 0
-        violations = sum_scale = trajectory_error_sum = trajectory_cart_error_sum= 0
 
         ctrl.reset_state(q)
-        low_scale_count = 0
-        scaling_threshold = 0.5
-        # test_start = True
         visualizer = StochasticCBFVisualizer()
         while t < duration and not stop_event.is_set():
-            # if t%T_total == 0:
-            #     test_start = False
-            #     test_start_publisher.publish_once(test_start)
-            # elif not test_start:
-            #     test_start = True
-            #     test_start_publisher.publish_once(test_start)
-            # print(f"{T_total}")
             h_min = np.inf
 
             loop_start = time.perf_counter()
@@ -317,56 +321,56 @@ def main():
             # print ("obstacle_positions:", obstacle_positions[7])
             # print ("type(obstacle_positions):", type(obstacle_positions))
             # print("size(obstacle_positions): ", obstacle_positions.shape)
-            cycles += 1
+            # cycles += 1
 
             nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
-            if obstacle_positions.shape[0] > 7:
-                out = ctrl.step(
-                    obs_pos=obstacle_positions[7].reshape(1,3),
-                    obs_vel=obstacle_velocities[7].reshape(1,3),
-                    obs_acc=obstacle_accelerations[7].reshape(1,3),
-                    nominal_q=nominal_q,
-                    nominal_Dq=nominal_Dq, 
-                    nominal_DDq=nominal_DDq
-                )
-            else:   
-                out = ctrl.step(
-                    obs_pos=obstacle_positions,
-                    obs_vel=obstacle_velocities,
-                    obs_acc=obstacle_accelerations,
-                    nominal_q=nominal_q,
-                    nominal_Dq=nominal_Dq, 
-                    nominal_DDq=nominal_DDq
-                )
+            # if obstacle_positions.shape[0] > 7:
+            #     out = ctrl.step(
+            #         obs_pos=obstacle_positions[7].reshape(1,3),
+            #         obs_vel=obstacle_velocities[7].reshape(1,3),
+            #         obs_acc=obstacle_accelerations[7].reshape(1,3),
+            #         nominal_q=nominal_q,
+            #         nominal_Dq=nominal_Dq,
+            #         nominal_DDq=nominal_DDq
+            #     )
+            # else:
+            out = ctrl.step(
+                obs_pos=obstacle_positions,
+                obs_vel=obstacle_velocities,
+                obs_acc=obstacle_accelerations,
+                nominal_q=nominal_q,
+                nominal_Dq=nominal_Dq,
+                nominal_DDq=nominal_DDq
+            )
             unfeasible_string = out["unfeasible_cnt"]
             q = out["q"]
 
-            if cycles<5:
+            if stats_calculator.cycles < 5: # Use stats_calculator.cycles for initial prints
                 print(f"q pln={nominal_q.T}\nq act={q.T}")
             dq = out["dq"]
             ddq = out["ddq"]
             trajectory_time = out["trajectory_time"]
             Dtrajectory_time = out["Dtrajectory_time"]
-            if (trajectory_time % T_total) < Tc:
-                if enable_lap_count:
-                    lap_count += 1
-                    prec_target = -1
-                    # print("Trajectory time: ", trajectory_time)
-                    # print(f"T_total: {T_total}")
-                    # print(f"actual scaling: {Dtrajectory_time}")
-                    enable_lap_count = False
-            else:
-                enable_lap_count = True
-                # print(f"actual lap: {int(trajectory_time % T_total)}")
-            elapsed = time.perf_counter() - loop_start
-            ct_qp.append(elapsed)
+            
+            # Old lap count logic removed, now handled by StatisticsCalculator
+            # if (trajectory_time % T_total) < Tc:
+            #     if enable_lap_count:
+            #         lap_count += 1
+            #         prec_target = -1
+            #         enable_lap_count = False
+            # else:
+            #     enable_lap_count = True
+            
+            # ct_qp.append(elapsed) # This was for a specific timing, might need to be re-evaluated if still needed
 
             # --------------------------- INTEGRATION ----------------------------
             t += Tc
             end_eff_pos = out["end_effector_pos"]
             end_eff_nominal_pos = out["Tbt_nominal"].translation
             trajectory_cart_err = float(np.linalg.norm(end_eff_pos - end_eff_nominal_pos))
-            if cycles % 5000 == 0:
+            end_eff_vel = out["end_effector_vel"]
+
+            if stats_calculator.cycles % 5000 == 0: # Use stats_calculator.cycles
                 print(f"STILL ALIVE! T: {t:.2f}s")
             if USE_BRIDGE and not stop_event.is_set():
                 bridge.sendCommand(q)
@@ -375,7 +379,6 @@ def main():
                 hmin = out["h_min"]
                 dmin = out["d_min"]
                 trj_error = out["trajectory_error"]
-                end_eff_vel = out["end_effector_vel"]
                 vr_min = out["vr_min"]
                 vh_min = out["vh_min"]
                 scaling = out["Dtrajectory_time"]
@@ -408,33 +411,56 @@ def main():
             if not USE_BRIDGE and LOG_DATA:
                 joint_state_publisher.publish_once(t, q, dq, ddq)
             # ----------------------------- TIMING -------------------------------
-            dist = []
-            for i in range(len(cartesian_configs.values())):
-                q_wp = list(cartesian_configs.values())[i]
-                dist.append(np.linalg.norm(q_wp - end_eff_pos))
-                if  np.linalg.norm(q_wp - end_eff_pos) < 2e-03 and prec_target != i:
-                    on_target_count += 1
-                    prec_target = i
-                    # print ("TARGET REACHED")
-                    break
-            # print("Min dist: ", np.min(dist))
-            if np.min(dist) > 0.0:
-                min_dist.append(np.min(dist))
-            if out["h_min"] < 0 and out["vr_min"] < -1e-3:
-                violations += 1
-            sum_scale += out["Dtrajectory_time"]
-            trajectory_error_sum += out["trajectory_error"]
-            trajectory_cart_error_sum += trajectory_cart_err
-            if (Dtrajectory_time) < scaling_threshold:
-                low_scale_count += 1
+            # Old min_dist, violations, sum_scale, trajectory_error_sum, trajectory_cart_error_sum, low_scale_count logic removed
+            # dist = []
+            # for i in range(len(cartesian_configs.values())):
+            #     q_wp = list(cartesian_configs.values())[i]
+            #     dist.append(np.linalg.norm(q_wp - end_eff_pos))
+            #     if  np.linalg.norm(q_wp - end_eff_pos) < 2e-03 and prec_target != i:
+            #         on_target_count += 1
+            #         prec_target = i
+            #         break
+            # if np.min(dist) > 0.0:
+            #     min_dist.append(np.min(dist))
+            # if out["h_min"] < 0 and out["vr_min"] < -1e-3:
+            #     violations += 1
+            # sum_scale += out["Dtrajectory_time"]
+            # trajectory_error_sum += out["trajectory_error"]
+            # trajectory_cart_error_sum += trajectory_cart_err
+            # if (Dtrajectory_time) < scaling_threshold:
+            #     low_scale_count += 1
             visualizer.update_vectors(out["h_min"], out["d_min"], out["vr_min"]-out["vh_min"], t,)
+            
             elapsed = time.perf_counter() - loop_start
-            if cycles>1:
-                ct.append(elapsed)
-                scaling_log.append(Dtrajectory_time)
-                h_log.append(out["h_min"])
-                trj_error_log.append(out["trajectory_error"])
-                traj_cart_error_log.append(trajectory_cart_err)
+
+            s_index = None
+            if stats_calculator.cycles > 1: # s_index requires at least 2 cycles of data
+                s_index = compute_dynamic_risk_index(end_eff_pos=end_eff_pos, end_eff_vel=end_eff_vel,
+                                                              obs_positions=obstacle_positions, obs_velocities=obstacle_velocities,
+                                                              obs_accelerations=obstacle_accelerations, a_s=cfg.a_s)
+
+            # Update the statistics calculator
+            stats_calculator.update(
+                out=out,
+                trajectory_cart_err=trajectory_cart_err,
+                s_index=s_index,
+                elapsed_time=elapsed,
+                unfeasible_string=unfeasible_string,
+                end_eff_pos=end_eff_pos
+            )
+
+            # Old ct.append, s_index_log, scaling_log, h_log, trj_error_log, traj_cart_error_log removed
+            # if cycles>1:
+            #     ct.append(elapsed)
+            #     s_index = compute_dynamic_risk_index_with_acc(end_eff_pos=end_eff_pos, end_eff_vel=end_eff_vel,
+            #                                                   obs_positions=obstacle_positions, obs_velocities=obstacle_velocities,
+            #                                                   obs_accelerations=obstacle_accelerations, a_s=cfg.a_s)
+            #     s_index_log.append(s_index)
+            #     scaling_log.append(Dtrajectory_time)
+            #     h_log.append(out["h_min"])
+            #     trj_error_log.append(out["trajectory_error"])
+            #     traj_cart_error_log.append(trajectory_cart_err)
+            
             rest = Tc - elapsed
             # print(ctrl.cfg.delta_q_max)
             if rest > 0:
@@ -448,9 +474,12 @@ def main():
                 else:
                     time.sleep(0.0001)
             else:
-                timeout_cycles+=1
-            if unfeasible_string != "FEASIBLE":
-                unfeasible_cnt += 1
+                # Old timeout_cycles increment removed, now handled by StatisticsCalculator
+                # timeout_cycles+=1
+                pass
+            # Old unfeasible_cnt increment removed, now handled by StatisticsCalculator
+            # if unfeasible_string != "FEASIBLE":
+            #     unfeasible_cnt += 1
 
         if not stop_event.is_set() and LOG_DATA:
             test_start_publisher.publish_once(False) # pyright: ignore[reportPossiblyUnboundVariable]
@@ -460,70 +489,60 @@ def main():
         stop_event.set()
 # 
     finally:
-        # bridge.shutdown()
-        # time.sleep(0.1)
-        # # 1) stop components that may be spinning their own executors (e.g., the bridge)
-        # try:
-        #     if 'bridge' in locals() and hasattr(bridge, 'shutdown'):
-        #         bridge.shutdown()
-        # except Exception:
-        #     print("Error during bridge shutdown")
-        # print(286)
-       
         try:
             pub_utils.publish_test_start_once(False)
         except Exception as e:
             print(f"[shutdown] one-shot publish failed: {e}")
-    # Call with your
-    computation_times = np.array(ct)
-    scaling_log = np.array(scaling_log)
-    h_log = np.array(h_log)
-    trj_error_log = np.array(trj_error_log)
-    traj_cart_error_log = np.array(traj_cart_error_log)
-    print(f"LAP COUNT: {lap_count}")
+    
+    # Print statistics using the new class
+    print(stats_calculator)
 
-    on_target_rate = on_target_count/(n_wp * ((lap_count)+ ((trajectory_time % T_total)/T_total)))
-    lap_count = lap_count + ((trajectory_time % T_total)/T_total)
-    print(f"average scaling = {np.mean(scaling_log)}")
+    # Old statistics calculation and printing removed
+    # computation_times = np.array(ct)
+    # scaling_log = np.array(scaling_log)
+    # h_log = np.array(h_log)
+    # trj_error_log = np.array(trj_error_log)
+    # traj_cart_error_log = np.array(traj_cart_error_log)
+    # print(f"LAP COUNT: {lap_count}")
 
-    #computation_times_others=computation_times-(computation_times_planner+computation_times_pin+computation_times_qp+computation_times_ssm)
-    stats = {
-        "computation_times": computation_times,
-    }
+    # on_target_rate = on_target_count/(n_wp * ((lap_count)+ ((trajectory_time % T_total)/T_total)))
+    # lap_count = lap_count + ((trajectory_time % T_total)/T_total)
+    # print(f"average scaling = {np.mean(scaling_log)}")
 
-    # 1. Error Oscillation (Total Variation of Tracking Error)
-    # np.dif    f computes e[k+1] - e[k]
-    trj_error_diff = np.abs(np.diff(trj_error_log))
-    total_variation_error = np.sum(trj_error_diff)
+    # stats = {
+    #     "computation_times": computation_times,
+    # }
 
-    trajectory_cart_error_diff = np.abs(np.diff(traj_cart_error_log))
-    total_variation_cart_error = np.sum(trajectory_cart_error_diff)
-    # Normalize by cycles so longer tests don't naturally score worse
-    mean_tv_error = total_variation_error / max(1, cycles)
-    mean_tv_cartesian = total_variation_cart_error / max(1, cycles)
+    # trj_error_diff = np.abs(np.diff(trj_error_log))
+    # total_variation_error = np.sum(trj_error_diff)
 
-    on_target_rate = on_target_count / (n_wp * ((lap_count) + ((trajectory_time % T_total) / T_total)))
-    lap_count = lap_count + ((trajectory_time % T_total) / T_total)
-    viol_rate = violations / max(1, cycles)
-    mean_scale = sum_scale / max(1, cycles)
-    mean_trajectory_error = trajectory_error_sum / max(1, cycles)
-    mean_cartesian_error = trajectory_cart_error_sum / max(1, cycles)
-    low_scale_rate = low_scale_count / max(1, cycles)
+    # trajectory_cart_error_diff = np.abs(np.diff(traj_cart_error_log))
+    # total_variation_cart_error = np.sum(trajectory_cart_error_diff)
+    # mean_tv_error = total_variation_error / max(1, cycles)
+    # mean_tv_cartesian = total_variation_cart_error / max(1, cycles)
 
+    # on_target_rate = on_target_count / (n_wp * ((lap_count) + ((trajectory_time % T_total) / T_total)))
+    # lap_count = lap_count + ((trajectory_time % T_total) / T_total)
+    # viol_rate = violations / max(1, cycles)
+    # mean_scale = sum_scale / max(1, cycles)
+    # mean_trajectory_error = trajectory_error_sum / max(1, cycles)
+    # mean_cartesian_error = trajectory_cart_error_sum / max(1, cycles)
+    # low_scale_rate = low_scale_count / max(1, cycles)
 
-
-    print(f"timeout cycles = {timeout_cycles} over {cycles}, percentage = {100.0*timeout_cycles/cycles}, average = {np.mean(computation_times)}")
-    print(f"unfeasible cycles = {unfeasible_cnt} over {cycles}, percentage = {100.0*unfeasible_cnt/cycles}")
-    print(f"LAP COUNT: {lap_count}")
-    print("on target count: ", on_target_count)
-    print(f"WAYPOINTS REACHING PERCENTAGE: {on_target_rate*100.0} %")
-    print(f"VIOLATION RATE: {viol_rate*100} %")
-    print(f"MEAN SCALING: {mean_scale}")
-    print(f"MEAN TRAJECTORY ERROR: {mean_trajectory_error}")
-    print(f"LOW SCALE RATE: {low_scale_rate*100}")
-    print(f"MEAN CARTESIAN ERROR: {mean_cartesian_error}")
-    print(f"MEAN TV JOINT ERROR: {mean_tv_error*1000}")
-    print(f"MEAN TV CARTESIAN ERROR: {mean_tv_cartesian*1000}")
+    # print(f"timeout cycles = {timeout_cycles} over {cycles}, percentage = {100.0*timeout_cycles/cycles}, average = {np.mean(computation_times)}")
+    # print(f"unfeasible cycles = {unfeasible_cnt} over {cycles}, percentage = {100.0*unfeasible_cnt/cycles}")
+    # print(f"LAP COUNT: {lap_count}")
+    # print("on target count: ", on_target_count)
+    # print(f"WAYPOINTS REACHING PERCENTAGE: {on_target_rate*100.0} %")
+    # print(f"VIOLATION RATE: {viol_rate*100} %")
+    # print(f"MEAN SCALING: {mean_scale}")
+    # print(f"MEAN TRAJECTORY ERROR: {mean_trajectory_error}")
+    # print(f"LOW SCALE RATE: {low_scale_rate*100}")
+    # print(f"MEAN CARTESIAN ERROR: {mean_cartesian_error}")
+    # print(f"MEAN TV JOINT ERROR: {mean_tv_error*1000}")
+    # print(f"MEAN TV CARTESIAN ERROR: {mean_tv_cartesian*1000}")
+    # print(f"MEAN RISK INDEX : {sum(s_index_log)/len(s_index_log)}")
+    
     visualizer.compute_mean_cov(True)
     # CREATING CARTESIAN REFERENCE CSV FILE
     if LOG_DATA:
@@ -531,7 +550,7 @@ def main():
             folder_name = "" # UPDATE WITH THE PATH THE TRAJECTORY LOGGER NODE USES
         else:
             folder_name = test_path
-        generate_cartesian_trajectory(folder_name+"/")
+        # generate_cartesian_trajectory(folder_name+"/") # This function is commented out in imports, so keeping it commented here
 
     # SAVING RESULTS
     if SAVE_DATA:
@@ -555,6 +574,9 @@ def main():
             "low_scale_rate"
         ]
 
+        # Get stats from the calculator
+        final_stats = stats_calculator._calculate_stats()
+
         # I dati da salvare (calcolati come nel tuo esempio)
         row_data = {
             "test_type": test_name,
@@ -564,12 +586,12 @@ def main():
             "lambda_acc": cfg.lambda_acc,
             "delta": delta,
             "gamma": cfg.gamma,
-            'on_target_rate': on_target_rate,
-            'lap_count': lap_count,
-            'viol_rate': viol_rate,
-            'mean_scale': mean_scale,
-            'mean_trajectory_error': mean_trajectory_error,
-            "low_scale_rate": low_scale_rate
+            'on_target_rate': final_stats['on_target_rate'],
+            'lap_count': final_stats['lap_count'],
+            'viol_rate': final_stats['violation_rate'],
+            'mean_scale': final_stats['mean_scaling'],
+            'mean_trajectory_error': final_stats['mean_trajectory_error'],
+            "low_scale_rate": final_stats['low_scale_rate']
         }
 
         # Controllo se il file esiste già per scrivere l'header solo la prima volta
