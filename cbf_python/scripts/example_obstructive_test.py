@@ -60,7 +60,7 @@ v_cfg = 1
 
 
 
-h_mean_ref = -0.1
+h_mean_ref =  0.1
 v_ref = 0.2
 spawn_freq = 10
 h_std_dev = 0.1

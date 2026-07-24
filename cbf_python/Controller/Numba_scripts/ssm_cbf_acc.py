@@ -57,11 +57,139 @@ def dmin_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, atol):
 
     t0 = 0.0
     t2 = tr
+    t_dec = - v_r / a_max
+    if t_dec < 0.0:
+        t_dec = 0.0
+    t4 = t2 + t_dec
+    print("VR: ", v_r)
+    print("Debug Tempi - t0:", t0, " t2:", t2, " t4:", t4)
+    m = a_h - a_max
+    v_diff = v_r - v_h
+
+    # Intersections (use boolean flags instead of NaN sentinels)
+    has_t1 = False
+    t1 = 0.0
+    if abs(a_h) > atol:
+        t1_raw = v_diff / a_h
+        if (t0 + atol) < t1_raw < (t2 - atol):
+            t1 = t1_raw
+            has_t1 = True
+
+    has_t3 = False
+    t3 = 0.0
+    if abs(m) > atol and (t4 - t2) > atol:
+        t3_raw = (v_diff - a_max * t2) / m
+        if (t2 + atol) < t3_raw < (t4 - atol):
+            t3 = t3_raw
+            has_t3 = True
+
+    C1 = has_t1
+    C3 = has_t3
+
+    # Candidates (fixed-size buffers; no Python lists)
+    uniq = np.empty(4, dtype=np.float64)
+    n = 0
+
+    def add_candidate(tt):
+        nonlocal n
+        for k in range(n):
+            if abs(tt - uniq[k]) <= atol:
+                return
+        uniq[n] = tt
+        n += 1
+
+    if v_r < 0.0:
+        add_candidate(t0)
+        add_candidate(t4)
+        if C1:
+            add_candidate(t1)
+        if C3:
+            add_candidate(t3)
+    else:
+        add_candidate(t0)
+        add_candidate(t2)
+        if C1:
+            add_candidate(t1)
+
+    # d_t2 = d + v_diff * t2 - 0.5 * a_h * (t2 * t2)
+
+    vals = np.empty(n, dtype=np.float64)
+    for i in range(n):
+        tt = uniq[i]
+        if tt <= t2 + atol:
+            vals[i] = d + v_diff * tt - 0.5 * a_h * (tt * tt)
+        else:
+            vals[i] = d + v_diff * tt - 0.5 * a_h * (tt *tt) + 0.5 * a_max * (tt - t2) * (tt - t2)
+
+    # Argmin without np.argmin (keeps typing simple)
+    i_min = 0
+    best = vals[0]
+    for i in range(1, n):
+        if vals[i] < best:
+            best = vals[i]
+            i_min = i
+
+    t_star = uniq[i_min]
+    d_min = best
+
+    # Jacobian (order: [d, v_r, v_h, a_h])
+    jac = np.zeros(4, dtype=np.float64)
+
+    if abs(t_star - t0) <= atol:
+        jac[0] = 1.0
+        return d_min, jac
+
+    if has_t1 and abs(t_star - t1) <= atol:
+        jac[0] = 1.0
+        jac[1] = t1
+        jac[2] = -t1
+        jac[3] = -0.5 * (t1 * t1)
+        return d_min, jac
+
+    if abs(t_star - t2) <= atol:
+        # t2_sq = t2 * t2
+        jac[0] = 1.0
+        jac[1] = t2
+        jac[2] = -t2
+        jac[3] = -0.5 * t2 * t2
+        return d_min, jac
+
+    if has_t3 and abs(t_star - t3) <= atol:
+        jac[0] = 1.0
+        jac[1] = t3
+        jac[2] = -t3
+        jac[3] = -0.5 * (t3 * t3)
+        return d_min, jac
+
+    # t4
+    if abs(t_star - t4) <= atol:
+        t4_sq = t4 * t4
+        jac[0] = 1.0
+        jac[1] = t4
+        jac[2] = -t4
+        jac[3] = -0.5 * t4_sq
+        if t_dec > atol:
+            dotd_t4_now = v_diff - a_max * t2 - m * t4
+            jac[1] += - dotd_t4_now / a_max
+        return d_min, jac
+
+    # Fallback
+    return d_min, jac
+
+@njit((float64, float64, float64, float64, float64, float64, float64), cache=True)
+def dmin_and_jacobian_numba_maybe_wrong(d, v_r, v_h, a_h, tr, a_max, atol):
+    # Guard (Numba supports raises in nopython)
+    if a_max <= 0.0:
+        raise ValueError("a_max must be positive.")
+
+    t0 = 0.0
+    t2 = tr
     t_dec = v_r / a_max
     if t_dec < 0.0:
         t_dec = 0.0
     t4 = t2 + t_dec
-
+    print("VR: ", v_r)
+    print("Debug Tempi - t0:", t0, " t2:", t2, " t4:", t4)
     m = a_h + a_max
     v_diff = v_r - v_h
 
@@ -169,7 +297,7 @@ def dmin_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, atol):
         jac[3] = -0.5 * t4_sq
         if t_dec > atol:
             dotd_t4_now = v_diff + a_max * t2 - m * t4
-            jac[1] += dotd_t4_now / a_max
+            jac[1] += - dotd_t4_now / a_max
         return d_min, jac
 
     # Fallback
@@ -401,13 +529,14 @@ def jacobian_psi_times_fg_fast_numba(
 
     vr_rel = u[0] * v_r[0] + u[1] * v_r[1] + u[2] * v_r[2]
     vh_rel = u[0] * v_h[0] + u[1] * v_h[1] + u[2] * v_h[2]
-    vr_tan = v_r - u * vr_rel
-    vh_tan = v_h - u * vh_rel
+    # Vettori gradienti posizionali (Velocità tangenziale / distanza)
+    grad_pr_vr = (v_r - u * vr_rel) / d
+    grad_pr_vh = (v_h - u * vh_rel) / d
 
     Jpsi_f = np.zeros(4, dtype=np.float64)
     Jpsi_f[0] = u[0] * v_diff[0] + u[1] * v_diff[1] + u[2] * v_diff[2]
-    Jpsi_f[1] = vr_tan[0] * v_diff[0] + vr_tan[1] * v_diff[1] + vr_tan[2] * v_diff[2]
-    Jpsi_f[2] = vh_tan[0] * v_diff[0] + vh_tan[1] * v_diff[1] + vh_tan[2] * v_diff[2]
+    Jpsi_f[1] = grad_pr_vr[0] * v_diff[0] + grad_pr_vr[1] * v_diff[1] + grad_pr_vr[2] * v_diff[2]
+    Jpsi_f[2] = grad_pr_vh[0] * v_diff[0] + grad_pr_vh[1] * v_diff[1] + grad_pr_vh[2] * v_diff[2]
 
     Jpsi_g = np.zeros((4, 3), dtype=np.float64)
     Jpsi_g[1, 0] = u[0]

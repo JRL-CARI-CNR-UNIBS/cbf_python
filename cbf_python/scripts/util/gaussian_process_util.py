@@ -12,8 +12,8 @@ from datetime import datetime
 import os
 Tc: float = 2e-3
 C: float = 0.25
-Tr: float = 0.5
-a_s: float = 4.5
+Tr: float = 0.15
+a_s: float = 2.5
 
 def generate_d_value(h_ref, v_ref):
     d = 0.0
