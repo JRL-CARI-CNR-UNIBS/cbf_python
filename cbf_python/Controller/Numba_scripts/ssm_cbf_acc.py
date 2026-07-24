@@ -61,8 +61,8 @@ def dmin_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, atol):
     if t_dec < 0.0:
         t_dec = 0.0
     t4 = t2 + t_dec
-    print("VR: ", v_r)
-    print("Debug Tempi - t0:", t0, " t2:", t2, " t4:", t4)
+    # print("VR: ", v_r)
+    # print("Debug Tempi - t0:", t0, " t2:", t2, " t4:", t4)
     m = a_h - a_max
     v_diff = v_r - v_h
 
@@ -705,7 +705,7 @@ def compute_h_and_lie_numba(translation_bt, obs_pos, vel_lineare, v_obs, Tr, a_s
 
     Jpsi_f, Jpsi_g = jacobian_psi_times_fg_fast_numba(translation_bt, obs_pos, vel_lineare, v_obs, atol)
 
-    Lie_f_h = Jh_psi[0]*Jpsi_f[0] + Jh_psi[1]*Jpsi_f[1] + Jh_psi[2]*Jpsi_f[2] + Jh_psi[3]*Jpsi_f[3]
+    Lie_f_h = Jh_psi[0] * Jpsi_f[0] + Jh_psi[1] * Jpsi_f[1] + Jh_psi[2] * (Jpsi_f[2] + a_h) + Jh_psi[3] * Jpsi_f[3]
 
     Lie_g_h = np.zeros(3, dtype=np.float64)
     Lie_g_h[0] += Jh_psi[0] * Jpsi_g[0, 0]; Lie_g_h[1] += Jh_psi[0] * Jpsi_g[0, 1]; Lie_g_h[2] += Jh_psi[0] * Jpsi_g[0, 2]
