@@ -108,29 +108,67 @@ cfg.shoulder_frame = "ur10e_shoulder_link"
 
 ### 2. Instantiating the Controller
 
-Pass a robot model wrapper (containing `model`, `collision_model`, and `visual_model`) to instantiate `BCFOptimalController`:
+### 2. Loading the Robot Model
+
+The `BCFOptimalController` accepts either a standard Pinocchio [`pinocchio.RobotWrapper`](https://gepettoweb.laas.fr/doc/stack-of-tasks/pinocchio/master/doxygen-html/classpinocchio_1_1RobotWrapper.html) or directly a [`pinocchio.Model`](https://gepettoweb.laas.fr/doc/stack-of-tasks/pinocchio/master/doxygen-html/structpinocchio_1_1ModelTpl.html). You can load any manipulator using standard Pinocchio APIs:
+
+#### Method A: From a standard URDF file with `RobotWrapper` (Recommended)
+```python
+import pinocchio as pin
+from pinocchio.robot_wrapper import RobotWrapper
+
+# Build RobotWrapper directly from any URDF file
+robot = RobotWrapper.BuildFromURDF(
+    filename="path/to/robot.urdf",
+    package_dirs=["path/to/mesh_packages"],
+)
+
+# Optional: if you have extra joints in the URDF you wish to lock (reduced model):
+# locked_joint_ids = [robot.model.getJointId(name) for name in locked_joint_names]
+# reduced_model, reduced_geom = pin.buildReducedModel(
+#     robot.model,
+#     list_of_geom_models=[robot.visual_model, robot.collision_model],
+#     list_of_joints_to_lock=locked_joint_ids,
+#     reference_configuration=pin.neutral(robot.model)
+# )
+# robot.model = reduced_model
+```
+
+#### Method B: From `example-robot-data` (Pinocchio robot library)
+```python
+import example_robot_data as robex
+
+# Load UR10 directly from standard library
+robot = robex.load("ur10")
+```
+
+#### Method C: Direct `pinocchio.Model` loading
+```python
+import pinocchio as pin
+
+# Load model directly without visual wrapper
+model = pin.buildModelFromUrdf("path/to/robot.urdf")
+```
+
+---
+
+### 3. Instantiating the Controller
+
+Pass the loaded `robot` (or `model`) to instantiate `BCFOptimalController`:
 
 ```python
-from sharework import loadSharework
 from Controller.optimal_cbf_task_controller import BCFOptimalController
-
-# Load Pinocchio robot model
-UR10E_JOINTS = [
-    "ur10e_shoulder_pan_joint", "ur10e_shoulder_lift_joint", "ur10e_elbow_joint",
-    "ur10e_wrist_1_joint", "ur10e_wrist_2_joint", "ur10e_wrist_3_joint"
-]
-model_wrapper = loadSharework(UR10E_JOINTS)
 
 # Create the B-CBF Optimal Controller
 controller = BCFOptimalController(
-    model_wrapper=model_wrapper,
+    model_or_wrapper=robot,  # Accepts pin.RobotWrapper or pin.Model
     cfg=cfg,
-    useCbf=True,           # Enable CBF obstacle avoidance constraints
-    keypoint_to_log=-1,    # Monitor all obstacle keypoints
+    useCbf=True,             # Enable CBF obstacle avoidance constraints
+    keypoint_to_log=-1,      # Monitor all obstacle keypoints
 )
 ```
 
-### 3. Real-Time Control Loop Step
+### 4. Real-Time Control Loop Step
 
 At each control cycle ($T_c$ seconds), call `controller.step(...)` with current human obstacle measurements and the nominal trajectory reference:
 
@@ -177,30 +215,37 @@ while True:
 
 ## Complete Minimal Example
 
-Below is a self-contained minimal script running the controller in simulation:
+Below is a self-contained minimal script running the controller in simulation using standard Pinocchio models:
 
 ```python
 #!/usr/bin/env python3
 import time
 import numpy as np
-from sharework import loadSharework
+import pinocchio as pin
+from pinocchio.robot_wrapper import RobotWrapper
 from Controller.optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
 from scripts.util.joint_interpolator import SegmentedJointTrap
 
-# 1. Setup Model & Configuration
-joint_names = [
-    "ur10e_shoulder_pan_joint", "ur10e_shoulder_lift_joint", "ur10e_elbow_joint",
-    "ur10e_wrist_1_joint", "ur10e_wrist_2_joint", "ur10e_wrist_3_joint"
-]
-model_wrapper = loadSharework(joint_names)
-cfg = ControllerConfig(Tc=0.002)
+# 1. Setup Robot Model (e.g. from standard URDF or Pinocchio built-in sample)
+try:
+    import example_robot_data as robex
+    robot = robex.load("ur10")
+except ImportError:
+    # Fallback to Pinocchio sample 6-DOF manipulator
+    model = pin.buildSampleModelManipulator()
+    robot = model
 
-# 2. Instantiate Controller
-ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
+# 2. Configure Controller
+cfg = ControllerConfig(Tc=0.002)
+cfg.tool_frame = robot.model.frames[-1].name if hasattr(robot, "model") else robot.frames[-1].name
+cfg.elbow_frame = robot.model.frames[-3].name if hasattr(robot, "model") else robot.frames[-3].name
+
+ctrl = BCFOptimalController(model_or_wrapper=robot, cfg=cfg, useCbf=True)
 
 # 3. Create Reference Trajectory
-home = np.deg2rad([90.0, -140.0, 140.0, -90.0, 90.0, 0.0])
-target = np.deg2rad([31.0, -78.0, 115.0, -127.0, 86.0, -32.0])
+nq = robot.model.nq if hasattr(robot, "model") else robot.nq
+home = np.zeros(nq)
+target = np.ones(nq) * 0.5
 
 planner = SegmentedJointTrap(Dq_max=cfg.Dq_max * 0.25, DDq_max=cfg.DDq_max * 0.125)
 planner.addWayPoint(home)
@@ -213,7 +258,7 @@ ctrl.reset_state(home)
 t_sim = 0.0
 trajectory_time = 0.0
 
-# Simulated obstacle placed near the robot trajectory
+# Simulated obstacle placed in Cartesian space
 obs_pos = np.array([[0.5, 0.2, 0.4]])
 obs_vel = np.array([[0.0, 0.0, 0.0]])
 obs_acc = np.array([[0.0, 0.0, 0.0]])
@@ -237,12 +282,11 @@ while t_sim < 5.0:
     trajectory_time = out["trajectory_time"]
     t_sim += cfg.Tc
 
-    # Synchronize real-time loop period
     elapsed = time.perf_counter() - loop_start
     if cfg.Tc > elapsed:
         time.sleep(cfg.Tc - elapsed)
 
-print(f"Done! Final joint position: {np.round(np.rad2deg(q), 1)} deg | Min barrier h: {out['h_min']:.3f}")
+print(f"Simulation completed! Final joint positions: {np.round(q, 3)}")
 ```
 
 ---

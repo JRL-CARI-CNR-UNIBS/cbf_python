@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 import numpy as np
 import quadprog
 import pinocchio as pin
@@ -135,10 +135,22 @@ class BCFOptimalController:
         - Speed & Separation Monitoring (SSM) Control Barrier Functions: L_g h * J_lin * ddq >= bound
     """
 
-    def __init__(self, model_wrapper, cfg: ControllerConfig, useCbf: bool = True, keypoint_to_log: int = 7):
+    def __init__(self, model_or_wrapper: Union[pin.Model, Any], cfg: ControllerConfig, useCbf: bool = True, keypoint_to_log: int = 7):
         self.cfg = cfg
-        self.model_wrapper = model_wrapper
-        self.model = self.model_wrapper.model
+        if isinstance(model_or_wrapper, pin.Model):
+            self.model = model_or_wrapper
+            self.model_wrapper = None
+        elif hasattr(model_or_wrapper, "model") and isinstance(model_or_wrapper.model, pin.Model):
+            self.model_wrapper = model_or_wrapper
+            self.model = model_or_wrapper.model
+        elif hasattr(model_or_wrapper, "model"):
+            self.model_wrapper = model_or_wrapper
+            self.model = model_or_wrapper.model
+        else:
+            raise TypeError(
+                "model_or_wrapper must be an instance of pinocchio.Model or an object containing a .model attribute (such as pinocchio.RobotWrapper)."
+            )
+
         self.data = self.model.createData()
         self.useCbf = useCbf
 
