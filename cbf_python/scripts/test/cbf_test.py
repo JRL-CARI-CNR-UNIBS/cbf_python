@@ -286,4 +286,4 @@ def test_controller_fallback_on_infeasible_qp():
 
     finally:
         # Ripristino indispensabile del risolutore per non corrompere altri test
-        quadprog.solve_qp = original_solve_qp\
+        quadprog.solve_qp = original_solve_qp

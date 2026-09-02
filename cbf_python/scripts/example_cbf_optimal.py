@@ -52,14 +52,14 @@ from scripts.util.statistics_calculator import StatisticsCalculator
 
 params_filename = "../params_csv/parameters_set.csv"
 set_ID = "0"
-duration = 15
+duration = 30
 
 SHOW_DATA = True
 USE_BRIDGE = False
 LOG_DATA = False
 SAVE_DATA = False
 
-parameters_type = "1"
+parameters_type = "0"
 
 stop_event = threading.Event()
 
