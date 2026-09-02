@@ -15,11 +15,13 @@ import os
 import csv
 import time
 import math
+import yaml
 import signal
+import argparse
 import threading
 import functools
 from datetime import datetime
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 
 import numpy as np
 import pinocchio as pin
@@ -42,30 +44,6 @@ from scripts.util.test_utils import (
 )
 from scripts.util import csv_publishers, test_publish_utils as pub_utils
 
-
-# -----------------------------------------------------------------------------
-# Configuration Constants
-# -----------------------------------------------------------------------------
-SIMULATION_DURATION: float = 30.0  # seconds
-CONTROL_PERIOD: float = 2e-3       # 500 Hz (0.002 s)
-
-SHOW_DATA: bool = True             # Enable Meshcat 3D visualization
-USE_BRIDGE: bool = False           # False for offline CSV playback, True for live ROS 2 bridge
-LOG_DATA: bool = False             # Log signals to CSV/ROS 2 topics
-SAVE_DATA: bool = False            # Append summary statistics to CSV file
-
-UR10E_JOINTS = [
-    "ur10e_shoulder_pan_joint",
-    "ur10e_shoulder_lift_joint",
-    "ur10e_elbow_joint",
-    "ur10e_wrist_1_joint",
-    "ur10e_wrist_2_joint",
-    "ur10e_wrist_3_joint",
-]
-
-HOME_CONFIG = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
-TEST_NAME = "recorded_skeleton_23_optimal_cbf"
-
 stop_event = threading.Event()
 
 
@@ -79,30 +57,71 @@ def _handle_sigint(bridge, signum, frame):
             pass
 
 
-def setup_controller(model_wrapper) -> Tuple[ControllerConfig, BCFOptimalController]:
-    """Initializes ControllerConfig and BCFOptimalController with tuned parameters."""
-    cfg = ControllerConfig(Tc=CONTROL_PERIOD)
-    delta_deg = 4.5
-    cfg.gamma = 5.95
-    cfg.lambda_pos = 2098.0
-    cfg.lambda_vel = 0.343
-    cfg.lambda_scaling = 16.56
-    cfg.lambda_acc = 1.45e-10
+def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Loads configuration parameters from a YAML file.
+    Falls back to 'config/optimal_cbf_params.yaml' if no path is provided.
+    """
+    if config_path is None or not os.path.isfile(config_path):
+        # Resolve path relative to project root or current working dir
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        default_yaml = os.path.join(base_dir, "config", "optimal_cbf_params.yaml")
+        if os.path.isfile(default_yaml):
+            config_path = default_yaml
+        else:
+            config_path = "config/optimal_cbf_params.yaml"
 
-    cfg.delta_q_max[0:2] = np.deg2rad(np.ones(2) * delta_deg)
-    cfg.delta_q_max[2:4] = np.deg2rad(np.ones(2) * delta_deg * 2.0)
-    cfg.delta_q_max[4:6] = np.deg2rad(np.ones(2) * delta_deg * 4.0)
+    print(f"Loading configuration from: {config_path}")
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+    return config
+
+
+def setup_controller(model_wrapper, config: Dict[str, Any]) -> Tuple[ControllerConfig, BCFOptimalController]:
+    """Initializes ControllerConfig and BCFOptimalController using configuration dictionary."""
+    sim_cfg = config.get("simulation", {})
+    ctrl_cfg = config.get("controller", {})
+    robot_cfg = config.get("robot", {})
+
+    Tc = float(sim_cfg.get("control_period", 0.002))
+    cfg = ControllerConfig(Tc=Tc)
+
+    # Frame assignments
+    cfg.prefix = str(robot_cfg.get("prefix", "ur10e_"))
+    cfg.tool_frame = str(robot_cfg.get("tool_frame", "ur10e_wrist_3_joint"))
+    cfg.elbow_frame = str(robot_cfg.get("elbow_frame", "ur10e_upper_arm_link"))
+    cfg.shoulder_frame = str(robot_cfg.get("shoulder_frame", "ur10e_shoulder_link"))
+
+    # CBF & safety parameters
+    cfg.gamma = float(ctrl_cfg.get("gamma", 5.95))
+    cfg.lambda_pos = float(ctrl_cfg.get("lambda_pos", 2098.0))
+    cfg.lambda_vel = float(ctrl_cfg.get("lambda_vel", 0.343))
+    cfg.lambda_scaling = float(ctrl_cfg.get("lambda_scaling", 16.56))
+    cfg.lambda_acc = float(ctrl_cfg.get("lambda_acc", 1.455e-10))
+    cfg.Tr = float(ctrl_cfg.get("Tr", 0.15))
+    cfg.a_s = float(ctrl_cfg.get("a_s", 2.5))
+    cfg.C = float(ctrl_cfg.get("C", 0.25))
+    cfg.max_obstacles = int(ctrl_cfg.get("max_obstacles", 90))
+
+    # Joint deviation tube bounds
+    delta_deg = float(ctrl_cfg.get("delta_deg", 4.5))
+    scales = ctrl_cfg.get("delta_q_scales", [1.0, 1.0, 2.0, 2.0, 4.0, 4.0])
+    for i in range(min(len(scales), 6)):
+        cfg.delta_q_max[i] = np.deg2rad(delta_deg * float(scales[i]))
+
+    use_cbf = bool(ctrl_cfg.get("use_cbf", True))
+    keypoint_to_log = int(ctrl_cfg.get("keypoint_to_log", -1))
 
     ctrl = BCFOptimalController(
         model_wrapper=model_wrapper,
         cfg=cfg,
-        useCbf=True,
-        keypoint_to_log=-1,
+        useCbf=use_cbf,
+        keypoint_to_log=keypoint_to_log,
     )
     return cfg, ctrl
 
 
-def setup_visualization(model_wrapper, n_obstacles: int = 18 * 5):
+def setup_visualization(model_wrapper, n_obstacles: int = 90):
     """Initializes Meshcat visualizer and background VisualizationDaemon."""
     viz = MeshcatVisualizer(
         model_wrapper.model,
@@ -131,29 +150,59 @@ def setup_visualization(model_wrapper, n_obstacles: int = 18 * 5):
     return viz, renderer
 
 
-def main():
+def main(config_path: Optional[str] = None):
+    # 0. Load Configuration
+    config = load_config(config_path)
+
+    sim_cfg = config.get("simulation", {})
+    robot_cfg = config.get("robot", {})
+    planner_cfg = config.get("planner", {})
+    bridge_cfg = config.get("bridge", {})
+    logging_cfg = config.get("logging", {})
+
+    duration = float(sim_cfg.get("duration", 30.0))
+    control_period = float(sim_cfg.get("control_period", 0.002))
+    show_data = bool(sim_cfg.get("show_data", True))
+    use_bridge = bool(sim_cfg.get("use_bridge", False))
+    log_data = bool(sim_cfg.get("log_data", False))
+    save_data = bool(sim_cfg.get("save_data", False))
+    test_name = str(sim_cfg.get("test_name", "optimal_cbf_run"))
+
+    joint_names = robot_cfg.get("joint_names", [
+        "ur10e_shoulder_pan_joint",
+        "ur10e_shoulder_lift_joint",
+        "ur10e_elbow_joint",
+        "ur10e_wrist_1_joint",
+        "ur10e_wrist_2_joint",
+        "ur10e_wrist_3_joint",
+    ])
+    home_config_deg = robot_cfg.get("home_config_deg", [90.0, -140.0, 140.0, -90.0, 90.0, 0.0])
+    home_config = np.deg2rad(np.array(home_config_deg, dtype=float))
+
     print("=" * 70)
-    print("Starting B-CBF Optimal Controller Execution")
-    print(f"Mode: {'ROS 2 Live Bridge' if USE_BRIDGE else 'Offline Simulation Replay'}")
-    print(f"Duration: {SIMULATION_DURATION} s | Control Period: {CONTROL_PERIOD} s")
+    print(f"Starting B-CBF Optimal Controller Execution: {test_name}")
+    print(f"Mode: {'ROS 2 Live Bridge' if use_bridge else 'Offline Simulation Replay'}")
+    print(f"Duration: {duration} s | Control Period: {control_period} s")
     print("=" * 70)
 
     # 1. Load Robot Kinematic & Dynamic Model
-    model_wrapper = loadSharework(UR10E_JOINTS)
+    model_wrapper = loadSharework(joint_names)
     model = model_wrapper.model
 
     # 2. Configure Controller
-    cfg, ctrl = setup_controller(model_wrapper)
+    cfg, ctrl = setup_controller(model_wrapper, config)
     print(cfg)
 
     # 3. Setup Command Bridge
-    target_name = "ur10e_wrist_3_joint"
-    if USE_BRIDGE:
+    tool_frame_name = cfg.tool_frame
+    if use_bridge:
+        threshold = float(bridge_cfg.get("threshold", 1.1))
+        timeout_sec = float(bridge_cfg.get("timeout_sec", 5.0))
         bridge = JointStateCommandBridge(
-            ordered_joint_names=UR10E_JOINTS,
-            threshold=1.1,
+            ordered_joint_names=joint_names,
+            threshold=threshold,
         )
-        first_joint_position = bridge.wait_for_first_state(target_name, timeout=5.0)
+        first_joint_position = bridge.wait_for_first_state(tool_frame_name, timeout=timeout_sec)
         signal.signal(signal.SIGINT, functools.partial(_handle_sigint, bridge))
         if math.isnan(first_joint_position):
             bridge.shutdown()
@@ -161,65 +210,77 @@ def main():
         first_joint_position = bridge.getPositions()
         bridge.switch_to_forward_position_controller_service()
     else:
-        # Camera transformation for recorded human dataset
-        quat = pin.Quaternion(0.83, 0.185, 0.513, 0.12)
-        quat.normalize()
-        T_wc = pin.SE3(quat.toRotationMatrix(), np.array([-0.094, -0.93, 2.309]))
+        offline_cfg = bridge_cfg.get("offline_dataset", {})
+        csv_path = str(offline_cfg.get("csv_path", "../skeleton_vectors/skeleton_vectors_23.csv"))
+        slowdown_factor = float(offline_cfg.get("slowdown_factor", 1.0))
+        t0 = float(offline_cfg.get("t0", 0.0))
 
-        csv_path = "../skeleton_vectors/skeleton_vectors_23.csv"
+        cam_tf = offline_cfg.get("camera_transform", {})
+        quat_wxyz = cam_tf.get("quaternion_wxyz", [0.83, 0.185, 0.513, 0.12])
+        trans = cam_tf.get("translation", [-0.094, -0.93, 2.309])
+
+        quat = pin.Quaternion(float(quat_wxyz[0]), float(quat_wxyz[1]), float(quat_wxyz[2]), float(quat_wxyz[3]))
+        quat.normalize()
+        T_wc = pin.SE3(quat.toRotationMatrix(), np.array(trans, dtype=float))
+
         bridge = FakeCommandBridge(
-            UR10E_JOINTS,
+            joint_names,
             csv_path=csv_path,
             Tworld_to_cam=T_wc,
-            slowdown_factor=1.0,
-            t0=0.0,
+            slowdown_factor=slowdown_factor,
+            t0=t0,
         )
-        first_joint_position = HOME_CONFIG.copy()
+        first_joint_position = home_config.copy()
         signal.signal(signal.SIGINT, functools.partial(_handle_sigint, None))
 
     # 4. Setup Visualization
     renderer = None
-    if SHOW_DATA:
+    if show_data:
         _, renderer = setup_visualization(model_wrapper, n_obstacles=cfg.max_obstacles)
 
     # 5. Bring Robot to Home Position & Plan Reference Trajectory
     q = first_joint_position.copy()
-    if USE_BRIDGE:
-        bring_robot_home(cfg, q, HOME_CONFIG, bridge, ctrl)
-        q = HOME_CONFIG.copy()
+    if use_bridge:
+        bring_robot_home(cfg, q, home_config, bridge, ctrl)
+        q = home_config.copy()
 
-    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max * 0.25, DDq_max=cfg.DDq_max * 0.125)
+    dq_scale = float(planner_cfg.get("dq_max_scale", 0.25))
+    ddq_scale = float(planner_cfg.get("ddq_max_scale", 0.125))
+    planner = SegmentedJointTrap(Dq_max=cfg.Dq_max * dq_scale, DDq_max=cfg.DDq_max * ddq_scale)
     plan_path(planner, q)
     T_total = planner.computeTime()
     print(f"Reference trajectory planned: {T_total:.2f} s per cycle")
 
-    if SHOW_DATA and renderer is not None:
+    if show_data and renderer is not None:
         renderer.publishPath(planner.publishPath())
 
     cartesian_configs = compute_cartesian_poses(q, model)
+    scaling_threshold = float(planner_cfg.get("scaling_threshold", 0.5))
+    n_waypoints = int(planner_cfg.get("n_waypoints", 10))
     stats_calculator = StatisticsCalculator(
-        n_wp=10,
+        n_wp=n_waypoints,
         T_total=T_total,
         cartesian_configs=cartesian_configs,
-        Tc=CONTROL_PERIOD,
-        scaling_threshold=0.5,
+        Tc=control_period,
+        scaling_threshold=scaling_threshold,
     )
 
     # 6. Setup Logging if requested
     log_publishers = {}
-    if LOG_DATA:
+    if log_data:
+        results_dir = str(logging_cfg.get("results_dir", "../results/simulation/scaling"))
         now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        test_path = f"../results/simulation/scaling/{now_str}"
+        test_path = os.path.join(results_dir, now_str)
         os.makedirs(test_path, exist_ok=True)
         log_publishers["target"] = csv_publishers.JointTargetCsvPublisher(
             csv_path=f"{test_path}/reference_trajectory.csv",
-            column_names="time," + ",".join([f"target_joint_{i}_{attr}" for i in range(6) for attr in ["pos", "vel", "acceleration"]]),
-            joint_names=UR10E_JOINTS,
+            column_names="time," + ",".join([f"target_joint_{i}_{attr}" for i in range(len(joint_names)) for attr in ["pos", "vel", "acceleration"]]),
+            joint_names=joint_names,
         )
         log_publishers["state"] = csv_publishers.JointTargetCsvPublisher(
             csv_path=f"{test_path}/joint_states.csv",
-            column_names="time," + ",".join([f"joint_{i}_{attr}" for i in range(6) for attr in ["pos", "vel", "acceleration"]]),
-            joint_names=UR10E_JOINTS,
+            column_names="time," + ",".join([f"joint_{i}_{attr}" for i in range(len(joint_names)) for attr in ["pos", "vel", "acceleration"]]),
+            joint_names=joint_names,
         )
         log_publishers["cbf"] = csv_publishers.DoubleArrayCsvPublisher(
             csv_path=f"{test_path}/cbf_results.csv",
@@ -237,11 +298,11 @@ def main():
     ctrl.reset_state(q)
 
     try:
-        while t < SIMULATION_DURATION and not stop_event.is_set():
+        while t < duration and not stop_event.is_set():
             loop_start = time.perf_counter()
 
             # A. Get Obstacles
-            if USE_BRIDGE:
+            if use_bridge:
                 obs_pos, obs_vel, obs_acc = bridge.getObstacles()
             else:
                 obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=t)
@@ -266,7 +327,7 @@ def main():
             unfeasible_status = out["unfeasible_cnt"]
 
             # D. Send Commands to Actuators
-            if USE_BRIDGE and not stop_event.is_set():
+            if use_bridge and not stop_event.is_set():
                 bridge.sendCommand(q)
 
             # E. Metrics & Diagnostics
@@ -297,7 +358,7 @@ def main():
             )
 
             # F. Asynchronous Logging
-            if LOG_DATA and not stop_event.is_set():
+            if log_data and not stop_event.is_set():
                 log_publishers["target"].publish_once(t, nominal_q, nominal_Dq, nominal_DDq)
                 log_publishers["state"].publish_once(t, q, dq, ddq)
                 log_publishers["cbf"].publish_once(
@@ -314,7 +375,7 @@ def main():
                 )
 
             # G. Meshcat Background Visual Update
-            if SHOW_DATA and renderer is not None:
+            if show_data and renderer is not None:
                 hud_str = (
                     f"h={out['h_min']:.2f}m  scale={out['Dtrajectory_time']:.3f}  "
                     f"err={out['trajectory_error']:.2f}rad  state:{unfeasible_status}"
@@ -328,12 +389,12 @@ def main():
                 )
 
             # H. Time Step & Real-Time Sync
-            t += CONTROL_PERIOD
+            t += control_period
             if stats_calculator.cycles % 2500 == 0:
                 print(f"[Sim Time: {t:6.2f}s] scale={out['Dtrajectory_time']:.3f} | h_min={out['h_min']:6.3f}m | state={unfeasible_status}")
 
             elapsed_total = time.perf_counter() - loop_start
-            rest = CONTROL_PERIOD - elapsed_total
+            rest = control_period - elapsed_total
             if rest > 0:
                 time.sleep(rest)
 
@@ -341,7 +402,7 @@ def main():
         stop_event.set()
         print("\nSimulation stopped by user.")
     finally:
-        if LOG_DATA and "start" in log_publishers:
+        if log_data and "start" in log_publishers:
             try:
                 log_publishers["start"].publish_once(False)
             except Exception:
@@ -353,17 +414,18 @@ def main():
     print("=" * 70)
     print(stats_calculator)
 
-    if SAVE_DATA:
-        file_path = "../results/simulation_data.csv"
+    if save_data:
+        file_path = str(logging_cfg.get("summary_csv", "../results/simulation_data.csv"))
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         headers = [
             "test_type", "lambda_pos", "lambda_vel", "lambda_scaling", "lambda_acc",
             "delta", "gamma", "on_target_rate", "lap_count", "viol_rate",
             "mean_scale", "mean_trajectory_error", "low_scale_rate"
         ]
+        delta_deg = float(config.get("controller", {}).get("delta_deg", 4.5))
         final_stats = stats_calculator._calculate_stats()
         row_data = {
-            "test_type": TEST_NAME,
+            "test_type": test_name,
             "lambda_pos": cfg.lambda_pos,
             "lambda_vel": cfg.lambda_vel,
             "lambda_scaling": cfg.lambda_scaling,
@@ -387,5 +449,14 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Run Optimal CBF Controller Simulation / Live Test.")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to YAML configuration file (default: config/optimal_cbf_params.yaml)",
+    )
+    args = parser.parse_args()
+    main(config_path=args.config)
+
 

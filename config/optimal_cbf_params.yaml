@@ -1,0 +1,68 @@
+# =============================================================================
+# Optimal Control Barrier Function (B-CBF) Configuration Parameters
+# =============================================================================
+
+# Simulation and Runtime Execution Options
+simulation:
+  duration: 30.0                # Total simulation duration in seconds
+  control_period: 0.002         # Loop period Tc in seconds (500 Hz = 0.002 s)
+  show_data: true               # Enable Meshcat 3D visualization
+  use_bridge: false             # false: offline CSV dataset replay, true: live ROS 2 bridge
+  log_data: false               # Enable asynchronous CSV/topic signal logging
+  save_data: false              # Append summary performance metrics to CSV
+  test_name: "recorded_skeleton_23_optimal_cbf"
+
+# Robot Model & Joint Setup
+robot:
+  prefix: "ur10e_"
+  tool_frame: "ur10e_wrist_3_joint"
+  elbow_frame: "ur10e_upper_arm_link"
+  shoulder_frame: "ur10e_shoulder_link"
+  joint_names:
+    - "ur10e_shoulder_pan_joint"
+    - "ur10e_shoulder_lift_joint"
+    - "ur10e_elbow_joint"
+    - "ur10e_wrist_1_joint"
+    - "ur10e_wrist_2_joint"
+    - "ur10e_wrist_3_joint"
+  home_config_deg: [90.0, -140.0, 140.0, -90.0, 90.0, 0.0]
+
+# B-CBF Optimal Controller Parameters
+controller:
+  use_cbf: true
+  keypoint_to_log: -1
+  gamma: 5.95                   # CBF class-K gain (linear decay rate)
+  lambda_pos: 2098.0            # Nominal position tracking weight
+  lambda_vel: 0.343             # Nominal velocity tracking weight
+  lambda_scaling: 16.56         # Trajectory time scaling regularization weight
+  lambda_acc: 1.4551402158959938e-10 # Joint acceleration effort penalty
+  delta_deg: 4.5                # Base allowable joint deviation tube size (degrees)
+  delta_q_scales: [1.0, 1.0, 2.0, 2.0, 4.0, 4.0] # Multipliers for joint tube bounds
+  Tr: 0.15                      # Reaction time buffer (seconds)
+  a_s: 2.5                      # Braking deceleration magnitude (m/s^2)
+  C: 0.25                       # Safety margin distance (meters)
+  max_obstacles: 90             # Maximum number of obstacles to monitor
+
+# Trajectory Planner Parameters
+planner:
+  dq_max_scale: 0.25            # Velocity limit scale factor for nominal planner
+  ddq_max_scale: 0.125          # Acceleration limit scale factor for nominal planner
+  scaling_threshold: 0.5        # Threshold for low velocity scaling statistics
+  n_waypoints: 10
+
+# Hardware / Fake Command Bridge Parameters
+bridge:
+  threshold: 1.1                # Joint position divergence threshold (radians)
+  timeout_sec: 5.0              # Timeout when waiting for initial robot state
+  offline_dataset:
+    csv_path: "../skeleton_vectors/skeleton_vectors_23.csv"
+    slowdown_factor: 1.0
+    t0: 0.0
+    camera_transform:
+      quaternion_wxyz: [0.83, 0.185, 0.513, 0.12]
+      translation: [-0.094, -0.93, 2.309]
+
+# Logging and Output Paths
+logging:
+  results_dir: "../results/simulation/scaling"
+  summary_csv: "../results/simulation_data.csv"

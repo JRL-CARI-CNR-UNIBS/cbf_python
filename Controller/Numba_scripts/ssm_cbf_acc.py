@@ -386,7 +386,7 @@ def compute_g_Lie_terms_numba(
     (
         float64[:],  # translation_bt (3,)
         float64[:],  # obs_pos       (3,)
-        float64[:],  # vel_lineare   (3,)
+        float64[:],  # linear_vel   (3,)
         float64[:],  # v_obs         (3,)
         float64,     # Tr
         float64,     # a_s
@@ -447,7 +447,7 @@ def compute_h_and_lie_numba(translation_bt, obs_pos, vel_lineare, v_obs, Tr, a_s
     (
         float64[:],    # translation_bt (3,)
         float64[:],    # obs_pos       (3,)
-        float64[:],    # vel_lineare   (3,)
+        float64[:],    # linear_vel   (3,)
         float64[:],    # v_obs         (3,)
         float64,       # Tr
         float64,       # a_s
@@ -506,4 +506,4 @@ def compute_h_and_constraints_numba(
 
         constraint_bound = -lg_dJ_dq - Lie_f_h - gamma * h
 
-    return h, constraint_row, constraint_bound, d, vr, vh
+    return h, constraint_row, constraint_bound, d, vr, vh
