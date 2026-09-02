@@ -1,8 +1,8 @@
-# CBF Python: Optimal Bounded Control Barrier Function (B-CBF) Controller
+# CBF Python: Optimal Robust Control Barrier Function Controller
 
-This repository provides the official implementation of the **Optimal Bounded Control Barrier Function (B-CBF)** controller for robotic manipulators operating in collaborative human-robot environments.
+This repository provides the implementation of an Optimal CBF controller for robotic manipulators operating in collaborative human-robot environments.
 
-The framework enforces ISO/TS 15066 compliant **Speed and Separation Monitoring (SSM)** safety guarantees while optimally tracking a nominal joint trajectory via dynamic time parameterization (trajectory time scaling) and Cartesian bounding tube constraints.
+The framework enforces ISO/TS 15066 compliant **Speed and Separation Monitoring (SSM)** safety guarantees while tracking a nominal joint trajectory via dynamic time parameterization (trajectory time scaling) and Cartesian bounding tube constraints.
 
 ---
 
