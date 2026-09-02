@@ -68,18 +68,8 @@ class BaseCommandBridgeABC(ABC):
         max_diff = float(np.max(np.abs(q_arr[mask] - curr[mask]))) if np.any(mask) else 0.0
 
         if max_diff > self.threshold:
-            print(f"Command difference {max_diff:.3f} exceeds threshold {self.threshold:.3f}")
-            # print current and commanded for debugging
-            # for i, name in enumerate(self.ordered_joint_names_):
-                # if mask[i]:
-                #     # print(
-                #     #     f"  Joint '{name}': current={curr[i]:.4f}, commanded={q_arr[i]:.4f}, "
-                #     #     f"diff={abs(q_arr[i]-curr[i]):.4f}"
-                #     # )
-                # else:
-                #     print(f"  Joint '{name}': current=NaN, commanded={q_arr[i]:.4f}")
             raise ValueError(
-                f"Command difference {max_diff:.3f} exceeds threshold {self.threshold:.3f}"
+                f"Command difference {max_diff:.3f} rad exceeds threshold {self.threshold:.3f} rad"
             )
 
         self._do_publish(q_arr)

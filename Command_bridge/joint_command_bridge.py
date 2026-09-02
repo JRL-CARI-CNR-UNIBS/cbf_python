@@ -1,8 +1,8 @@
+#!/usr/bin/env python3
 from __future__ import annotations
 
 import threading
-from typing import Iterable, List, Optional, Dict
-
+from typing import Iterable, List, Optional, Dict, Tuple
 import numpy as np
 import time
 from functools import partial
@@ -17,16 +17,20 @@ from sensor_msgs.msg import JointState
 from geometry_msgs.msg import PoseArray
 from tf2_ros import Buffer, TransformListener
 
-import math
 from controller_manager_msgs.srv import SwitchController
 from builtin_interfaces.msg import Duration as MsgDuration
 
-# ZED skeletons
-from zed_msgs.msg import ObjectsStamped
+try:
+    from zed_skeleton_kinematics_msgs.msg import ObjectsKinematicsStamped
+except ImportError:
+    ObjectsKinematicsStamped = None
+
+# NEW: import the abstract, ROS-agnostic base
+from Command_bridge.base_command_bridge_abc import BaseCommandBridgeABC
 
 
-class JointStateCommandBridge(Node):
-    """Bridge node: JointState subscriber → Float64MultiArray publisher + obstacles."""
+class JointStateCommandBridge(Node, BaseCommandBridgeABC):
+    """Bridge node: ROS2 JointState subscriber → command publisher + obstacles/kinematics."""
 
     def __init__(
         self,
@@ -37,11 +41,13 @@ class JointStateCommandBridge(Node):
         joint_states_topic: str = "/joint_states",
         command_topic: str = "/forward_position_controller/commands",
         obstacles_topics: Iterable[str] = ("/rs1/poses", "/rs2/poses"),
-        skeleton_topics: Iterable[str] = ("/zed/zed_node/body_trk/skeletons",),
-        start_executor: bool = True,
-        publish_period_sec: float = 0.002,     # NEW: Tc (publisher thread period)
+        kinematics_topics: Iterable[str] = (),
+        switch_service_name: str = "/controller_manager/switch_controller",
+        position_controller_name: str = "forward_position_controller",
+        trajectory_controller_name: str = "scaled_joint_trajectory_controller",
+        timeout_sec: float = 5.0,
     ) -> None:
-        # Initialize rclpy context if not already done
+        # Ensure rclpy is initialized
         try:
             rclpy.get_default_context()
             if not rclpy.ok():
@@ -52,37 +58,45 @@ class JointStateCommandBridge(Node):
             except Exception:
                 pass
 
-        super().__init__(node_name)
+        Node.__init__(self, node_name)
+        BaseCommandBridgeABC.__init__(self, ordered_joint_names, threshold=threshold)
 
-        self.ordered_joint_names_: List[str] = list(ordered_joint_names)
-        self.threshold: float = float(threshold)
+        self.joint_states_topic = str(joint_states_topic)
+        self.command_topic = str(command_topic)
+        self.obstacles_topics = list(obstacles_topics)
+        self.kinematics_topics = list(kinematics_topics)
 
-        n = len(self.ordered_joint_names_)
-        self.actual_joint_positions_ = np.full(n, np.nan, dtype=float)
-        self.actual_joint_velocities_ = np.full(n, np.nan, dtype=float)
-        self.actual_joint_efforts_ = np.full(n, np.nan, dtype=float)
-        self._state_lock = threading.Lock()
-
-        # Publisher (queue depth 10 is fine for commands)
-        self._pub = self.create_publisher(Float64MultiArray, command_topic, 10)
-
-        # Subscriber: use sensor-data QoS for low-latency best-effort
-        self._sub = self.create_subscription(
-            JointState, joint_states_topic, self._on_joint_state, qos_profile_sensor_data
+        self._js_sub = self.create_subscription(
+            JointState,
+            self.joint_states_topic,
+            self._on_joint_state_ros,
+            qos_profile_sensor_data,
         )
 
-        # --- TF and obstacles subscribers ---
+        self._cmd_pub = self.create_publisher(Float64MultiArray, self.command_topic, 10)
+
+        # Service client for controller manager
+        self._switch_client = self.create_client(SwitchController, switch_service_name)
+        self._pos_ctrl = str(position_controller_name)
+        self._traj_ctrl = str(trajectory_controller_name)
+        self._svc_timeout_sec = float(timeout_sec)
+
+        # TF + caches
         self._tf_buffer: Buffer = Buffer()
-        self._tf_listener: TransformListener = TransformListener(self._tf_buffer, self, spin_thread=False)
+        self._tf_listener: TransformListener = TransformListener(self._tf_buffer, self)
         self._frame_to_world_cache: Dict[str, np.ndarray] = {}
         self._last_tf_warn_time: Dict[str, float] = {}
 
-        # Per-topic obstacles and last receive times
+        # Legacy PoseArray store (kept for compatibility)
         self.obstacles_: Dict[str, List[np.ndarray]] = {}
         self._obstacles_last_recv_: Dict[str, rclpy.time.Time] = {}
         self._poses_lock = threading.Lock()
 
-        # Create one subscription per PoseArray topic
+        # Kinematics store: topic -> (pos[N,3], vel[N,3], acc[N,3])
+        self.kinematics_: Dict[str, Tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+        self._kin_last_recv_: Dict[str, rclpy.time.Time] = {}
+
+        # Subscriptions for PoseArray
         self._poses_subs = []
         for topic in obstacles_topics:
             topic = str(topic)
@@ -95,22 +109,32 @@ class JointStateCommandBridge(Node):
             except Exception:
                 self._obstacles_last_recv_[topic] = rclpy.time.Time()
 
-        # Create one subscription per ZED ObjectsStamped topic (skeletons)
-        self._skeleton_subs = []
-        for topic in skeleton_topics:
+        # Subscriptions for kinematics
+        self._kin_subs = []
+        for topic in kinematics_topics:
             topic = str(topic)
-            cb = partial(self._on_objects_stamped, topic_name=topic)
-            sub = self.create_subscription(ObjectsStamped, topic, cb, qos_profile_sensor_data)
-            self._skeleton_subs.append(sub)
-            if topic not in self.obstacles_:
-                self.obstacles_[topic] = []
-            if topic not in self._obstacles_last_recv_:
-                try:
-                    self._obstacles_last_recv_[topic] = rclpy.time.Time(seconds=0, nanoseconds=0)
-                except Exception:
-                    self._obstacles_last_recv_[topic] = rclpy.time.Time()
+            if ObjectsKinematicsStamped is not None:
+                cb = partial(self._on_objects_kinematics, topic_name=topic)
+                sub = self.create_subscription(ObjectsKinematicsStamped, topic, cb, qos_profile_sensor_data)
+                self._kin_subs.append(sub)
+            self.kinematics_[topic] = (np.zeros((0, 3)), np.zeros((0, 3)), np.zeros((0, 3)))
+            try:
+                self._kin_last_recv_[topic] = rclpy.time.Time(seconds=0, nanoseconds=0)
+            except Exception:
+                self._kin_last_recv_[topic] = rclpy.time.Time()
 
-        # Optional internal executor thread
+        # Preallocated kinematics buffers per topic TO BE TESTED
+        self._kin_buffers: Dict[str, Dict[str, np.ndarray]] = {}
+
+        for topic in kinematics_topics:
+            topic = str(topic)
+            self._kin_buffers[topic] = {
+                "pos": np.empty((0, 3), dtype=float),
+                "vel": np.empty((0, 3), dtype=float),
+                "acc": np.empty((0, 3), dtype=float),
+            }
+
+        # Optional executor
         self._executor: Optional[SingleThreadedExecutor] = None
         self._spin_thread: Optional[threading.Thread] = None
         if start_executor:
@@ -119,48 +143,17 @@ class JointStateCommandBridge(Node):
             self._spin_thread = threading.Thread(target=self._executor.spin, daemon=True)
             self._spin_thread.start()
 
-        # --- NEW: command storage + publishing thread state ---
-        self._cmd_lock = threading.Lock()
-        self._cmd_q = np.zeros(n, dtype=float)
-        self._cmd_qp = np.zeros(n, dtype=float)
-        self._cmd_qpp = np.zeros(n, dtype=float)
-        self._new_command = False
-        self._Tc = float(publish_period_sec)
-        self._pub_stop = threading.Event()
-        self._publishing_thread = threading.Thread(target=self._publishing_loop, name="publishing_thread", daemon=True)
-        self._publishing_thread.start()
-
         self.get_logger().info(
             f"Initialized with joints: {self.ordered_joint_names_}; "
             f"threshold={self.threshold}; "
             f"obstacles_topics={list(obstacles_topics)}; "
-            f"skeleton_topics={list(skeleton_topics)}; "
-            f"Tc={self._Tc}s"
+            f"kinematics_topics={list(kinematics_topics)}"
         )
 
-    # ---------------------------- Callbacks ----------------------------
-    def _on_joint_state(self, msg: JointState) -> None:
-        name_to_idx = {name: i for i, name in enumerate(msg.name)}
-
-        pos = np.full_like(self.actual_joint_positions_, np.nan)
-        vel = np.full_like(self.actual_joint_velocities_, np.nan)
-        eff = np.full_like(self.actual_joint_efforts_, np.nan)
-
-        for j, joint in enumerate(self.ordered_joint_names_):
-            idx = name_to_idx.get(joint)
-            if idx is None:
-                continue
-            if idx < len(msg.position):
-                pos[j] = float(msg.position[idx])
-            if idx < len(msg.velocity):
-                vel[j] = float(msg.velocity[idx])
-            if idx < len(msg.effort):
-                eff[j] = float(msg.effort[idx])
-
-        with self._state_lock:
-            self.actual_joint_positions_[:] = pos
-            self.actual_joint_velocities_[:] = vel
-            self.actual_joint_efforts_[:] = eff
+    # ---------------------------- ROS callbacks ----------------------------
+    def _on_joint_state_ros(self, msg: JointState) -> None:
+        # Delegate to transport-agnostic mapper
+        self.map_joint_state(msg.name, msg.position, msg.velocity, msg.effort)
 
     def _on_pose_array(self, msg: PoseArray, *, topic_name: str) -> None:
         frame_id = (msg.header.frame_id or "").strip() or "world"
@@ -168,6 +161,7 @@ class JointStateCommandBridge(Node):
             np.array([float(p.position.x), float(p.position.y), float(p.position.z)], dtype=float)
             for p in msg.poses
         ]
+
         if frame_id != "world":
             T = self._get_transform_matrix_to_world(frame_id, msg.header.stamp)
             if T is None:
@@ -181,137 +175,144 @@ class JointStateCommandBridge(Node):
             self.obstacles_[topic_name] = [np.asarray(v, dtype=float) for v in pts_world]
             self._obstacles_last_recv_[topic_name] = recv_time
 
-    def _on_objects_stamped(self, msg: ObjectsStamped, *, topic_name: str) -> None:
+    def _on_objects_kinematics(
+            self,
+            msg: ObjectsKinematicsStamped,
+            *,
+            topic_name: str
+    ) -> None:
+        """Efficient kinematics callback: vectorized, allocation-minimal."""
+
         frame_id = (msg.header.frame_id or "").strip() or "world"
-        raw_pts: List[np.ndarray] = []
-        try:
-            objects = msg.objects
-        except Exception:
-            objects = []
+        recv_time = self.get_clock().now()
 
-        for obj in objects:
-            sk = getattr(obj, "skeleton_3d", None)
-            if sk is None:
-                continue
-            kps = getattr(sk, "keypoints", None)
-            if not kps:
-                continue
-            for kp in kps:
-                xyz = getattr(kp, "kp", kp)
-                if xyz is None or len(xyz) < 3:
-                    continue
-                x, y, z = float(xyz[0]), float(xyz[1]), float(xyz[2])
-                if (x == 0.0) and (y == 0.0) and (z == 0.0):
-                    continue
-                raw_pts.append(np.array([x, y, z], dtype=float))
+        # -------- collect raw arrays (vectorized) -----------------------------
+        pos_chunks = []
+        vel_chunks = []
+        acc_chunks = []
 
-        if not raw_pts:
-            recv_time = self.get_clock().now()
+        for objkin in msg.objects:
+            obj = getattr(objkin, "object", None)
+            sk = getattr(obj, "skeleton_3d", None) if obj is not None else None
+            if sk is None or not hasattr(sk, "keypoints"):
+                continue
+
+            kps = sk.keypoints
+            vels = getattr(objkin, "keypoint_velocities", None)
+            accs = getattr(objkin, "keypoint_accelerations", None)
+            if not kps or not vels or not accs:
+                continue
+
+            n = min(len(kps), len(vels), len(accs))
+            if n == 0:
+                continue
+
+            try:
+                pos = np.asarray([kp.kp for kp in kps[:n]], dtype=float)
+                vel = np.asarray([v.kp for v in vels[:n]], dtype=float)
+                acc = np.asarray([a.kp for a in accs[:n]], dtype=float)
+            except Exception:
+                # Fallback for alternative field layouts
+                pos = np.asarray([[kp.x, kp.y, kp.z] for kp in kps[:n]], dtype=float)
+                vel = np.asarray([[v.x, v.y, v.z] for v in vels[:n]], dtype=float)
+                acc = np.asarray([[a.x, a.y, a.z] for a in accs[:n]], dtype=float)
+
+            # Filter invalid (zero) keypoints in one shot
+            mask = np.linalg.norm(pos, axis=1) > 1e-12
+            if not np.any(mask):
+                continue
+
+            pos_chunks.append(pos[mask])
+            vel_chunks.append(vel[mask])
+            acc_chunks.append(acc[mask])
+
+        # -------- no data case -------------------------------------------------
+        if not pos_chunks:
             with self._poses_lock:
-                self._obstacles_last_recv_[topic_name] = recv_time
+                self._kin_last_recv_[topic_name] = recv_time
             return
 
+        # -------- concatenate once --------------------------------------------
+        pos_all = np.concatenate(pos_chunks, axis=0)
+        vel_all = np.concatenate(vel_chunks, axis=0)
+        acc_all = np.concatenate(acc_chunks, axis=0)
+
+        # -------- transform to world (vectorized) ------------------------------
         if frame_id != "world":
             T = self._get_transform_matrix_to_world(frame_id, msg.header.stamp)
             if T is None:
                 return
-            pts_world = [(T @ np.array([p[0], p[1], p[2], 1.0], dtype=float))[:3] for p in raw_pts]
-        else:
-            pts_world = raw_pts
 
-        recv_time = self.get_clock().now()
+            R = T[:3, :3]
+            t = T[:3, 3]
+
+            pos_all = pos_all @ R.T + t
+            vel_all = vel_all @ R.T
+            acc_all = acc_all @ R.T
+
+        # -------- reuse preallocated buffers ----------------------------------
+        buf = self._kin_buffers[topic_name]
+        n = pos_all.shape[0]
+
+        if buf["pos"].shape[0] < n:
+            buf["pos"] = np.empty((n, 3), dtype=float)
+            buf["vel"] = np.empty((n, 3), dtype=float)
+            buf["acc"] = np.empty((n, 3), dtype=float)
+
+        buf["pos"][:n] = pos_all
+        buf["vel"][:n] = vel_all
+        buf["acc"][:n] = acc_all
+
+        # -------- publish atomically ------------------------------------------
         with self._poses_lock:
-            self.obstacles_[topic_name] = [np.asarray(v, dtype=float) for v in pts_world]
-            self._obstacles_last_recv_[topic_name] = recv_time
-
-    # ---------------------------- Commands ----------------------------
-    def sendCommand(self, q: np.ndarray, qp: np.ndarray, qpp: np.ndarray) -> None:
-        """
-        Store the desired (q, qp, qpp) for publishing thread.
-        Raises ValueError if max(abs(q - current_positions)) > threshold (ignoring NaNs),
-        or if vector sizes mismatch.
-        """
-        q = np.asarray(q, dtype=float).reshape(-1)
-        qp = np.asarray(qp, dtype=float).reshape(-1)
-        qpp = np.asarray(qpp, dtype=float).reshape(-1)
-
-        n = len(self.ordered_joint_names_)
-        if q.size != n or qp.size != n or qpp.size != n:
-            raise ValueError(f"Expected vectors of length {n}; got q={q.size}, qp={qp.size}, qpp={qpp.size}")
-
-        # threshold check versus latest actual positions (ignore NaNs)
-        with self._state_lock:
-            curr = self.actual_joint_positions_.copy()
-        mask = ~np.isnan(curr)
-        max_diff = float(np.max(np.abs(q[mask] - curr[mask]))) if np.any(mask) else 0.0
-        if max_diff > self.threshold:
-            raise ValueError(
-                f"Command difference {max_diff:.3f} exceeds threshold {self.threshold:.3f}"
+            self.kinematics_[topic_name] = (
+                buf["pos"][:n],
+                buf["vel"][:n],
+                buf["acc"][:n],
             )
+            self._kin_last_recv_[topic_name] = recv_time
 
-        # store and mark new command
-        with self._cmd_lock:
-            self._cmd_q[:] = q
-            self._cmd_qp[:] = qp
-            self._cmd_qpp[:] = qpp
-            self._new_command = True  # external thread notified
+    # ---------------------------- ABC overrides ----------------------------
+    def _do_publish(self, q: np.ndarray) -> None:
+        msg = Float64MultiArray()
+        msg.data = q.tolist()
+        self._pub.publish(msg)
 
-    # ---------------------------- Publishing loop (NEW) ----------------------------
-    def _publishing_loop(self) -> None:
-        Tc = self._Tc
-        next_t = time.monotonic()
-        while not self._pub_stop.is_set():
-            now = time.monotonic()
-            if now < next_t:
-                time.sleep(min(0.001, next_t - now))
-                continue
-            next_t += Tc
+    def getObstacles(self,elapsed  = 0.0,  max_age_sec: float = 0.5) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Aggregate recent kinematics into (pos, vel, acc) as in the original node:contentReference[oaicite:2]{index=2}."""
+        now = self.get_clock().now()
+        pos_all, vel_all, acc_all = [], [], []
 
-            # -------- first short lock: snapshot + clear-once if new ----------
-            with self._cmd_lock:
-                q_snapshot = self._cmd_q.copy()
-                qp_snapshot = self._cmd_qp.copy()
-                qpp_snapshot = self._cmd_qpp.copy()
-                saw_new = self._new_command
-                if saw_new:
-                    # consume the new-command edge; publish snapshot as-is
-                    self._new_command = False
+        with self._poses_lock:
+            for topic, triple in self.kinematics_.items():
+                last = self._kin_last_recv_.get(topic)
+                if last is None:
+                    continue
+                try:
+                    age_sec = float((now - last).nanoseconds) * 1e-9
+                except Exception:
+                    age_sec = float("inf")
+                if age_sec <= float(max_age_sec):
+                    p, v, a = triple
+                    if p.size:
+                        pos_all.append(p)
+                        vel_all.append(v)
+                        acc_all.append(a)
 
-            if saw_new:
-                # publish outside the lock
-                msg = Float64MultiArray()
-                msg.data = q_snapshot.tolist()
-                self._pub.publish(msg)
-                continue
+        if pos_all:
+            return (np.vstack(pos_all), np.vstack(vel_all), np.vstack(acc_all))
+        else:
+            z = np.zeros((0, 3), dtype=float)
+            return (z, z.copy(), z.copy())
 
-            # -------- no new command → integrate outside the lock -------------
-            q_int = q_snapshot + qp_snapshot * Tc + 0.5 * qpp_snapshot * (Tc ** 2)
-            qp_int = qp_snapshot + qpp_snapshot * Tc
-
-            # -------- second short lock: check for races + write-back ---------
-            publish_data = None
-            with self._cmd_lock:
-                if self._new_command:
-                    # A new command arrived during integration → publish the freshest q
-                    publish_data = self._cmd_q.copy()
-                    self._new_command = False
-                else:
-                    # Commit integrated state and publish it
-                    self._cmd_q[:] = q_int
-                    self._cmd_qp[:] = qp_int
-                    publish_data = q_int
-
-            # publish outside the lock
-            msg = Float64MultiArray()
-            msg.data = publish_data.tolist()
-            self._pub.publish(msg)
-
-    # ---------------------------- TF helpers ----------------------------
+    # ---------------------------- TF + utilities (ROS-specific) ----------------------------
     def _get_transform_matrix_to_world(self, frame_id: str, stamp) -> Optional[np.ndarray]:
         if frame_id in self._frame_to_world_cache:
             return self._frame_to_world_cache[frame_id]
         try:
-            time_obj = rclpy.time.Time(seconds=getattr(stamp, 'sec', 0), nanoseconds=getattr(stamp, 'nanosec', 0))
+            time_obj = rclpy.time.Time(
+                seconds=getattr(stamp, "sec", 0), nanoseconds=getattr(stamp, "nanosec", 0)
+            )
         except Exception:
             time_obj = rclpy.time.Time()
         try:
@@ -340,73 +341,19 @@ class JointStateCommandBridge(Node):
         if n == 0.0:
             return np.eye(3, dtype=float)
         x, y, z, w = q / n
-        xx, yy, zz = x*x, y*y, z*z
-        xy, xz, yz = x*y, x*z, y*z
-        wx, wy, wz = w*x, w*y, w*z
-        return np.array([
-            [1 - 2*(yy + zz),     2*(xy - wz),         2*(xz + wy)],
-            [2*(xy + wz),         1 - 2*(xx + zz),     2*(yz - wx)],
-            [2*(xz - wy),         2*(yz + wx),         1 - 2*(xx + yy)],
-        ], dtype=float)
+        xx, yy, zz = x * x, y * y, z * z
+        xy, xz, yz = x * y, x * z, y * z
+        wx, wy, wz = w * x, w * y, w * z
+        return np.array(
+            [
+                [1 - 2 * (yy + zz), 2 * (xy - wz), 2 * (xz + wy)],
+                [2 * (xy + wz), 1 - 2 * (xx + zz), 2 * (yz - wx)],
+                [2 * (xz - wy), 2 * (yz + wx), 1 - 2 * (xx + yy)],
+            ],
+            dtype=float,
+        )
 
-    # ---------------------------- Getters ----------------------------
-    def getPositions(self) -> np.ndarray:
-        with self._state_lock:
-            return self.actual_joint_positions_.copy()
-
-    def getVelocities(self) -> np.ndarray:
-        with self._state_lock:
-            return self.actual_joint_velocities_.copy()
-
-    def getEfforts(self) -> np.ndarray:
-        with self._state_lock:
-            return self.actual_joint_efforts_.copy()
-
-    def _index_of(self, name: str) -> int:
-        try:
-            return self.ordered_joint_names_.index(name)
-        except ValueError as e:
-            raise KeyError(f"Unknown joint name: {name}") from e
-
-    def getJointPosition(self, name: str) -> float:
-        idx = self._index_of(name)
-        with self._state_lock:
-            return float(self.actual_joint_positions_[idx])
-
-    def getJointVelocity(self, name: str) -> float:
-        idx = self._index_of(name)
-        with self._state_lock:
-            return float(self.actual_joint_velocities_[idx])
-
-    def getJointEffort(self, name: str) -> float:
-        idx = self._index_of(name)
-        with self._state_lock:
-            return float(self.actual_joint_efforts_[idx])
-
-    def getObstaclesPoses(self, max_age_sec: float = 0.5) -> List[np.ndarray]:
-        now = self.get_clock().now()
-        combined: List[np.ndarray] = []
-        with self._poses_lock:
-            for topic, poses in self.obstacles_.items():
-                last = self._obstacles_last_recv_.get(topic)
-                if last is None:
-                    continue
-                age_sec = float((now - last).nanoseconds) * 1e-9
-                if age_sec <= float(max_age_sec):
-                    combined.extend([v.copy() for v in poses])
-        return combined
-
-    # ---------------------------- Shutdown ----------------------------
     def shutdown(self) -> None:
-        """Stop threads/executor and destroy the node."""
-        # stop publishing thread
-        self._pub_stop.set()
-        try:
-            if self._publishing_thread is not None:
-                self._publishing_thread.join(timeout=1.0)
-        except Exception:
-            pass
-
         if self._executor is not None:
             try:
                 self._executor.shutdown()
@@ -417,6 +364,42 @@ class JointStateCommandBridge(Node):
             except Exception:
                 pass
             self._executor = None
-
         self.destroy_node()
-        # Leave rclpy.shutdown() to the app/main.
+
+    def switch_to_forward_position_controller_service(self, timeout_sec: float = 10.0) -> None:
+        """Stop trajectory controller and start forward position controller, as before:contentReference[oaicite:3]{index=3}."""
+        client = self.create_client(SwitchController, "/controller_manager/switch_controller")
+        if not client.wait_for_service(timeout_sec=timeout_sec):
+            raise RuntimeError("/controller_manager/switch_controller service not available")
+
+        req = SwitchController.Request()
+        req.activate_controllers = []
+        req.deactivate_controllers = []
+        req.start_controllers = ["forward_position_controller"]
+        req.stop_controllers = ["scaled_joint_trajectory_controller"]
+
+        if hasattr(req, "strictness"):
+            req.strictness = 0
+        if hasattr(req, "start_asap"):
+            req.start_asap = False
+        if hasattr(req, "activate_asap"):
+            req.activate_asap = False
+        if hasattr(req, "timeout"):
+            req.timeout = MsgDuration(sec=0, nanosec=0)
+
+        future = client.call_async(req)
+        if self._executor is None:
+            rclpy.spin_until_future_complete(self, future, timeout_sec=timeout_sec)
+        else:
+            deadline = time.monotonic() + timeout_sec if timeout_sec is not None else None
+            while not future.done() and (deadline is None or time.monotonic() < deadline):
+                time.sleep(0.01)
+
+        if not future.done():
+            raise TimeoutError("switch_controller call timed out")
+
+        resp = future.result()
+        ok = getattr(resp, "ok", True)
+        if not ok:
+            raise RuntimeError("switch_controller returned ok=False")
+        self.get_logger().info("Controller switch request completed successfully.")

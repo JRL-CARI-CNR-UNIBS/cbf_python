@@ -1,29 +1,17 @@
-#!/usr/bin/env python3
-# joint_target_publisher.py
+from typing import Sequence, Optional
+import time
+import threading
+import queue
+import numpy as np
 
 import rclpy
 from rclpy.node import Node
 from rclpy.context import Context
-from sensor_msgs.msg import JointState
-from std_msgs.msg import Float64MultiArray
-from std_msgs.msg import Bool
-from builtin_interfaces.msg import Time
-from contextlib import contextmanager
-from typing import Sequence, Optional, overload
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-import time
-import pandas as pd
-import threading
-import queue
-import numpy as np
-from typing import Optional, Sequence
-
-# ... your existing imports ...
-# from rclpy.node import Node
-# from std_msgs.msg import Bool
-# from sensor_msgs.msg import JointState
-# etc.
+from sensor_msgs.msg import JointState
+from std_msgs.msg import Float64MultiArray, Bool
+from builtin_interfaces.msg import Time
 
 # -------------------------------------------------------------------
 # Global async publish bus: single queue, single worker thread
@@ -332,16 +320,3 @@ def publish_test_start_once(value: bool, topic: str = 'test_start', wait_match_s
             except Exception:
                 pass
         ctx.shutdown()
-
-# You can run the module directly to test a single publish.
-# if __name__ == '__main__':
-#     # example data
-#     q   = [0.0, 0.5, -0.3]
-#     dq  = [0.0, 0.0,  0.0]
-#     ddq = [0.0, -0.1, 0.1]
-#     publisher = JointTargetPublisher(
-#         topic='joint_target',
-#         joint_names=['joint1', 'joint2', 'joint3'],
-#         frame_id='base_link'
-#     )
-#     publisher.publish_once(q, dq, ddq)

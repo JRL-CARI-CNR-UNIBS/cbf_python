@@ -38,30 +38,28 @@ class FakeCommandBridge(BaseCommandBridgeABC):
         slowdown_factor: float = 0.4,
         on_publish: Optional[Callable[[np.ndarray], None]] = None,
         auto_diff_if_missing: bool = False,
-        t0=time.monotonic(),
+        t0: Optional[float] = None,
     ) -> None:
-        super().__init__(ordered_joint_names,threshold=threshold)
+        super().__init__(ordered_joint_names, threshold=threshold)
 
-        # --- Build default Tworld->cam if none provided (INITI snippet) ---
+        # --- Build default Tworld->cam if none provided ---
         if Tworld_to_cam is None:
             R = pin.utils.rotate('z', 1.9) @ pin.utils.rotate('x', 1.57)  # ~90° about X, 1.9 rad about Z
             Tworld_to_cam = pin.SE3(R, np.array([-1.85, -0.9, 0.9]))
 
         # --- Pose reader & trajectory duration ---
-        self._reader = PoseReader(csv_path, Tworld_to_cam, auto_diff_if_missing=auto_diff_if_missing)  # :contentReference[oaicite:2]{index=2}
-        self._human_T = float(self._reader.getTotalTime())  # recording duration  :contentReference[oaicite:3]{index=3}
+        self._reader = PoseReader(csv_path, Tworld_to_cam, auto_diff_if_missing=auto_diff_if_missing)
+        self._human_T = float(self._reader.getTotalTime())
 
-        # --- Simulation knobs ---
+        # --- Simulation settings ---
         self._slowdown = float(slowdown_factor)
-        self._t0 = t0
-        # print("T0: ", self._t0)
+        self._t0 = time.monotonic() if t0 is None else float(t0)
         self._on_publish = on_publish
-        self.last_command: Optional[np.ndarray] = None  # for inspection/tests
+        self.last_command: Optional[np.ndarray] = None
         self.actual_joint_positions_ = np.array([90.0, -140.0, 140.0, -90.0, 90.0, 0.0]) * np.pi / 180.0
-        self.last_command = self.actual_joint_positions_
-        self.actual_joint_velocities_= np.array([0.0]*6)
-        self.actual_joint_accelerations_ = np.array([0.0] * 6)
-
+        self.last_command = self.actual_joint_positions_.copy()
+        self.actual_joint_velocities_ = np.zeros(6, dtype=float)
+        self.actual_joint_accelerations_ = np.zeros(6, dtype=float)
 
     # --------------------- ABC: command publish ---------------------
     def _do_publish(self, q: np.ndarray) -> None:
@@ -70,19 +68,24 @@ class FakeCommandBridge(BaseCommandBridgeABC):
             try:
                 self._on_publish(q.copy())
             except Exception:
-                pass  # publishing callback is best-effort here
+                pass
 
     # --------------------- ABC: obstacles provider ------------------
-    def getObstacles(self, elapsed = time.monotonic(), max_age_sec: float = 0.5) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def getObstacles(
+        self,
+        elapsed: Optional[float] = None,
+        max_age_sec: float = 0.5,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Returns (pos[K,3], vel[K,3], acc[K,3]) for the current simulated time.
 
         The CSV may contain any number of keypoints K; arrays are shaped (K,3).
         """
-        # current raw time scaled by slowdown
-        elapsed = elapsed - self._t0
-        # ("ELAPSED: ", elprintapsed)
-        t_raw = self._slowdown * elapsed
+        if elapsed is None:
+            elapsed_time = time.monotonic() - self._t0
+        else:
+            elapsed_time = elapsed - self._t0
+        t_raw = self._slowdown * elapsed_time
 
         T = self._human_T
         # wrap into [0, 2T)

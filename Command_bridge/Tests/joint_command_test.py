@@ -28,7 +28,7 @@ import rclpy
 from controller_manager_msgs.srv import SwitchController
 
 # Import the class from the same directory or your installed package
-from Command_bridge.joint_command_bridge_modified import JointStateCommandBridge
+from Command_bridge.joint_command_bridge import JointStateCommandBridge
 
 
 UR10E_JOINTS: List[str] = [
