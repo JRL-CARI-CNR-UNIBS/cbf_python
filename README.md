@@ -58,14 +58,18 @@ The framework enforces ISO/TS 15066 compliant **Speed and Separation Monitoring 
 
 ### Environment Activation
 ```bash
-# Activate your python virtual environment:
-source /home/galileo/projects/python_venv/galileo_venv/bin/activate
-
 # Add the workspace root to PYTHONPATH:
 export PYTHONPATH=/path/to/cbf_python:$PYTHONPATH
 ```
 
----
+### Running the optimal test
+
+To run the optimal test, the sharework_cell package is needed (contains all the urdf files for the robotic cell reconstruction):
+
+```bash
+pip install git+https://github.com/JRL-CARI-CNR-UNIBS/sharework_cell
+```
+
 
 ## Tutorial: Initializing and Using the Controller
 
@@ -307,15 +311,3 @@ python3 -m scripts.example_cbf_optimal
 python3 -m scripts.example_cbf_optimal --config path/to/custom_params.yaml
 ```
 
----
-
-## Citation
-
-If you use this work in an academic publication, please cite the associated article:
-```bibtex
-@article{optimal_cbf_controller_2026,
-  title   = {Optimal Bounded Control Barrier Functions for Safe Human-Robot Collaboration},
-  journal = {IEEE Robotics and Automation Letters / Transactions on Robotics},
-  year    = {2026}
-}
-```
