@@ -15,8 +15,6 @@ This repository contains the Python implementation of the **Optimal Control Barr
 - `cbf_python/scripts/`:
   - `example_cbf_optimal.py`: Simulation and execution script demonstrating the optimal CBF controller on a UR10e manipulator.
   - `test/cbf_test.py`: Unit test suite verifying mathematical derivations, gradients, and QP integration.
-- `launch/`:
-  - `example_with_logging.launch.py`: ROS 2 launch file for running the controller with tracking/logging.
 
 ## Requirements & Setup
 
