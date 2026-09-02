@@ -62,14 +62,6 @@ The framework enforces ISO/TS 15066 compliant **Speed and Separation Monitoring 
 export PYTHONPATH=/path/to/cbf_python:$PYTHONPATH
 ```
 
-### Running the optimal test
-
-To run the optimal test, the sharework_cell package is needed (contains all the urdf files for the robotic cell reconstruction):
-
-```bash
-pip install git+https://github.com/JRL-CARI-CNR-UNIBS/sharework_cell
-```
-
 
 ## Tutorial: Initializing and Using the Controller
 
@@ -303,6 +295,15 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest scripts/test/cbf_test.py
 ```
 
 ### Run Full Simulation with Meshcat Visualization
+
+To run full simulation, it is necessary to download and install the [sharework_python](https://github.com/JRL-CARI-CNR-UNIBS/sharework_python) package, containig the urdf model of the Sharework cell employed in the test:
+
+```bash
+pip install git+https://github.com/JRL-CARI-CNR-UNIBS/sharework_python
+```
+
+After this, it is possible to run the test using: 
+
 ```bash
 # Using default YAML parameters:
 python3 -m scripts.example_cbf_optimal
