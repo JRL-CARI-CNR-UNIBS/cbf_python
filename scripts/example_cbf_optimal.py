@@ -34,7 +34,6 @@ from Command_bridge.fake_command_bridge import FakeCommandBridge
 from scripts.util.joint_interpolator import SegmentedJointTrap
 from scripts.util.visualization_daemon import VisualizationDaemon
 from scripts.util.statistics_calculator import StatisticsCalculator
-from scripts.util.mean_visualizer import StochasticCBFVisualizer
 from scripts.util.bcf_utils import compute_dynamic_risk_index
 from scripts.util.test_utils import (
     bring_robot_home,
@@ -205,7 +204,6 @@ def main():
         Tc=CONTROL_PERIOD,
         scaling_threshold=0.5,
     )
-    visualizer = StochasticCBFVisualizer()
 
     # 6. Setup Logging if requested
     log_publishers = {}
@@ -297,7 +295,6 @@ def main():
                 unfeasible_string=unfeasible_status,
                 end_eff_pos=end_eff_pos,
             )
-            visualizer.update_vectors(out["h_min"], out["d_min"], out["vr_min"] - out["vh_min"], t)
 
             # F. Asynchronous Logging
             if LOG_DATA and not stop_event.is_set():
@@ -355,7 +352,6 @@ def main():
     print("FINAL PERFORMANCE STATISTICS")
     print("=" * 70)
     print(stats_calculator)
-    visualizer.compute_mean_cov(print_val=True)
 
     if SAVE_DATA:
         file_path = "../results/simulation_data.csv"
