@@ -1,6 +1,0 @@
-Collecting pinocchio
-  Using cached pinocchio-0.4.3-py3-none-any.whl (12 kB)
-Collecting colorama
-  Using cached colorama-0.4.6-py2.py3-none-any.whl (25 kB)
-Installing collected packages: colorama, pinocchio
-Successfully installed colorama-0.4.6 pinocchio-0.4.3

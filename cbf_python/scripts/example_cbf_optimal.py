@@ -45,8 +45,6 @@ import rclpy
 import signal
 import threading
 from scripts.util import csv_publishers, test_publish_utils as pub_utils
-# from scripts.util.reference_xyz_trajectory import generate_cartesian_trajectory
-from scripts.util.gaussian_process_util import read_config_data_from_csv
 from scripts.util.bcf_utils import compute_dynamic_risk_index
 from scripts.util.statistics_calculator import StatisticsCalculator
 

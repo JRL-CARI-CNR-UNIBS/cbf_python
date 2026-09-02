@@ -1,7 +1,6 @@
 import pinocchio as pin
 import numpy as np
 import pandas as pd
-from Controller.gaussian_controller import GaussianController, GaussianControllerConfig, GaussianSet
 import time
 from scripts.util.joint_interpolator import SegmentedJointTrap
 from Controller.optimal_cbf_task_controller import ControllerConfig
