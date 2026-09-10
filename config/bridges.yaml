@@ -1,0 +1,23 @@
+# Configuration for Robot Command Bridges
+
+joint_names:
+  - "ur10e_shoulder_pan_joint"
+  - "ur10e_shoulder_lift_joint"
+  - "ur10e_elbow_joint"
+  - "ur10e_wrist_1_joint"
+  - "ur10e_wrist_2_joint"
+  - "ur10e_wrist_3_joint"
+
+fake_bridge:
+  csv_path: "skeleton_vectors/skeleton_vectors_23.csv"
+  slowdown_factor: 1.0
+  t0: 0.0
+  camera_pose:
+    quaternion: [0.83, 0.185, 0.513, 0.12]
+    type_0_translation: [-0.094, -0.93, 2.309]
+    type_1_translation: [1.04, -0.93, 2.309]
+
+joint_bridge:
+  threshold: 1.1
+  target_name: "ur10e_wrist_3_joint"
+  timeout: 5.0

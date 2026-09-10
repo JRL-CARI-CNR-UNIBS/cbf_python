@@ -69,9 +69,9 @@ def generate_launch_description():
             'enable_skeleton_logging': enable_skeleton_logging,
         }.items(),
     )
-    # ---- 3) python example_cbf_optimal.py ----
+    # ---- 3) python run_cbf_pid ----
     cbf_process = ExecuteProcess(
-        cmd=['python3', '-m', 'scripts.example_cbf_PID'],
+        cmd=['python3', '-m', 'cbf_python.examples.run_cbf_pid'],
         output='screen',
     )
 

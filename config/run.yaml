@@ -1,0 +1,114 @@
+# ==============================================================================
+# Unified Configuration for Run & Simulation Scripts
+#
+# Shared parameters (flags, default controller properties, logging paths) are
+# declared once under "common". Script-specific sections only declare their
+# unique parameters or override common defaults.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Shared Parameters (Inherited by all experiment runs)
+# ------------------------------------------------------------------------------
+common:
+  flags:
+    show_data: true
+    use_bridge: false
+    log_data: false
+    save_data: false
+    duration: 30.0
+
+  parameters:
+    set_id: "0"
+    parameters_type: "0"
+    params_filename: "params_csv/parameters_set.csv"
+    log_path: "results/simulation/scaling"
+
+  controller:
+    Tc: 0.002
+    gamma: 5.949803744662194
+    lambda_pos: 2098.0150948315577
+    lambda_vel: 0.34298548889519453
+    lambda_scaling: 16.558982747305556
+    lambda_acc: 1.4551402158959938e-10
+    delta_deg: 4.5
+
+# ------------------------------------------------------------------------------
+# Script-Specific Parameters and Overrides
+# ------------------------------------------------------------------------------
+
+# 1. Optimal CBF Controller (run_cbf_optimal)
+cbf_optimal:
+  parameters:
+    test_name: "recorded_skeleton_23_h_-0.1_par"
+    h_cfg: "article"
+    v_cfg: "article"
+
+# 2. Cartesian PID + CBF Controller (run_cbf_pid)
+cbf_pid:
+  parameters:
+    log_path: "results/simulation/pid"
+    test_name: "pid_cbf_test"
+  controller:
+    Kp_tra: 40.0
+    Kd_tra: 12.0
+    Kp_rot: 20.0
+    Kd_rot: 8.0
+    gamma: 5.0
+    C: 0.25
+    Tr: 0.15
+    a_s: 2.5
+
+# 3. Dynamic Polynomial CBF Controller (run_dynamic_polynomial)
+dynamic_polynomial:
+  parameters:
+    test_name: "recorded_skeleton_23_dynamic_polynomial"
+  controller:
+    lambda_0_pos: 2098.0150948315577
+    lambda_0_vel: 0.34298548889519453
+    lambda_0_acc: 1.4551402158959938e-10
+    lambda_0_scaling: 16.558982747305556
+    gamma_0: 5.949803744662194
+
+    lambda_f_pos: 500.0
+    lambda_f_vel: 0.1
+    lambda_f_acc: 1e-12
+    lambda_f_scaling: 100.0
+    gamma_f: 1.0
+
+    n_pos: 1.0
+    n_vel: 1.0
+    n_acc: 1.0
+    n_scaling: 1.0
+    n_gamma: 1.0
+
+    m_pos: 2.0
+    m_vel: 2.0
+    m_acc: 2.0
+    m_scaling: 2.0
+    m_gamma: 2.0
+
+    w_pos: 1.0
+    w_vel: 1.0
+    w_acc: 1.0
+    w_scaling: 1.0
+    w_gamma: 1.0
+
+    h_t: -0.1
+
+# 4. Gaussian Process / Stochastic CBF Controller (run_gaussian_control)
+gaussian_control:
+  parameters:
+    params_filename: "params_csv/log_best_trials.csv"
+    test_name: "recorded_skeleton_23_gaussian"
+    h_cfg: 0.0
+    v_cfg: 0.0
+
+# 5. Obstructive Obstacle Injection Test (run_obstructive_test)
+obstructive_test:
+  parameters:
+    test_name: "obstructive_obstacle_test"
+  obstacle_spawner:
+    spawn_freq: 500
+    d_objective: 0.25
+    v_ref: 0.1
+    enable_spawn: true

@@ -69,10 +69,9 @@ def generate_launch_description():
             'enable_skeleton_logging': enable_skeleton_logging,
         }.items(),
     )
-    # ---- 3) python example_cbf_optimal.py ----
+    # ---- 3) python run_cbf_optimal ----
     cbf_process = ExecuteProcess(
-        # cmd=['python3', '-m', 'scripts.example_dynamic_polynomial'],
-        cmd=['python3', '-m', 'scripts.example_cbf_optimal'],
+        cmd=['python3', '-m', 'cbf_python.examples.run_cbf_optimal'],
         output='screen',
     )
 

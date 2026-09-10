@@ -1,0 +1,24 @@
+# Default parameters for CBF Optimal Controller
+Tc: 0.002
+C: 0.25
+Tr: 0.15
+a_s: 2.5
+gamma: 5.949803744662194
+max_obstacles: 20
+lambda_pos: 2098.0150948315577
+lambda_vel: 0.34298548889519453
+lambda_scaling: 16.558982747305556
+lambda_acc: 1.4551402158959938e-10
+DDtrajectory_time_max: 5.0
+prefix: "ur10e_"
+tool_frame: "ur10e_wrist_3_joint"
+elbow_frame: "ur10e_upper_arm_link"
+delta_deg: 4.5
+
+# Joint velocity limits (rad/s) and acceleration limits (rad/s^2)
+Dq_max: [3.14159265, 3.14159265, 3.14159265, 6.28318531, 6.28318531, 6.28318531]
+DDq_max: [15.70796327, 15.70796327, 15.70796327, 31.41592654, 31.41592654, 31.41592654]
+
+# Tube limits (rad)
+delta_q_max: [0.07853982, 0.07853982, 0.15707963, 0.15707963, 0.31415927, 0.31415927]
+delta_unfeasible: [0.005, 0.005, 0.01, 0.01, 0.02, 0.02]
