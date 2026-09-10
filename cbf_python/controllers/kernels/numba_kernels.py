@@ -22,7 +22,7 @@ def build_free_forced_one_step(Ts: float, nq: int):
     FreePos = np.hstack((I, Ts * I))
     ForcedVel = Ts * I
     FreeVel = np.hstack((np.zeros_like(I), I))
-    return FreePos, ForcedPos, FreeVel, FreeVel
+    return FreePos, ForcedPos, FreeVel, ForcedVel
 
 
 # ------------------------------------------------------------
