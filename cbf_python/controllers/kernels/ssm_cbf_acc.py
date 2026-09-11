@@ -6,12 +6,6 @@ import math
 import numpy as np
 from numba import njit, float64, boolean
 
-# Safe no‑op decorator if not running under line_profiler
-try:
-    profile  # provided by line_profiler at runtime
-except NameError:  # pragma: no cover
-    def profile(func):
-        return func
 
 
 # ------------------------------------------------------------
@@ -34,15 +28,6 @@ def range_state_derivative_numba(v_r: np.ndarray, v_h: np.ndarray):
     g[6, 0] = 1.0
     g[7, 1] = 1.0
     g[8, 2] = 1.0
-    return f, g
-
-
-@profile
-def range_state_derivative(v_r, v_h):
-    zero3 = np.zeros(3)
-    f = np.concatenate([v_r, v_h, zero3, zero3])
-    g = np.zeros((12, 3))
-    g[6:9] = np.eye(3)
     return f, g
 
 
@@ -201,28 +186,6 @@ def h_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, C, atol):
 
     return h_val, h_jac
 
-
-@profile
-def h_and_jacobian(d: float, v_r: float, v_h: float, a_h: float, tr: float, a_max: float, C: float, atol: float = 1e-12):
-    """
-    Barrier function h and its gradient, including Cat.2 correction term.
-
-    h = min_t d(t) - C + h_ss_cat2,
-    where h_ss_cat2 = max(0, (C - d_min)/C * tr * v_r).
-    """
-    d_min, dist_jac = dmin_and_jacobian(d=d, v_r=v_r, v_h=v_h, a_h=a_h, tr=tr, a_max=a_max, atol=atol)
-
-    ss_term = 0.0
-    h_jac = dist_jac.copy()
-
-    if d_min < C:
-        ss_term = ((C - d_min) / C) * tr * v_r
-        h_jac = h_jac + (-dist_jac * (tr / C) * v_r) + ((C - d_min) * (tr / C)) * np.array([0.0, 1.0, 0.0, 0.0])
-
-    h = d_min - C + ss_term
-    return h, h_jac
-
-
 # ------------------------------------------------------------
 # 4) Geometric Jacobian blocks
 # ------------------------------------------------------------
@@ -281,24 +244,6 @@ def jacobian_psi_numba(p_r: np.ndarray, p_h: np.ndarray, v_lin: np.ndarray, v_hu
     return J
 
 
-@profile
-def jacobian_psi(p_r, p_h, v_lin, v_human):
-    diff = p_r - p_h
-    norm = math.sqrt(np.dot(diff, diff))
-    u_rh = (diff / norm).reshape(3, 1)
-    P = np.eye(3) - u_rh @ u_rh.T
-
-    vlinP = v_lin @ P
-    vhumP = v_human @ P
-
-    return np.vstack((
-        np.hstack((u_rh.T, -u_rh.T, np.zeros((1, 3)), np.zeros((1, 3)))),
-        np.hstack((vlinP.reshape(1, -1), -vlinP.reshape(1, -1), u_rh.T, np.zeros((1, 3)))),
-        np.hstack((vhumP.reshape(1, -1), -vhumP.reshape(1, -1), np.zeros((1, 3)), u_rh.T)),
-        np.zeros((1, 12))
-    ))
-
-
 # ------------------------------------------------------------
 # 5) Fast contractions: (Jpsi @ f) and (Jpsi @ g)
 # ------------------------------------------------------------
@@ -306,6 +251,7 @@ def jacobian_psi(p_r, p_h, v_lin, v_human):
 def jacobian_psi_times_fg_fast_numba(
     p_r: np.ndarray, p_h: np.ndarray,
     v_r: np.ndarray, v_h: np.ndarray,
+    a_h_vec: np.ndarray,
     atol: float = 1e-12,
 ):
     """
@@ -334,71 +280,23 @@ def jacobian_psi_times_fg_fast_numba(
 
     vr_rel = u[0] * v_r[0] + u[1] * v_r[1] + u[2] * v_r[2]
     vh_rel = u[0] * v_h[0] + u[1] * v_h[1] + u[2] * v_h[2]
-    # Vettori gradienti posizionali (Velocità tangenziale / distanza)
+    ah_rel = u[0] * a_h_vec[0] + u[1] * a_h_vec[1] + u[2] * a_h_vec[2]
+
+    # Positional gradient vectors (tangential vector / distance)
     grad_pr_vr = (v_r - u * vr_rel) / d
     grad_pr_vh = (v_h - u * vh_rel) / d
+    grad_pr_ah = (a_h_vec - u * ah_rel) / d
 
     Jpsi_f = np.zeros(4, dtype=np.float64)
     Jpsi_f[0] = u[0] * v_diff[0] + u[1] * v_diff[1] + u[2] * v_diff[2]
     Jpsi_f[1] = grad_pr_vr[0] * v_diff[0] + grad_pr_vr[1] * v_diff[1] + grad_pr_vr[2] * v_diff[2]
     Jpsi_f[2] = grad_pr_vh[0] * v_diff[0] + grad_pr_vh[1] * v_diff[1] + grad_pr_vh[2] * v_diff[2]
+    Jpsi_f[3] = grad_pr_ah[0] * v_diff[0] + grad_pr_ah[1] * v_diff[1] + grad_pr_ah[2] * v_diff[2]
 
     Jpsi_g = np.zeros((4, 3), dtype=np.float64)
     Jpsi_g[1, 0] = u[0]
     Jpsi_g[1, 1] = u[1]
     Jpsi_g[1, 2] = u[2]
-
-    return Jpsi_f, Jpsi_g
-
-
-@profile
-def jacobian_psi_times_fg_fast(
-    p_r: np.ndarray, p_h: np.ndarray,
-    v_r: np.ndarray, v_h: np.ndarray,
-    atol: float = 1e-12,
-    out_Jf: np.ndarray | None = None,
-    out_Jg: np.ndarray | None = None,
-):
-    r = p_r - p_h
-    d = math.sqrt(np.dot(r, r))
-    if d <= atol:
-        u = v_r.copy()
-        nrm = math.sqrt(np.dot(u, u))
-        if nrm <= atol:
-            u = np.array([1.0, 0.0, 0.0])
-        else:
-            u /= nrm
-        d = max(d, atol)
-    else:
-        u = r / d
-
-    v_diff = v_r - v_h
-
-    vr_rel = np.dot(u, v_r)
-    vh_rel = np.dot(u, v_h)
-    vr_tan = v_r - u * vr_rel
-    vh_tan = v_h - u * vh_rel
-
-    jf0 = np.dot(u, v_diff)
-    jf1 = np.dot(vr_tan, v_diff)
-    jf2 = np.dot(vh_tan, v_diff)
-
-    if out_Jf is None:
-        Jpsi_f = np.array([jf0, jf1, jf2, 0.0], dtype=float)
-    else:
-        out_Jf[0] = jf0
-        out_Jf[1] = jf1
-        out_Jf[2] = jf2
-        out_Jf[3] = 0.0
-        Jpsi_f = out_Jf
-
-    if out_Jg is None:
-        Jpsi_g = np.zeros((4, 3), dtype=float)
-        Jpsi_g[1, :] = u
-    else:
-        out_Jg.fill(0.0)
-        out_Jg[1, :] = u
-        Jpsi_g = out_Jg
 
     return Jpsi_f, Jpsi_g
 
@@ -449,8 +347,9 @@ def compute_g_Lie_terms_numba(
 
     h_val, Jh_psi = h_and_jacobian_numba(d, v_rel, v_h, a_h, Tr, a_s, C, atol)
 
+    zero3 = np.zeros(3, dtype=np.float64)
     Jpsi_f, Jpsi_g = jacobian_psi_times_fg_fast_numba(
-        p_r=translation_bt, p_h=obs_pos, v_r=vel_lineare, v_h=v_obs
+        p_r=translation_bt, p_h=obs_pos, v_r=vel_lineare, v_h=v_obs, a_h_vec=zero3, atol=atol
     )
 
     Lie_f_h = Jh_psi[0]*Jpsi_f[0] + Jh_psi[1]*Jpsi_f[1] + Jh_psi[2]*Jpsi_f[2] + Jh_psi[3]*Jpsi_f[3]
@@ -508,7 +407,7 @@ def compute_h_and_lie_numba(translation_bt, obs_pos, vel_lineare, v_obs, Tr, a_s
 
     h, Jh_psi = h_and_jacobian_numba(d, v_r, v_h, a_h, Tr, a_s, C, atol)
 
-    Jpsi_f, Jpsi_g = jacobian_psi_times_fg_fast_numba(translation_bt, obs_pos, vel_lineare, v_obs, atol)
+    Jpsi_f, Jpsi_g = jacobian_psi_times_fg_fast_numba(translation_bt, obs_pos, vel_lineare, v_obs, obs_acc, atol)
 
     Lie_f_h = Jh_psi[0] * Jpsi_f[0] + Jh_psi[1] * Jpsi_f[1] + Jh_psi[2] * (Jpsi_f[2] + a_h) + Jh_psi[3] * Jpsi_f[3]
 

@@ -55,6 +55,26 @@ def fill_scaling_rows(A, c, row, nq, Tc, Dtraj, DDtraj_max):
 
 
 @njit(cache=True, fastmath=True)
+def fill_pos_rows(A, c, row, nq, FreePos, ForcedPos, x0, q_min, q_max):
+    """Assemble joint position limit constraints: q_min <= q(k+1) <= q_max."""
+    Fx = FreePos @ x0  # Shape (nq,)
+    # Upper bound: q(k+1) <= q_max <=> -ForcedPos * ddq >= -q_max + Fx
+    for i in range(nq):
+        for j in range(nq):
+            A[row + i, j] = -ForcedPos[i, j]
+        c[row + i] = -q_max[i] + Fx[i]
+    row += nq
+
+    # Lower bound: q(k+1) >= q_min <=> +ForcedPos * ddq >= q_min - Fx
+    for i in range(nq):
+        for j in range(nq):
+            A[row + i, j] = +ForcedPos[i, j]
+        c[row + i] = q_min[i] - Fx[i]
+    row += nq
+    return row
+
+
+@njit(cache=True, fastmath=True)
 def fill_tube_rows(A, c, row, nq, FreePos, ForcedPos, x0, nominal_q, delta_q_max):
     """Assemble position error tube constraints: |q(k+1) - nominal_q(k+1)| <= delta_q_max."""
     Fx = FreePos @ x0  # Shape (nq,)
@@ -172,7 +192,8 @@ def append_cbf_rows_loop(
             if HAS_CBF:
                 for j in range(nq):
                     A[row, j] = row_vec[j]
-                A[row, nq] = 0.0
+                if A.shape[1] > nq:
+                    A[row, nq] = 0.0
                 c[row] = bound
                 row += 1
 
@@ -236,11 +257,12 @@ def assemble_qp_inplace(
     q, dq,
     nominal_q, nominal_Dq,
     Dtraj, Tc,
+    q_min, q_max,
     Dq_max, DDq_max, delta_q_max,
     frames_p, frames_vlin, Jlins, dJlins, obs_p, obs_v, obs_a,
     Tr, a_s, C, gamma, DDtraj_max, atol, ref_scaling, HAS_CBF, keypoint_to_log,
 ):
-    """Zero out arrays, assemble scaling/tube/velocity/acceleration/CBF constraints, and assemble cost."""
+    """Zero out arrays, assemble scaling/pos/tube/velocity/acceleration/CBF constraints, and assemble cost."""
     nq = q.size
     for i in range(A.shape[0]):
         for j in range(A.shape[1]):
@@ -255,6 +277,7 @@ def assemble_qp_inplace(
         x0[i] = q[i]
         x0[nq + i] = dq[i]
 
+    row = fill_pos_rows(A, c, row, nq, FreePos, ForcedPos, x0, q_min, q_max)
     row = fill_tube_rows(A, c, row, nq, FreePos, ForcedPos, x0, nominal_q, delta_q_max)
     row = fill_vel_rows(A, c, row, nq, FreeVel, ForcedVel, x0, Dq_max)
     row = fill_acc_rows(A, c, row, nq, DDq_max)

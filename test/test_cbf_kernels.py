@@ -12,6 +12,7 @@ from cbf_python.controllers.kernels.ssm_cbf_acc import (
 )
 from cbf_python.controllers.kernels.numba_kernels import (
     build_free_forced_one_step,
+    fill_pos_rows,
     fill_tube_rows,
     fill_scaling_rows,
     assemble_qp_inplace,
@@ -59,19 +60,20 @@ def test_jacobian_psi_times_fg_finite_differences():
     p_h = np.array([0.5, 0.2, 0.1])
     v_r = np.array([-0.3, 0.1, -0.2])
     v_h = np.array([0.1, -0.05, 0.05])
+    a_h = np.array([0.2, -0.1, 0.15])
     atol = 1e-12
 
-    Jf_anal, Jg_anal = jacobian_psi_times_fg_fast_numba(p_r, p_h, v_r, v_h, atol)
+    Jf_anal, Jg_anal = jacobian_psi_times_fg_fast_numba(p_r, p_h, v_r, v_h, a_h, atol)
 
     # Validate Jf: time derivative of psi under free dynamics
-    def eval_psi(pr, ph, vr, vh):
+    def eval_psi(pr, ph, vr, vh, ah):
         r = pr - ph
         d = np.linalg.norm(r)
         u = r / d
-        return np.array([d, np.dot(u, vr), np.dot(u, vh), 0.0])
+        return np.array([d, np.dot(u, vr), np.dot(u, vh), np.dot(u, ah)])
 
-    psi_p = eval_psi(p_r + EPS * v_r, p_h + EPS * v_h, v_r, v_h)
-    psi_m = eval_psi(p_r - EPS * v_r, p_h - EPS * v_h, v_r, v_h)
+    psi_p = eval_psi(p_r + EPS * v_r, p_h + EPS * v_h, v_r, v_h, a_h)
+    psi_m = eval_psi(p_r - EPS * v_r, p_h - EPS * v_h, v_r, v_h, a_h)
     Jf_num = (psi_p - psi_m) / (2 * EPS)
     assert_allclose(Jf_anal, Jf_num, rtol=RTOL, atol=ATOL)
 
@@ -80,8 +82,8 @@ def test_jacobian_psi_times_fg_finite_differences():
     for j in range(3):
         acc = np.zeros(3)
         acc[j] = 1.0
-        p_plus = eval_psi(p_r, p_h, v_r + EPS * acc, v_h)
-        p_minus = eval_psi(p_r, p_h, v_r - EPS * acc, v_h)
+        p_plus = eval_psi(p_r, p_h, v_r + EPS * acc, v_h, a_h)
+        p_minus = eval_psi(p_r, p_h, v_r - EPS * acc, v_h, a_h)
         Jg_num[:, j] = (p_plus - p_minus) / (2 * EPS)
 
     assert_allclose(Jg_anal, Jg_num, rtol=RTOL, atol=ATOL)
@@ -152,3 +154,35 @@ def test_numba_qp_assembly():
 
     assert P2.shape == (nq + 1, nq + 1)
     assert b_pos.shape == (nq + 1,)
+
+
+def test_fill_pos_rows():
+    """Verify fill_pos_rows linear inequalities match q_min <= q(k+1) <= q_max."""
+    nq = 6
+    Ts = 0.002
+    FreePos, ForcedPos, FreeVel, ForcedVel = build_free_forced_one_step(Ts, nq)
+
+    q = np.array([0.5, -1.0, 1.2, 0.0, -0.5, 0.8])
+    dq = np.array([0.1, -0.2, 0.05, -0.1, 0.3, -0.05])
+    x0 = np.concatenate([q, dq])
+
+    q_min = np.array([-2.0, -2.0, -2.0, -2.0, -2.0, -2.0])
+    q_max = np.array([2.0, 2.0, 2.0, 2.0, 2.0, 2.0])
+
+    A = np.zeros((2 * nq, nq))
+    c = np.zeros(2 * nq)
+    row = fill_pos_rows(A, c, 0, nq, FreePos, ForcedPos, x0, q_min, q_max)
+    assert row == 2 * nq
+
+    # Test random acceleration inputs
+    for _ in range(50):
+        ddq = np.random.randn(nq) * 50.0
+        q_next = FreePos @ x0 + ForcedPos @ ddq
+        # A @ ddq >= c should be elementwise equivalent to q_min <= q_next <= q_max
+        ineq_satisfaction = (A @ ddq >= c - 1e-12)
+        limits_satisfaction_upper = (q_next <= q_max + 1e-12)
+        limits_satisfaction_lower = (q_next >= q_min - 1e-12)
+
+        assert np.all(ineq_satisfaction[:nq] == limits_satisfaction_upper)
+        assert np.all(ineq_satisfaction[nq:] == limits_satisfaction_lower)
+

@@ -50,6 +50,26 @@ class ControllerConfig:
     tool_frame: str = "tool0"
     elbow_frame: str = "forearm_link"
 
+    def compute_missed_cycle_margin(
+        self,
+        v_r_bar: float = 1.0,
+        v_h_bar: float = 1.6,
+        a_r_bar: float = 2.5,
+        a_h_bar: float = 4.5,
+    ) -> float:
+        """Compute Delta d_miss for missed deadlines according to Eq. 17."""
+        return (v_r_bar + v_h_bar) * self.Tc + 0.5 * (a_r_bar + a_h_bar) * (self.Tc ** 2)
+
+    def compute_robust_margin(
+        self,
+        v_r_bar: float = 1.0,
+        v_h_bar: float = 1.6,
+        a_r_bar: float = 2.5,
+        a_h_bar: float = 4.5,
+    ) -> float:
+        """Compute C^rob = C + Delta d_miss according to Eq. 18."""
+        return self.C + self.compute_missed_cycle_margin(v_r_bar, v_h_bar, a_r_bar, a_h_bar)
+
     def __str__(self) -> str:
         """Return formatted string representation of controller configuration."""
         def fmt_arr(arr: np.ndarray) -> str:
@@ -122,22 +142,21 @@ class BCFOptimalController:
         self.P_acc = np.zeros((nq + 1, nq + 1), dtype=np.float64)
         self.P_acc[:nq, :nq] = I
 
-        self.Punfeasible = np.zeros((nq + 1, nq + 1), dtype=np.float64)
-        self.Punfeasible[:nq, :nq] = (self.cfg.Tc ** 2) * I
-        self.Punfeasible[-1, -1] = self.cfg.Tc ** 2
-
         # Linear objective vectors
         self.b_pos = np.zeros(nq + 1, dtype=np.float64)
         self.b_vel = np.zeros(nq + 1, dtype=np.float64)
         self.b_scaling = np.zeros(nq + 1, dtype=np.float64)
         self.b_acc = np.zeros(nq + 1, dtype=np.float64)
-        self.bunfeasible = np.zeros(nq + 1, dtype=np.float64)
+
+        # Position limits
+        self.q_min = np.copy(self.model.lowerPositionLimit)
+        self.q_max = np.copy(self.model.upperPositionLimit)
 
         # Constraint matrices upper bounds
         if useCbf:
-            self.n_constraints = 3 + 2 * 3 * nq + cfg.max_obstacles * len(self.frames_ids)
+            self.n_constraints = 3 + 2 * 4 * nq + cfg.max_obstacles * len(self.frames_ids)
         else:
-            self.n_constraints = 3 + 2 * 3 * nq
+            self.n_constraints = 3 + 2 * 4 * nq
         self.A = np.zeros((self.n_constraints, nq + 1), dtype=np.float64)
         self.c = np.zeros(self.n_constraints, dtype=np.float64)
 
@@ -175,6 +194,8 @@ class BCFOptimalController:
         self.trajectory_time = 0.0
         self.Dtrajectory_time = 1.0
         self.DDtrajectory_time = 0.0
+        self.u_prev = np.zeros(self.model.nq + 1, dtype=np.float64)
+        self.N_miss = 0
 
     def step(
         self,
@@ -184,6 +205,7 @@ class BCFOptimalController:
         nominal_q: np.ndarray,
         nominal_Dq: np.ndarray,
         nominal_DDq: np.ndarray,
+        deadline_missed: bool = False,
     ) -> Dict[str, Any]:
         """Perform one discrete control loop iteration."""
         test_unfeasible = 0
@@ -231,7 +253,9 @@ class BCFOptimalController:
                 self.set_ref_scaling(ref_scaling)
             self.qp_scaling = self.ref_scaling
         else:
+            # During recovery, progression along nominal trajectory is suspended (dot{xi} = 0)
             self.qp_scaling = 0.0
+            self.Dtrajectory_time = 0.0
 
         # Assemble QP in-place using Numba kernel
         row, h_min, d_min, vr_min, vh_min, htest, dtest, i_h, i_d = assemble_qp_inplace(
@@ -241,6 +265,7 @@ class BCFOptimalController:
             self.q, self.dq,
             nominal_q, nominal_Dq,
             self.Dtrajectory_time, Tc,
+            self.q_min, self.q_max,
             cfg.Dq_max, cfg.DDq_max, self.delta_q_max,
             frames_p, frames_v, Jlins, dJlins, obs_pos, obs_vel, obs_acc,
             cfg.Tr, cfg.a_s, cfg.C, cfg.gamma, cfg.DDtrajectory_time_max, 1e-12, self.qp_scaling, self.useCbf,
@@ -273,25 +298,38 @@ class BCFOptimalController:
         A = np.ascontiguousarray(self.A, dtype=np.float64)
         c = np.ascontiguousarray(self.c, dtype=np.float64)
 
-        try:
-            u, *_ = quadprog.solve_qp(P, b, A.T, c, 0)
-        except ValueError as err:
-            if "constraints are inconsistent" in str(err):
-                # QP Infeasible fallback mode
-                self.bunfeasible[:-1] = -Tc * self.dq
-                self.bunfeasible[-1] = -Tc * self.Dtrajectory_time
-                u, *_ = quadprog.solve_qp(
-                    self.Punfeasible, self.bunfeasible,
-                    A[(3 + nq * 4):(3 + nq * 6), :].T,
-                    c[(3 + nq * 4):(3 + nq * 6)],
-                )
-                test_unfeasible = 1
-                self.unfeasible_cnt = "UNFEASIBLE"
-                self.qp_scaling = 0.0
-                self.cfg.lambda_pos = self.og_lamda_pos * 1000.0
-                self.check_delta = True
+        u = np.zeros(nq + 1, dtype=np.float64)
+
+        if deadline_missed:
+            self.N_miss += 1
+            if self.N_miss == 1:
+                # One missed deadline: zero-order hold (Eq. 19)
+                u = self.u_prev.copy()
             else:
-                raise
+                # Multiple missed deadlines: deterministic emergency braking (Eq. 16, 19)
+                u[:-1] = np.clip(-self.dq / Tc, -cfg.DDq_max, cfg.DDq_max)
+                u[-1] = np.clip(-self.Dtrajectory_time / Tc, -cfg.DDtrajectory_time_max, cfg.DDtrajectory_time_max)
+                self.u_prev = u.copy()
+            test_unfeasible = 1
+            self.unfeasible_cnt = "UNFEASIBLE"
+            self.qp_scaling = 0.0
+        else:
+            try:
+                u, *_ = quadprog.solve_qp(P, b, A.T, c, 0)
+                self.N_miss = 0
+                self.u_prev = u.copy()
+            except ValueError as err:
+                if "constraints are inconsistent" in str(err):
+                    # QP Infeasible fallback mode: deterministic braking command (Eq. 16, 19)
+                    u[:-1] = np.clip(-self.dq / Tc, -cfg.DDq_max, cfg.DDq_max)
+                    u[-1] = np.clip(-self.Dtrajectory_time / Tc, -cfg.DDtrajectory_time_max, cfg.DDtrajectory_time_max)
+                    self.N_miss = 0
+                    self.u_prev = u.copy()
+                    test_unfeasible = 1
+                    self.unfeasible_cnt = "UNFEASIBLE"
+                    self.qp_scaling = 0.0
+                else:
+                    raise
 
         # Integrate joint state and time scaling
         self.ddq = u[:-1]
@@ -310,19 +348,25 @@ class BCFOptimalController:
         frames_v[-1, :] = twist.linear
         expected_trj_err = np.abs(self.q - nominal_q)
 
+        # Tube expansion and recovery logic (Eq. 20-21)
         if test_unfeasible == 1:
-            for i in range(cfg.delta_q_max.shape[0]):
-                if expected_trj_err[i] > self.delta_q_max[i]:
-                    self.delta_q_max[i] = expected_trj_err[i]
-        elif self.check_delta:
-            count_dev = 0
+            # Braking phase: expand delta_temp to accommodate any excursion outside nominal tube (Eq. 20)
             for i in range(nq):
-                if expected_trj_err[i] <= cfg.delta_q_max[i]:
-                    self.delta_q_max[i] = np.copy(cfg.delta_q_max[i])
-                    count_dev += 1
-            if count_dev == nq:
+                if expected_trj_err[i] > cfg.delta_q_max[i]:
+                    self.delta_q_max[i] = expected_trj_err[i]
+                    self.check_delta = True
+        elif self.check_delta:
+            # Recovery phase: monotonically shrink delta_temp according to Eq. 21
+            # delta_temp[i, k+1] = max(delta_nom[i], min(delta_temp[i, k], |e[i, k]|))
+            for i in range(nq):
+                self.delta_q_max[i] = max(
+                    cfg.delta_q_max[i],
+                    min(self.delta_q_max[i], expected_trj_err[i]),
+                )
+            # Recovery phase terminates when |e_{i,k}| <= delta_{nom,i} for all joints
+            if np.all(expected_trj_err <= cfg.delta_q_max):
                 self.check_delta = False
-                self.cfg.lambda_pos = self.og_lamda_pos
+                self.delta_q_max = np.copy(cfg.delta_q_max)
                 self.unfeasible_cnt = "FEASIBLE"
             else:
                 self.unfeasible_cnt = "RECOVERING"

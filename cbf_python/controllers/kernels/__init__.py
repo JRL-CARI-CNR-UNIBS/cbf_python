@@ -13,6 +13,7 @@ from cbf_python.controllers.kernels.ssm_cbf_acc import (
 from cbf_python.controllers.kernels.numba_kernels import (
     build_free_forced_one_step,
     fill_scaling_rows,
+    fill_pos_rows,
     fill_tube_rows,
     fill_vel_rows,
     fill_acc_rows,
@@ -35,6 +36,7 @@ __all__ = [
     "compute_h_and_constraints_numba",
     "build_free_forced_one_step",
     "fill_scaling_rows",
+    "fill_pos_rows",
     "fill_tube_rows",
     "fill_vel_rows",
     "fill_acc_rows",

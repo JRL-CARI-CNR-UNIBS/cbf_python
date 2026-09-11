@@ -67,14 +67,19 @@ class UR10CBFController:
         self.dq = np.zeros(nq, dtype=np.float64)
         self.ddq = np.zeros(nq, dtype=np.float64)
 
+        self.q_min = np.copy(self.model.lowerPositionLimit)
+        self.q_max = np.copy(self.model.upperPositionLimit)
+
         self.useCbf = useCbf
         if useCbf:
-            self.n_constraints = 2 * 2 * nq + 18 * len(self.frames_ids) + 4
+            self.n_constraints = 2 * 3 * nq + 18 * len(self.frames_ids) + 4
         else:
-            self.n_constraints = 2 * 2 * nq
+            self.n_constraints = 2 * 3 * nq
 
         self.A = np.zeros((self.n_constraints, nq), dtype=np.float64)
         self.c = np.zeros(self.n_constraints, dtype=np.float64)
+        self.u_prev = np.zeros(nq, dtype=np.float64)
+        self.N_miss = 0
 
     def reset_state(self, q0: np.ndarray, dq0: Optional[np.ndarray] = None) -> None:
         """Reset internal joint state."""
@@ -84,6 +89,8 @@ class UR10CBFController:
         else:
             self.dq = np.array(dq0, dtype=np.float64).copy()
         self.ddq = np.zeros_like(self.q)
+        self.u_prev = np.zeros_like(self.q)
+        self.N_miss = 0
 
     def matrix_ensemble(
         self,
@@ -107,6 +114,7 @@ class UR10CBFController:
         t: float = 0.0,
         goal_dtwist: Optional[np.ndarray] = None,
         gamma: Optional[float] = None,
+        deadline_missed: bool = False,
     ) -> Dict[str, Any]:
         """Execute one Cartesian PID CBF control step."""
         if goal_dtwist is None:
@@ -175,25 +183,42 @@ class UR10CBFController:
         if self.useCbf and len(obstacle_positions) > 0:
             row, h_min, d_min, vr_min, vh_min = assemble_qp_PID_problem(
                 self.A, self.c,
+                self.FreePos, self.ForcedPos,
                 self.FreeVel, self.ForcedVel,
                 self.q, self.dq,
+                self.q_min, self.q_max,
                 self.Dq_max, self.DDq_max,
                 frames_p, frames_v, Jlins, dJlins,
                 obstacle_positions, obstacle_velocities, obstacle_accelerations,
                 self.Tr, self.a_s, self.C, self.gamma, 1e-12, self.useCbf,
             )
 
-        if self.useCbf and self.A.shape[0] > 0:
+        if deadline_missed:
+            self.N_miss += 1
+            if self.N_miss == 1:
+                # One missed deadline: zero-order hold (Eq. 19)
+                ddq = self.u_prev.copy()
+            else:
+                # Multiple missed deadlines: deterministic emergency braking (Eq. 16, 19)
+                ddq = np.clip(-self.dq / self.Tc, -self.DDq_max, self.DDq_max)
+                self.u_prev = ddq.copy()
+        elif self.useCbf and self.A.shape[0] > 0:
             try:
                 ddq, *_ = quadprog.solve_qp(P, b, self.A.T, self.c, 0)
+                self.N_miss = 0
+                self.u_prev = ddq.copy()
             except ValueError as err:
                 if "constraints are inconsistent" in str(err):
-                    # Infeasible fallback: damping
-                    ddq = -10.0 * self.dq
+                    # Infeasible fallback: deterministic bang-bang braking (Eq. 16, 19)
+                    ddq = np.clip(-self.dq / self.Tc, -self.DDq_max, self.DDq_max)
+                    self.N_miss = 0
+                    self.u_prev = ddq.copy()
                 else:
                     raise
         else:
             ddq = damped_pinv_svd(J) @ (dtwist_tool - dJ @ self.dq)
+            self.N_miss = 0
+            self.u_prev = ddq.copy()
 
         self.q = self.q + self.dq * self.Tc + 0.5 * ddq * (self.Tc ** 2)
         self.dq = self.dq + ddq * self.Tc
@@ -231,3 +256,4 @@ class UR10CBFController:
         self.A = None
         self.c = None
         self.q = self.dq = self.ddq = None
+        self.q_min = self.q_max = None

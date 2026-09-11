@@ -8,6 +8,7 @@ from numba import njit
 import pinocchio as pin
 
 from cbf_python.controllers.kernels.numba_kernels import (
+    fill_pos_rows,
     fill_vel_rows,
     fill_acc_rows,
     append_cbf_rows_loop,
@@ -31,8 +32,10 @@ def assemble_qp_PID_problem(
     # Outputs (in-place)
     A, c,
     # Inputs
+    FreePos, ForcedPos,
     FreeVel, ForcedVel,
     q, dq,
+    q_min, q_max,
     Dq_max, DDq_max,
     # CBF inputs
     frames_p, frames_vlin, Jlins, dJlins, obs_p, obs_v, obs_a,
@@ -51,6 +54,7 @@ def assemble_qp_PID_problem(
         x0[i] = q[i]
         x0[nq + i] = dq[i]
 
+    row = fill_pos_rows(A, c, row, nq, FreePos, ForcedPos, x0, q_min, q_max)
     row = fill_vel_rows(A, c, row, nq, FreeVel, ForcedVel, x0, Dq_max)
     row = fill_acc_rows(A, c, row, nq, DDq_max)
 
