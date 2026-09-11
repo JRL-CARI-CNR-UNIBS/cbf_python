@@ -98,12 +98,13 @@ def test_lie_derivatives_consistency():
     obs_acc = np.array([0.0, 0.0, 0.0])
     Tr, a_s, C, atol = 0.15, 2.5, 0.25, 1e-12
 
-    h_val, Lf_h, Lg_h, d, vr, vh = compute_h_and_lie_numba(
+    h_val, Lf_h, Lg_h, d, vr, vh, h_chi = compute_h_and_lie_numba(
         p_r, p_h, v_r, v_obs, Tr, a_s, C, obs_acc, atol
     )
     assert d > 0.0
     assert isinstance(Lf_h, float)
     assert Lg_h.shape == (3,)
+    assert isinstance(h_chi, float)
 
 
 def test_constraint_assembly_vectorization():
@@ -116,6 +117,7 @@ def test_constraint_assembly_vectorization():
     obs_acc = np.array([0.01, 0.0, 0.0])
     Tr, a_s, C, atol = 0.15, 2.5, 0.25, 1e-12
     gamma = 5.0
+    delta_H = 0.15
 
     np.random.seed(42)
     Jlin = np.random.randn(3, nq)
@@ -123,15 +125,15 @@ def test_constraint_assembly_vectorization():
     dq = np.random.randn(nq)
 
     h, row, bound, d, vr, vh = compute_h_and_constraints_numba(
-        p_r, p_h, v_r, v_obs, Tr, a_s, C, obs_acc, atol, Jlin, dJlin, dq, gamma, True
+        p_r, p_h, v_r, v_obs, Tr, a_s, C, obs_acc, atol, Jlin, dJlin, dq, gamma, True, delta_H
     )
 
-    _, Lf_h, Lg_h, _, _, _ = compute_h_and_lie_numba(
+    _, Lf_h, Lg_h, _, _, _, h_chi = compute_h_and_lie_numba(
         p_r, p_h, v_r, v_obs, Tr, a_s, C, obs_acc, atol
     )
 
     row_expected = Lg_h @ Jlin
-    bound_expected = -(Lg_h @ (dJlin @ dq)) - Lf_h - gamma * h
+    bound_expected = -(Lg_h @ (dJlin @ dq)) - Lf_h - gamma * h - h_chi * delta_H
 
     assert_allclose(row, row_expected, rtol=RTOL, atol=ATOL)
     assert_allclose(bound, bound_expected, rtol=RTOL, atol=ATOL)

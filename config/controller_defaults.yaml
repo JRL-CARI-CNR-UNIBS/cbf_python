@@ -1,6 +1,12 @@
 # Default parameters for CBF Optimal Controller
 Tc: 0.002
 C: 0.25
+C_0: 0.10
+beta: 3.291
+T_f_bar: 0.3
+sigma_p: 0.015
+sigma_v: 0.072
+sigma_a: 0.196
 Tr: 0.15
 a_s: 2.5
 gamma: 5.949803744662194

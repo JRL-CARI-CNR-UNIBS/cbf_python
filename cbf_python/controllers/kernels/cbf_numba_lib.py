@@ -40,6 +40,7 @@ def assemble_qp_PID_problem(
     # CBF inputs
     frames_p, frames_vlin, Jlins, dJlins, obs_p, obs_v, obs_a,
     Tr, a_s, C, gamma, atol, use_CBF,
+    delta_H=0.0,
 ):
     """Assemble constraints for Cartesian PID CBF controller."""
     nq = q.size
@@ -60,7 +61,8 @@ def assemble_qp_PID_problem(
 
     if frames_p.size != 0 and obs_p.size != 0:
         row, hmin, dmin, vr_min, vh_min, htest, dtest, i_h, i_d = append_cbf_rows_loop(
-            A, c, row, frames_p, frames_vlin, obs_p, obs_v, obs_a, Jlins, dJlins, dq, Tr, a_s, C, gamma, atol, use_CBF, -1
+            A, c, row, frames_p, frames_vlin, obs_p, obs_v, obs_a, Jlins, dJlins, dq, Tr, a_s, C, gamma, atol, use_CBF, -1,
+            delta_H
         )
     else:
         hmin = 1e9

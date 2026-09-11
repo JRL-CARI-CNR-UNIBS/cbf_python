@@ -140,6 +140,7 @@ def append_cbf_rows_loop(
     obs_p, obs_v, obs_a,    # (nO, 3)
     Jlins, dJlins, dq,      # (nF, 3, nq)
     Tr, a_s, C, gamma, atol, HAS_CBF, keypoint_to_log,
+    delta_H=0.0,
 ):
     """Loop over all monitored robot control points and obstacles to assemble CBF constraints."""
     hmin = 1e9
@@ -166,7 +167,7 @@ def append_cbf_rows_loop(
             ov = obs_v[o]
             oa = obs_a[o]
             h, row_vec, bound, d, vr, vh = compute_h_and_constraints_numba(
-                p_bt, op, vlin, ov, Tr, a_s, C, oa, atol, Jlin, dJlin, dq, gamma, HAS_CBF
+                p_bt, op, vlin, ov, Tr, a_s, C, oa, atol, Jlin, dJlin, dq, gamma, HAS_CBF, delta_H
             )
             # If keypoint_to_log is non-negative, select that keypoint; otherwise select global minimum
             if keypoint_to_log >= 0:
@@ -261,6 +262,7 @@ def assemble_qp_inplace(
     Dq_max, DDq_max, delta_q_max,
     frames_p, frames_vlin, Jlins, dJlins, obs_p, obs_v, obs_a,
     Tr, a_s, C, gamma, DDtraj_max, atol, ref_scaling, HAS_CBF, keypoint_to_log,
+    delta_H=0.0,
 ):
     """Zero out arrays, assemble scaling/pos/tube/velocity/acceleration/CBF constraints, and assemble cost."""
     nq = q.size
@@ -285,7 +287,7 @@ def assemble_qp_inplace(
     if frames_p.size != 0 and obs_p.size != 0:
         row, hmin, dmin, vr_min, vh_min, htest, dtest, i_h, i_d = append_cbf_rows_loop(
             A, c, row, frames_p, frames_vlin, obs_p, obs_v, obs_a, Jlins, dJlins, dq, Tr, a_s, C, gamma, atol, HAS_CBF,
-            keypoint_to_log
+            keypoint_to_log, delta_H
         )
     else:
         hmin = 1e9

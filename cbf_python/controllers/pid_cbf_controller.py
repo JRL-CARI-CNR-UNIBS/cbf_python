@@ -35,6 +35,13 @@ class UR10CBFController:
         Tr: float = 0.5,
         a_s: float = 4.5,
         C: float = 0.25,
+        C_0: Optional[float] = None,
+        beta: float = 3.291,
+        T_f_bar: float = 0.3,
+        sigma_p: float = 0.015,
+        sigma_v: float = 0.072,
+        sigma_a: float = 0.196,
+        delta_H: Optional[float] = None,
         Dq_max: Optional[np.ndarray] = None,
         DDq_max: Optional[np.ndarray] = None,
     ) -> None:
@@ -54,6 +61,16 @@ class UR10CBFController:
         self.Tr = float(Tr)
         self.a_s = float(a_s)
         self.C = float(C)
+        self.C_0 = float(C_0) if C_0 is not None else self.C
+        self.beta = float(beta)
+        self.T_f_bar = float(T_f_bar)
+        self.sigma_p = float(sigma_p)
+        self.sigma_v = float(sigma_v)
+        self.sigma_a = float(sigma_a)
+        if delta_H is not None:
+            self.delta_H = float(delta_H)
+        else:
+            self.delta_H = self.beta * (self.sigma_p + self.sigma_v * self.T_f_bar + 0.5 * self.sigma_a * (self.T_f_bar ** 2))
 
         nq = self.model.nq
         self.Dq_max = Dq_max if Dq_max is not None else np.pi * np.ones(nq, dtype=np.float64) * np.pi
@@ -190,7 +207,8 @@ class UR10CBFController:
                 self.Dq_max, self.DDq_max,
                 frames_p, frames_v, Jlins, dJlins,
                 obstacle_positions, obstacle_velocities, obstacle_accelerations,
-                self.Tr, self.a_s, self.C, self.gamma, 1e-12, self.useCbf,
+                self.Tr, self.a_s, self.C_0, self.gamma, 1e-12, self.useCbf,
+                self.delta_H,
             )
 
         if deadline_missed:

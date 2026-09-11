@@ -367,26 +367,17 @@ def compute_g_Lie_terms_numba(
     return g, Lie_f_h, Lie_g_h
 
 
-@njit(
-    (
-        float64[:],  # translation_bt (3,)
-        float64[:],  # obs_pos       (3,)
-        float64[:],  # vel_lineare   (3,)
-        float64[:],  # v_obs         (3,)
-        float64,     # Tr
-        float64,     # a_s
-        float64,     # C
-        float64[:],  # obs_acc
-        float64,     # atol
-    ),
-    cache=True,
-)
+@njit(cache=True, fastmath=True)
 def compute_h_and_lie_numba(translation_bt, obs_pos, vel_lineare, v_obs, Tr, a_s, C, obs_acc, atol):
     """
     Returns:
         h: float
         Lie_f_h: float
         Lie_g_h: (3,) ndarray
+        d: float
+        v_r: float
+        v_h: float
+        h_chi: float (sensitivity dh/dd)
     """
     r0 = translation_bt[0] - obs_pos[0]
     r1 = translation_bt[1] - obs_pos[1]
@@ -417,42 +408,26 @@ def compute_h_and_lie_numba(translation_bt, obs_pos, vel_lineare, v_obs, Tr, a_s
     Lie_g_h[0] += Jh_psi[2] * Jpsi_g[2, 0]; Lie_g_h[1] += Jh_psi[2] * Jpsi_g[2, 1]; Lie_g_h[2] += Jh_psi[2] * Jpsi_g[2, 2]
     Lie_g_h[0] += Jh_psi[3] * Jpsi_g[3, 0]; Lie_g_h[1] += Jh_psi[3] * Jpsi_g[3, 1]; Lie_g_h[2] += Jh_psi[3] * Jpsi_g[3, 2]
 
-    return h, Lie_f_h, Lie_g_h, d, v_r, v_h
+    h_chi = Jh_psi[0]
+    return h, Lie_f_h, Lie_g_h, d, v_r, v_h, h_chi
 
 # ------------------------------------------------------------
 # 7) Full constraint assembly
 # ------------------------------------------------------------
-@njit(
-    (
-        float64[:],    # translation_bt (3,)
-        float64[:],    # obs_pos       (3,)
-        float64[:],    # vel_lineare   (3,)
-        float64[:],    # v_obs         (3,)
-        float64,       # Tr
-        float64,       # a_s
-        float64,       # C
-        float64[:],    # obs_acc
-        float64,       # atol
-        float64[:, :], # Jlin  (3 x n)
-        float64[:, :], # dJlin (3 x n)
-        float64[:],    # dq    (n,)
-        float64,       # gamma
-        boolean
-    ),
-    cache=True
-)
+@njit(cache=True, fastmath=True)
 def compute_h_and_constraints_numba(
     translation_bt, obs_pos, vel_lineare, v_obs,
-    Tr, a_s, C, obs_acc, atol, Jlin, dJlin, dq, gamma, HAS_CBF
+    Tr, a_s, C, obs_acc, atol, Jlin, dJlin, dq, gamma, HAS_CBF,
+    delta_H=0.0
 ):
     """
     Returns:
-        h, constraint_row, constraint_bound, Lie_f_h, Lie_g_h
+        h, constraint_row, constraint_bound, d, vr, vh
     Where:
         constraint_row  = Lie_g_h @ Jlin
-        constraint_bound= -(Lie_g_h @ dJlin @ dq) - Lie_f_h - gamma*h
+        constraint_bound= -(Lie_g_h @ dJlin @ dq) - Lie_f_h - gamma*h - h_chi*delta_H
     """
-    h, Lie_f_h, Lie_g_h, d, vr, vh = compute_h_and_lie_numba(
+    h, Lie_f_h, Lie_g_h, d, vr, vh, h_chi = compute_h_and_lie_numba(
         translation_bt, obs_pos, vel_lineare, v_obs, Tr, a_s, C, obs_acc, atol
     )
 
@@ -479,5 +454,5 @@ def compute_h_and_constraints_numba(
         for j in range(n):
             lg_dJ_dq += tmp[j] * dq[j]
 
-        constraint_bound = -lg_dJ_dq - Lie_f_h - gamma * h
-    return h, constraint_row, constraint_bound, d,vr, vh
+        constraint_bound = -lg_dJ_dq - Lie_f_h - gamma * h - h_chi * delta_H
+    return h, constraint_row, constraint_bound, d, vr, vh

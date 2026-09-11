@@ -21,7 +21,13 @@ class ControllerConfig:
     """Configuration parameters for the CBF optimal controller."""
 
     Tc: float = 2e-3                          # Control period [s]
-    C: float = 0.25                           # Safety margin [m]
+    C: float = 0.25                           # Safety margin [m] (legacy lumped margin)
+    C_0: float = 0.10                         # Static perception uncertainty margin [m]
+    beta: float = 3.291                       # Confidence interval coefficient (99.9% Gaussian)
+    T_f_bar: float = 0.3                      # Upper bound on stopping time [s]
+    sigma_p: float = 0.015                    # Position measurement noise std dev [m]
+    sigma_v: float = 0.072                    # Velocity estimation noise std dev [m/s]
+    sigma_a: float = 0.196                    # Acceleration estimation noise std dev [m/s^2]
     Tr: float = 0.15                          # Reaction time [s]
     a_s: float = 2.5                          # Robot maximum deceleration [m/s^2]
     gamma: float = 5.0                        # CBF class-K gain
@@ -50,6 +56,11 @@ class ControllerConfig:
     tool_frame: str = "tool0"
     elbow_frame: str = "forearm_link"
 
+    @property
+    def delta_H(self) -> float:
+        """Maximum anticipated error in human-robot distance estimation (Eq. 9)."""
+        return self.beta * (self.sigma_p + self.sigma_v * self.T_f_bar + 0.5 * self.sigma_a * (self.T_f_bar ** 2))
+
     def compute_missed_cycle_margin(
         self,
         v_r_bar: float = 1.0,
@@ -67,8 +78,9 @@ class ControllerConfig:
         a_r_bar: float = 2.5,
         a_h_bar: float = 4.5,
     ) -> float:
-        """Compute C^rob = C + Delta d_miss according to Eq. 18."""
-        return self.C + self.compute_missed_cycle_margin(v_r_bar, v_h_bar, a_r_bar, a_h_bar)
+        """Compute C^rob = C_0 + Delta d_miss according to Eq. 18."""
+        margin = self.C_0 if self.C_0 is not None else self.C
+        return margin + self.compute_missed_cycle_margin(v_r_bar, v_h_bar, a_r_bar, a_h_bar)
 
     def __str__(self) -> str:
         """Return formatted string representation of controller configuration."""
@@ -258,6 +270,8 @@ class BCFOptimalController:
             self.Dtrajectory_time = 0.0
 
         # Assemble QP in-place using Numba kernel
+        margin_C0 = cfg.C_0 if getattr(cfg, "C_0", None) is not None else cfg.C
+        delta_H = getattr(cfg, "delta_H", 0.0)
         row, h_min, d_min, vr_min, vh_min, htest, dtest, i_h, i_d = assemble_qp_inplace(
             self.P_vel, self.b_pos, self.b_vel, self.b_scaling,
             self.A, self.c,
@@ -268,8 +282,8 @@ class BCFOptimalController:
             self.q_min, self.q_max,
             cfg.Dq_max, cfg.DDq_max, self.delta_q_max,
             frames_p, frames_v, Jlins, dJlins, obs_pos, obs_vel, obs_acc,
-            cfg.Tr, cfg.a_s, cfg.C, cfg.gamma, cfg.DDtrajectory_time_max, 1e-12, self.qp_scaling, self.useCbf,
-            self.keypoint_to_log,
+            cfg.Tr, cfg.a_s, margin_C0, cfg.gamma, cfg.DDtrajectory_time_max, 1e-12, self.qp_scaling, self.useCbf,
+            self.keypoint_to_log, delta_H,
         )
 
         if row < self.n_constraints:

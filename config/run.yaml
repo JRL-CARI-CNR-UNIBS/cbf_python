@@ -25,6 +25,13 @@ common:
 
   controller:
     Tc: 0.002
+    C: 0.25
+    C_0: 0.250
+    beta: 3.291
+    T_f_bar: 0.3
+    sigma_p: 0.015
+    sigma_v: 0.072
+    sigma_a: 0.196
     gamma: 5.949803744662194
     lambda_pos: 2098.0150948315577
     lambda_vel: 0.34298548889519453

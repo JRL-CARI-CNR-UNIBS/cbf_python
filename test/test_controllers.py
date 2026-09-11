@@ -354,3 +354,87 @@ def test_deadline_missed_cycles(model_wrapper):
     )
     assert ctrl.N_miss == 0
 
+
+def test_disturbance_rejection_parameters_and_delta_H():
+    """Verify ControllerConfig disturbance rejection parameters and Delta_H computation (Eq. 9)."""
+    cfg = ControllerConfig()
+    assert cfg.C_0 == 0.10
+    assert cfg.beta == 3.291
+    assert cfg.T_f_bar == 0.3
+    assert cfg.sigma_p == 0.015
+    assert cfg.sigma_v == 0.072
+    assert cfg.sigma_a == 0.196
+
+    # Expected: beta * (sigma_p + sigma_v * T_f_bar + 0.5 * sigma_a * T_f_bar^2)
+    expected_delta_H = 3.291 * (0.015 + 0.072 * 0.3 + 0.5 * 0.196 * (0.3 ** 2))
+    assert np.isclose(cfg.delta_H, expected_delta_H, atol=1e-6)
+    assert np.isclose(cfg.delta_H, 0.149477, atol=1e-4)
+
+
+def test_disturbance_rejection_yaml_loading():
+    """Verify that YAML configuration files load C_0 and uncertainty parameters."""
+    from cbf_python.utils.config_loader import load_yaml, populate_controller_config
+
+    data = load_yaml("controller_defaults.yaml")
+    assert "C_0" in data
+    assert data["C_0"] == 0.10
+    assert data["beta"] == 3.291
+    assert data["T_f_bar"] == 0.3
+
+    cfg = ControllerConfig()
+    populate_controller_config(cfg, data)
+    assert cfg.C_0 == 0.10
+    assert cfg.beta == 3.291
+    assert np.isclose(cfg.delta_H, 0.149477, atol=1e-4)
+
+
+def test_controllers_execution_with_disturbance_rejection(model_wrapper):
+    """Verify Method I and Method II execute with C_0 and delta_H enabled."""
+    import pinocchio as pin
+
+    # Test Method II (BCFOptimalController)
+    cfg = ControllerConfig(C_0=0.10)
+    ctrl_optimal = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
+    ctrl_optimal.reset_state(HOME)
+
+    obs_pos = np.array([[0.8, 0.2, 0.4]])
+    obs_vel = np.array([[-0.1, 0.0, 0.0]])
+    obs_acc = np.array([[0.0, 0.0, 0.0]])
+
+    out_opt = ctrl_optimal.step(
+        obs_pos=obs_pos,
+        obs_vel=obs_vel,
+        obs_acc=obs_acc,
+        nominal_q=HOME,
+        nominal_Dq=np.zeros(6),
+        nominal_DDq=np.zeros(6),
+    )
+    assert "ddq" in out_opt
+    assert out_opt["ddq"].shape == (6,)
+
+    # Test Method I (UR10CBFController)
+    model = model_wrapper.model
+    ctrl_pid = UR10CBFController(
+        model=model,
+        tool_frame_name="ur10e_wrist_3_joint",
+        C_0=0.10,
+        useCbf=True,
+    )
+    ctrl_pid.reset_state(HOME)
+
+    data = model.createData()
+    pin.forwardKinematics(model, data, HOME)
+    pin.updateFramePlacements(model, data)
+    goal_pose = data.oMf[model.getFrameId("ur10e_wrist_3_joint")]
+
+    out_pid = ctrl_pid.step(
+        goal_pose=goal_pose,
+        twist_goal=np.zeros(6),
+        obstacle_positions=obs_pos,
+        obstacle_velocities=obs_vel,
+        obstacle_accelerations=obs_acc,
+    )
+    assert "ddq" in out_pid
+    assert out_pid["ddq"].shape == (6,)
+
+

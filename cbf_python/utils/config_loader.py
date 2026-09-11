@@ -136,6 +136,18 @@ def populate_controller_config(
         cfg.Tc = float(data["Tc"])
     if "C" in data:
         cfg.C = float(data["C"])
+    if "C_0" in data:
+        cfg.C_0 = float(data["C_0"])
+    if "beta" in data:
+        cfg.beta = float(data["beta"])
+    if "T_f_bar" in data:
+        cfg.T_f_bar = float(data["T_f_bar"])
+    if "sigma_p" in data:
+        cfg.sigma_p = float(data["sigma_p"])
+    if "sigma_v" in data:
+        cfg.sigma_v = float(data["sigma_v"])
+    if "sigma_a" in data:
+        cfg.sigma_a = float(data["sigma_a"])
     if "Tr" in data:
         cfg.Tr = float(data["Tr"])
     if "a_s" in data:
