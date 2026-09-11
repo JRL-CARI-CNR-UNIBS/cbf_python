@@ -1,0 +1,49 @@
+# GPR Dataset Builder Configuration (Lexicographic Selection)
+
+database:
+  use_sqlite: true
+  sqlite_path: "optuna_gpr_grid.db"
+  url: "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
+  study_prefix: "gpr_slice"
+
+# Grid density selection (enables comparative studies in the paper)
+grid_selection:
+  # Mode: 'all' (full oversampled grid), 'coarse' (subsampled), 'medium', or 'custom'
+  mode: "all"
+  subsample_h_step: 1       # Take every N-th h value (e.g. 2 for half density)
+  subsample_v_step: 1       # Take every N-th v value
+  min_h: -0.05
+  max_h: 0.80
+  min_v: -0.4
+  max_v: 1.5
+
+# Lexicographical Multi-Objective Selection Parameters
+lexicographic:
+  # Tier 1: Safety Filter Configuration
+  safety:
+    mode: "quantile"        # 'quantile' (scale-invariant, recommended) or 'threshold'
+    q0: 0.10                # Base quantile of safest trials at h = 0 (top 10% highest S_index)
+    beta: 1.5               # Quantile expansion slope per meter of margin h
+    q_min: 0.05             # Minimum quantile clamp
+    q_max: 0.85             # Maximum quantile clamp (always discard bottom 15% unsafe)
+    min_safety_index: 0.10  # Minimum allowable S_index (if mode is set to 'threshold')
+
+  # Tier 2: Smoothness / Jerk Gate
+  smoothness:
+    max_tv_cart: 25.0       # Maximum acceptable Total Variation in Cartesian error [mm]
+    quantile: 0.70          # Retain top 70% smoothest trials in candidate pool
+
+  # Tier 3: Performance Extraction Pool
+  performance:
+    top_ratio: 0.85         # Keep candidates achieving at least 85% of peak performance
+
+  # Tier 4: Infeasibility Decider
+  infeasibility:
+    primary_key: "user_attrs_unfeasible_count"
+    secondary_key: "values_performance"
+
+output:
+  output_csv: "gpr_training_dataset.csv"
+  log_transform_lambdas: true   # Save both raw and log10 transformed weights
+  save_diagnostics_plot: true
+

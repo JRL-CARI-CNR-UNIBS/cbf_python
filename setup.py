@@ -34,6 +34,7 @@ setup(
             'run_optimization = cbf_python.examples.run_optimization:main',
             'run_optimization_poly = cbf_python.examples.run_optimization_poly:main',
             'run_optimization_gpr = cbf_python.examples.run_optimization_gpr:main',
+            'build_gpr_dataset = cbf_python.examples.build_gpr_dataset:main',
             'run_optimization_obstructive = cbf_python.examples.run_optimization_obstructive:main',
             'plot_metrics = cbf_python.examples.plot_metrics:plot_comparison',
             'rebuild_dataset = cbf_python.examples.rebuild_dataset:main',

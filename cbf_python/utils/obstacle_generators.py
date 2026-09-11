@@ -42,8 +42,16 @@ def generate_d_value(h_ref: float, v_ref: float, Tr: float = 0.15, a_s: float = 
 def compute_required_d(
     h: float, v_r: float, v_h: float, a_h: float, Tr: float = 0.15, a_s: float = 2.5, C: float = 0.25
 ) -> float:
-    """Compute required distance d analytically for target margin h."""
+    """Compute required distance d analytically for target margin h.
+    
+    Inverts h_and_jacobian_numba:
+      - For h >= 0: h = d_min - C  =>  d = h + C - base_dmin
+      - For h < 0:  h = (d_min - C) * (1 - Tr * v_r / C)  =>  d = h / (1 - Tr * v_r / C) + C - base_dmin
+    """
     base_dmin, _ = dmin_and_jacobian_numba(0.0, v_r, v_h, a_h, Tr, a_s, 1e-9)
+    if h < 0.0:
+        denom = 1.0 - (Tr * v_r / C)
+        return float(h / denom + C - base_dmin)
     return float(h + C - base_dmin)
 
 

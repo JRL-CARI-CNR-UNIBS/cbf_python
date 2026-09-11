@@ -1,0 +1,63 @@
+# Optuna GPR Grid Optimization Configuration
+
+database:
+  url: "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
+  use_sqlite_fallback: true
+  sqlite_path: "optuna_gpr_grid.db"
+
+study:
+  name_prefix: "gpr_slice"
+  n_trials: 1000
+  n_jobs: 4
+  timeout: 300.0
+  sampler: "NSGAIIISampler"  # Multi-objective sampler for 4D Pareto fronts
+
+episode:
+  Tc: 0.002
+  duration: 2.0  # 2.0 second high-resolution encounter slice
+  alpha_cart_error: 2.0  # Weight on Cartesian path error inside performance metric
+  warning_h_threshold: 0.20  # Distance threshold [m] inside which directional velocity is penalized
+  cruise_t_start: 1.30  # Time into nominal trajectory for high-speed cruising flight (~0.69 m/s)
+
+# Oversampled 2D grid definition for interaction regimes (h, v_rel)
+grid:
+  # Safety margin h [m]: dense sampling near boundary (h <= 0.1), expanding towards open space
+  h_values:
+    - -0.05
+    - -0.025
+    - 0.0
+    - 0.025
+    - 0.05
+    - 0.075
+    - 0.10
+    - 0.15
+    - 0.20
+    - 0.25
+    - 0.30
+    - 0.40
+    - 0.50
+    - 0.65
+    - 0.80
+
+  # Relative closing velocity v_rel [m/s]: from separating to fast closing
+  v_values:
+    - -0.4
+    - -0.2
+    - 0.0
+    - 0.2
+    - 0.4
+    - 0.6
+    - 0.8
+    - 1.0
+    - 1.2
+    - 1.5
+
+# Controller Hyperparameter Optimization Search Ranges
+ranges:
+  lambda_pos: [10.0, 100000.0]
+  lambda_vel: [0.001, 1000.0]
+  lambda_acc: [1.0e-15, 1.0e-4]
+  lambda_scaling: [10.0, 1000.0]
+  gamma: [0.1, 20.0]
+  delta_deg: [1.0, 10.0]
+
