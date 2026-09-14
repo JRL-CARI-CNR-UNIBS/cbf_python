@@ -44,95 +44,171 @@ def select_lexicographic_trial(
     h_target: float,
     lex_cfg: Dict[str, Any],
 ) -> pd.Series:
-    """Select the best trial from a multi-objective study using the 4-tier lexicographical criterion."""
+    """Select the best trial from a multi-objective study using lexicographical criteria.
+
+    Supports:
+      - Hard switching (hard_switching=True): Discrete order swap at h_crit.
+          * h < h_crit:  Safety -> Smoothness -> Performance -> Infeasibility
+          * h >= h_crit: Performance -> Smoothness -> Safety -> Infeasibility
+      - Smooth switching (hard_switching=False): Continuous adaptive relaxation of tolerances
+        as a function of safety margin h.
+    """
     if df.empty:
         raise ValueError("Cannot select from an empty trials DataFrame.")
 
-    # -------------------------------------------------------------
-    # TIER 1: Safety Gate (Adaptive Quantile or Threshold)
-    # -------------------------------------------------------------
-    safe_cfg = lex_cfg.get("safety", {})
-    mode = safe_cfg.get("mode", "quantile")
+    hard_switching = bool(lex_cfg.get("hard_switching", True))
+    h_crit = float(lex_cfg.get("h_crit", 0.20))
+
     safe_col = "values_safety_index_min" if "values_safety_index_min" in df.columns else "values_safety_penalty"
     is_safety_index = (safe_col == "values_safety_index_min")
+    infeas_col = (
+        "user_attrs_unfeasible_count"
+        if "user_attrs_unfeasible_count" in df.columns
+        else "values_unfeasible_count"
+    )
 
-    if mode == "quantile":
+    if hard_switching:
+        hard_cfg = lex_cfg.get("hard_regime", {})
+        if h_target < h_crit:
+            # -------------------------------------------------------------
+            # HAZARDOUS / PROXIMITY REGIME (h < h_crit)
+            # Priority: Safety -> Smoothness -> Performance -> Infeasibility
+            # -------------------------------------------------------------
+            prox_cfg = hard_cfg.get("proximity", {})
+            safe_q = float(prox_cfg.get("safety_quantile", 0.15))
+            smooth_q = float(prox_cfg.get("smoothness_quantile", 0.60))
+            max_tv = float(prox_cfg.get("max_tv_cart", 25.0))
+            perf_ratio = float(prox_cfg.get("performance_top_ratio", 0.75))
+
+            # Tier 1: Safety Gate (strict)
+            if is_safety_index:
+                safety_cutoff = float(df[safe_col].quantile(1.0 - safe_q))
+                c1 = df[df[safe_col] >= safety_cutoff].copy()
+            else:
+                safety_cutoff = float(df[safe_col].quantile(safe_q))
+                c1 = df[df[safe_col] <= safety_cutoff].copy()
+            if c1.empty:
+                c1 = df.copy()
+
+            # Tier 2: Smoothness Gate (strict jerk limit)
+            tv_cutoff = min(max_tv, float(c1["values_tv_cart"].quantile(smooth_q)))
+            c2 = c1[c1["values_tv_cart"] <= tv_cutoff].copy()
+            if c2.empty:
+                c2 = c1.copy()
+
+            # Tier 3: Performance Extraction Pool
+            p_max = float(c2["values_performance"].max())
+            p_min = float(c2["values_performance"].min())
+            perf_thresh = p_max * perf_ratio if p_max > 0 else p_max - (p_max - p_min) * (1.0 - perf_ratio)
+            c3 = c2[c2["values_performance"] >= perf_thresh].copy()
+            if c3.empty:
+                c3 = c2.copy()
+
+            # Tier 4: Infeasibility Decider & Tie-Breaker
+            best_row = c3.sort_values(
+                by=[infeas_col, "values_performance", "values_tv_cart"],
+                ascending=[True, False, True],
+            ).iloc[0]
+            return best_row
+        else:
+            # -------------------------------------------------------------
+            # NOMINAL / SAFE REGIME (h >= h_crit)
+            # Priority: Performance -> Smoothness -> Safety -> Infeasibility
+            # -------------------------------------------------------------
+            nom_cfg = hard_cfg.get("nominal", {})
+            perf_ratio = float(nom_cfg.get("performance_top_ratio", 0.95))
+            smooth_q = float(nom_cfg.get("smoothness_quantile", 0.70))
+            min_safe_q = float(nom_cfg.get("min_safety_quantile", 0.90))
+
+            # Tier 1: Performance Gate (demand top-tier throughput first)
+            p_max = float(df["values_performance"].max())
+            p_min = float(df["values_performance"].min())
+            perf_thresh = p_max * perf_ratio if p_max > 0 else p_max - (p_max - p_min) * (1.0 - perf_ratio)
+            c1 = df[df["values_performance"] >= perf_thresh].copy()
+            if c1.empty:
+                c1 = df.copy()
+
+            # Tier 2: Smoothness Gate (pick smoothest motions among fast candidates)
+            tv_cutoff = float(c1["values_tv_cart"].quantile(smooth_q))
+            c2 = c1[c1["values_tv_cart"] <= tv_cutoff].copy()
+            if c2.empty:
+                c2 = c1.copy()
+
+            # Tier 3: Safety Sanity Check (discard bottom extreme unsafe outliers)
+            if is_safety_index:
+                safety_cutoff = float(c2[safe_col].quantile(1.0 - min_safe_q))
+                c3 = c2[c2[safe_col] >= safety_cutoff].copy()
+            else:
+                safety_cutoff = float(c2[safe_col].quantile(min_safe_q))
+                c3 = c2[c2[safe_col] <= safety_cutoff].copy()
+            if c3.empty:
+                c3 = c2.copy()
+
+            # Tier 4: Infeasibility Decider & Tie-Breaker
+            best_row = c3.sort_values(
+                by=[infeas_col, "values_performance", "values_tv_cart"],
+                ascending=[True, False, True],
+            ).iloc[0]
+            return best_row
+
+    else:
+        # -------------------------------------------------------------
+        # SMOOTH CONTINUOUS SWITCHING (Adaptive Relaxation)
+        # -------------------------------------------------------------
+        smooth_regime = lex_cfg.get("smooth_regime", lex_cfg)
+        safe_cfg = smooth_regime.get("safety", lex_cfg.get("safety", {}))
+        smooth_cfg = smooth_regime.get("smoothness", lex_cfg.get("smoothness", {}))
+        perf_cfg = smooth_regime.get("performance", lex_cfg.get("performance", {}))
+
+        # 1. Smooth Adaptive Safety Gate: q(h) = clip(q0 + beta * h, q_min, q_max)
         q0 = float(safe_cfg.get("q0", 0.10))
         beta = float(safe_cfg.get("beta", 1.5))
         q_min = float(safe_cfg.get("q_min", 0.05))
         q_max = float(safe_cfg.get("q_max", 0.85))
-
-        # Adaptive quantile expansion: q(h) = q0 + beta * h
         q_h = float(np.clip(q0 + beta * max(0.0, h_target), q_min, q_max))
 
         if is_safety_index:
-            # Safety Index is maximized (higher is safer): take top q_h portion
             safety_cutoff = float(df[safe_col].quantile(1.0 - q_h))
-            t1_candidates = df[df[safe_col] >= safety_cutoff].copy()
+            c1 = df[df[safe_col] >= safety_cutoff].copy()
         else:
-            # Safety penalty is minimized (lower is safer): take lowest q_h portion
             safety_cutoff = float(df[safe_col].quantile(q_h))
-            t1_candidates = df[df[safe_col] <= safety_cutoff].copy()
-    else:
-        if is_safety_index:
-            min_s = float(safe_cfg.get("min_safety_index", 0.10))
-            t1_candidates = df[df[safe_col] >= min_s].copy()
-        else:
-            eps0 = float(safe_cfg.get("eps0", 0.0))
-            eps_beta = float(safe_cfg.get("eps_beta", 0.20))
-            eps_h = max(0.0, eps0 + eps_beta * h_target)
-            t1_candidates = df[df[safe_col] <= eps_h].copy()
+            c1 = df[df[safe_col] <= safety_cutoff].copy()
+        if c1.empty:
+            c1 = df.copy()
 
-    if t1_candidates.empty:
-        # Fallback: keep the safest available trials
-        if is_safety_index:
-            max_safe = df[safe_col].max()
-            t1_candidates = df[df[safe_col] >= max_safe - 1e-4].copy()
-        else:
-            min_safe = df[safe_col].min()
-            t1_candidates = df[df[safe_col] <= min_safe + 1e-4].copy()
+        # 2. Smooth Adaptive Smoothness Gate: tolerates more vibration as h increases
+        base_max_tv = float(smooth_cfg.get("base_max_tv", smooth_cfg.get("max_tv_cart", 25.0)))
+        tv_slope = float(smooth_cfg.get("tv_slope", 25.0))
+        max_tv_h = base_max_tv + tv_slope * max(0.0, h_target)
 
-    # -------------------------------------------------------------
-    # TIER 2: Smoothness / Jerk Gate
-    # -------------------------------------------------------------
-    smooth_cfg = lex_cfg.get("smoothness", {})
-    max_tv = float(smooth_cfg.get("max_tv_cart", 25.0))
-    tv_q = float(smooth_cfg.get("quantile", 0.70))
+        base_q = float(smooth_cfg.get("base_quantile", smooth_cfg.get("quantile", 0.60)))
+        q_slope = float(smooth_cfg.get("quantile_slope", 0.40))
+        tv_q_h = float(np.clip(base_q + q_slope * max(0.0, h_target), 0.50, 0.98))
 
-    tv_cutoff = min(max_tv, float(t1_candidates["values_tv_cart"].quantile(tv_q)))
-    t2_candidates = t1_candidates[t1_candidates["values_tv_cart"] <= tv_cutoff].copy()
-    if t2_candidates.empty:
-        t2_candidates = t1_candidates.copy()
+        tv_cutoff = min(max_tv_h, float(c1["values_tv_cart"].quantile(tv_q_h)))
+        c2 = c1[c1["values_tv_cart"] <= tv_cutoff].copy()
+        if c2.empty:
+            c2 = c1.copy()
 
-    # -------------------------------------------------------------
-    # TIER 3: Performance Extraction Pool
-    # -------------------------------------------------------------
-    perf_cfg = lex_cfg.get("performance", {})
-    top_ratio = float(perf_cfg.get("top_ratio", 0.85))
+        # 3. Smooth Adaptive Performance Pool: demands near-peak performance as h increases
+        base_top_ratio = float(perf_cfg.get("base_top_ratio", perf_cfg.get("top_ratio", 0.80)))
+        perf_slope = float(perf_cfg.get("slope", 0.20))
+        top_ratio_h = float(np.clip(base_top_ratio + perf_slope * max(0.0, h_target), 0.70, 0.98))
 
-    p_max = float(t2_candidates["values_performance"].max())
-    p_min = float(t2_candidates["values_performance"].min())
-    if p_max > 0:
-        perf_threshold = p_max * top_ratio
-    else:
-        perf_threshold = p_max - (p_max - p_min) * (1.0 - top_ratio)
+        p_max = float(c2["values_performance"].max())
+        p_min = float(c2["values_performance"].min())
+        perf_thresh = p_max * top_ratio_h if p_max > 0 else p_max - (p_max - p_min) * (1.0 - top_ratio_h)
 
-    t3_candidates = t2_candidates[t2_candidates["values_performance"] >= perf_threshold].copy()
-    if t3_candidates.empty:
-        t3_candidates = t2_candidates.copy()
+        c3 = c2[c2["values_performance"] >= perf_thresh].copy()
+        if c3.empty:
+            c3 = c2.copy()
 
-    # -------------------------------------------------------------
-    # TIER 4: Infeasibility Decider & Tie-Breaker
-    # -------------------------------------------------------------
-    infeas_col = "user_attrs_unfeasible_count" if "user_attrs_unfeasible_count" in t3_candidates.columns else "values_unfeasible_count"
-    
-    # Sort primarily by lowest solver fallbacks, then highest performance, then lowest jerk
-    best_row = t3_candidates.sort_values(
-        by=[infeas_col, "values_performance", "values_tv_cart"],
-        ascending=[True, False, True],
-    ).iloc[0]
-
-    return best_row
+        # 4. Infeasibility Decider & Tie-Breaker
+        best_row = c3.sort_values(
+            by=[infeas_col, "values_performance", "values_tv_cart"],
+            ascending=[True, False, True],
+        ).iloc[0]
+        return best_row
 
 
 def filter_grid_studies(
@@ -218,6 +294,11 @@ def main(config_file: str = "dataset_builder.yaml") -> None:
     # Apply grid selection / subsampling
     selected_studies = filter_grid_studies(study_coords, grid_cfg)
     print(f"Selected {len(selected_studies)} grid points according to grid density configuration.")
+
+    hard_switching = bool(lex_cfg.get("hard_switching", True))
+    h_crit = float(lex_cfg.get("h_crit", 0.20))
+    mode_str = f"Hard Regime Switching at h_crit = {h_crit:.2f} m" if hard_switching else "Smooth Adaptive Switching"
+    print(f"Lexicographical Selection Strategy: {mode_str}")
 
     dataset_rows: List[Dict[str, Any]] = []
 

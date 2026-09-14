@@ -19,25 +19,46 @@ grid_selection:
 
 # Lexicographical Multi-Objective Selection Parameters
 lexicographic:
-  # Tier 1: Safety Filter Configuration
-  safety:
-    mode: "quantile"        # 'quantile' (scale-invariant, recommended) or 'threshold'
-    q0: 0.10                # Base quantile of safest trials at h = 0 (top 10% highest S_index)
-    beta: 1.5               # Quantile expansion slope per meter of margin h
-    q_min: 0.05             # Minimum quantile clamp
-    q_max: 0.85             # Maximum quantile clamp (always discard bottom 15% unsafe)
-    min_safety_index: 0.10  # Minimum allowable S_index (if mode is set to 'threshold')
+  # Flag: true = hard regime switching at h_crit; false = smooth continuous adaptive relaxation
+  hard_switching: true
+  h_crit: 0.20              # Threshold [m] separating proximity (hazard) regime from nominal (safe) regime
 
-  # Tier 2: Smoothness / Jerk Gate
-  smoothness:
-    max_tv_cart: 25.0       # Maximum acceptable Total Variation in Cartesian error [mm]
-    quantile: 0.70          # Retain top 70% smoothest trials in candidate pool
+  # Configuration for Hard Switching Mode (when hard_switching: true)
+  hard_regime:
+    proximity:  # For h < h_crit: Safety -> Smoothness -> Performance -> Infeasibility
+      safety_quantile: 0.15           # Retain top 15% safest trials
+      smoothness_quantile: 0.60       # Strict jerk filtering (top 60% smoothest)
+      max_tv_cart: 25.0               # Maximum acceptable Total Variation in Cartesian error [mm]
+      performance_top_ratio: 0.75     # Willing to sacrifice performance down to 75% of max
+    nominal:    # For h >= h_crit: Performance -> Smoothness -> Safety -> Infeasibility
+      performance_top_ratio: 0.95     # Retain top 5% fastest/highest-tracking trials
+      smoothness_quantile: 0.70       # Pick smoothest among top performers
+      min_safety_quantile: 0.90       # Discard only extreme unsafe outliers (bottom 10%)
 
-  # Tier 3: Performance Extraction Pool
-  performance:
-    top_ratio: 0.85         # Keep candidates achieving at least 85% of peak performance
+  # Configuration for Smooth Switching Mode (when hard_switching: false)
+  smooth_regime:
+    # Tier 1: Safety Filter Configuration (relaxes smoothly with margin h)
+    safety:
+      mode: "quantile"        # 'quantile' (scale-invariant, recommended) or 'threshold'
+      q0: 0.10                # Base quantile of safest trials at h = 0 (top 10% highest S_index)
+      beta: 1.5               # Quantile expansion slope per meter of margin h
+      q_min: 0.05             # Minimum quantile clamp
+      q_max: 0.85             # Maximum quantile clamp (always discard bottom 15% unsafe)
+      min_safety_index: 0.10  # Minimum allowable S_index (if mode is set to 'threshold')
 
-  # Tier 4: Infeasibility Decider
+    # Tier 2: Smoothness / Jerk Gate (relaxes tolerance smoothly with margin h)
+    smoothness:
+      base_max_tv: 20.0       # Base Cartesian TV cut-off [mm] at h=0
+      tv_slope: 25.0          # Allowed TV expansion per meter: TV_max(h) = base_max_tv + tv_slope * max(0, h)
+      base_quantile: 0.60     # Base smoothness quantile at h=0
+      quantile_slope: 0.40    # Quantile expansion slope
+
+    # Tier 3: Performance Extraction Pool (tightens to peak performance as h increases)
+    performance:
+      base_top_ratio: 0.80    # Top performance ratio at h=0
+      slope: 0.20             # Demanded performance increases with h: ratio(h) = min(0.98, base + slope * max(0, h))
+
+  # Common Tie-Breaker Configuration (Lowest QP Infeasibility Count)
   infeasibility:
     primary_key: "user_attrs_unfeasible_count"
     secondary_key: "values_performance"
