@@ -1,7 +1,7 @@
 # GPR Dataset Builder Configuration (Lexicographic Selection)
 
 database:
-  use_sqlite: true
+  use_sqlite: false
   sqlite_path: "optuna_gpr_grid.db"
   url: "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
   study_prefix: "gpr_slice"
