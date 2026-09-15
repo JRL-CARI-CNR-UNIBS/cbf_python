@@ -171,11 +171,28 @@ def compute_dynamic_risk_index(
     D_0: float = 0.25,
     lambd: float = 1.0,
 ) -> float:
-    v_m_norm = float(np.linalg.norm(end_eff_vel))
-    T_b = 0.0 if v_m_norm < 1e-5 else v_m_norm / a_s
-    T_tot = T_r + T_b
+    """Compute the dynamic safety margin independent of the controller barrier function.
 
-    s_index_max = 0.0
+    Evaluates the Speed and Separation Monitoring (SSM / ISO 15066) protective distance margin:
+        Margin_i = d_i - D_req,i
+    where:
+        D_req,i = delta * (S_robot + S_human) + D_0
+        S_robot = v_r,proj * T_r + 0.5 * (v_r,proj^2) / a_s
+        S_human = v_h,proj * T_tot + 0.5 * a_h,proj * (T_tot^2)
+        T_tot   = T_r + v_r,proj / a_s
+
+    Returns the worst-case (minimum) safety margin across all obstacles:
+        S_index = min_i (Margin_i) * lambd
+
+    Properties:
+        > 0 : Clear safety buffer beyond minimum required stopping distance.
+        = 0 : Exact safety boundary.
+        < 0 : Penetration into the protective safety separation.
+    """
+    if obs_positions.size == 0:
+        return float("inf")
+
+    min_margin = float("inf")
 
     for i in range(obs_positions.shape[0]):
         p_o = obs_positions[i]
@@ -185,31 +202,36 @@ def compute_dynamic_risk_index(
         diff_ot = p_o - end_eff_pos
         dist_ot = float(np.linalg.norm(diff_ot))
 
-        if dist_ot < 1e-5:
-            return float("inf")
+        if dist_ot < 1e-6:
+            return -D_0 * lambd
 
+        # Unit vector pointing from robot end-effector to obstacle
         dir_ot = diff_ot / dist_ot
 
-        delta_x_robot = (end_eff_vel * T_r) + (0.5 * end_eff_vel * T_b)
-        delta_x_hand = (v_hand * T_tot) + (0.5 * a_hand * (T_tot ** 2))
-        delta_x_tot = delta_x_hand + delta_x_robot
-        integral_val = float(np.dot(delta_x_tot, dir_ot))
+        # Velocity components along the line-of-sight closing trajectory
+        # Positive values represent closing towards each other
+        v_r_proj = max(0.0, float(np.dot(end_eff_vel, dir_ot)))
+        v_h_proj = max(0.0, float(np.dot(-v_hand, dir_ot)))
+        a_h_proj = max(0.0, float(np.dot(-a_hand, dir_ot)))
 
-        D_lh = delta * integral_val + D_0
+        # Robot stopping time and displacement
+        T_b = (v_r_proj / a_s) if a_s > 0.0 else 0.0
+        T_tot = T_r + T_b
+        delta_x_robot = (v_r_proj * T_r) + (0.5 * (v_r_proj ** 2) / a_s if a_s > 0.0 else 0.0)
 
-        v_sum = v_hand + end_eff_vel
-        den = float(np.dot(v_sum, diff_ot))
+        # Human displacement during the robot's stopping time
+        delta_x_hand = (v_h_proj * T_tot) + (0.5 * a_h_proj * (T_tot ** 2))
 
-        if den <= 1e-6:
-            current_s_index = 0.0
-        else:
-            fraction = (dist_ot - D_lh) / den
-            current_s_index = lambd * (T_tot + fraction * dist_ot)
+        # Required SSM protective separation
+        D_req = delta * (delta_x_robot + delta_x_hand) + D_0
 
-        if current_s_index > s_index_max:
-            s_index_max = current_s_index
+        # Physical safety margin (in meters): positive = safe, negative = intrusion
+        margin = dist_ot - D_req
 
-    return s_index_max
+        if margin < min_margin:
+            min_margin = margin
+
+    return float(lambd * min_margin)
 
 
 def print_stats_table(stats: Dict[str, np.ndarray]) -> None:

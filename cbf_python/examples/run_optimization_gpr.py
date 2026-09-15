@@ -155,7 +155,7 @@ def run_slice_episode(
                 a_s=cfg.a_s,
                 T_r=cfg.Tr,
                 delta=1.25,
-                D_0=cfg.C,
+                D_0=margin_C,
             )
             if s_index < min_s_index:
                 min_s_index = s_index
