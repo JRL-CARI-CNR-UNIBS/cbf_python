@@ -30,7 +30,7 @@ robot:
 # B-CBF Optimal Controller Parameters
 controller:
   use_cbf: true
-  has_plane_cbf: true
+  has_plane_cbf: false
   keypoint_to_log: -1
   gamma: 5.95                   # CBF class-K gain (linear decay rate)
   gamma_vel: 5.0                # HOCBF velocity class-K gain for plane avoidance
