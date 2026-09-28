@@ -9,16 +9,42 @@ import rtde_receive
 import rtde_control
 import math
 import signal
+import sys
+from pathlib import Path
 
 
 from concurrent.futures import ThreadPoolExecutor
 
+# Allow this file to be launched directly from any working directory. The
+# inference directory contains robotiq_socket.py, while CBF_DIR contains
+# legacy top-level modules imported by the CBF code (Controller, scripts, etc.).
+CBF_DIR = Path(__file__).resolve().parents[1]
+INFERENCE_DIR = CBF_DIR.parent
+for module_dir in (INFERENCE_DIR, CBF_DIR):
+    if str(module_dir) not in sys.path:
+        sys.path.insert(0, str(module_dir))
+
 from robotiq_socket import RobotiqCModelURCap
 from openpi_client import image_tools, websocket_client_policy
 
-from cbf_python.scripts.example_cbf_optimal import load_config, setup_controller, _handle_sigint
+from cbf_python.scripts.example_cbf_optimal import load_config, setup_controller
 from sharework import loadSharework
 from cbf_python.Command_bridge.joint_command_bridge import JointStateCommandBridge
+from cbf_python.Controller.optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
+
+def _handle_robot_sigint(rtde_c, signum, frame):
+    """Stop active servo motion immediately, then enter normal cleanup."""
+    print("\nCtrl+C received: stopping robot immediately...", flush=True)
+    if rtde_c is not None:
+        try:
+            rtde_c.servoStop()
+        except Exception:
+            try:
+                rtde_c.stopJ(2.0)
+            except Exception:
+                pass
+    raise KeyboardInterrupt
+
 # ============================================================
 # CONFIG
 # ============================================================
@@ -87,7 +113,8 @@ MAX_CHUNK_DELTA = 0.45
 #
 # If the robot falls behind by more than this:
 #
-#     abandon remaining actions
+#     abandon remaining a    from robotiq_socket import RobotiqCModelURCap
+
 #     -> observe
 #     -> infer again
 # ============================================================
@@ -759,6 +786,7 @@ def main():
 
     rtde_r = None
     rtde_c = None
+    bridge = None
 
     gripper = None
 
@@ -944,6 +972,12 @@ def main():
         )
 
 
+        # Stop servo motion immediately on Ctrl+C, then run normal cleanup.
+        signal.signal(
+            signal.SIGINT,
+            functools.partial(_handle_robot_sigint, rtde_c),
+        )
+
         last_gripper_raw = (
             gripper.get_current_position()
         )
@@ -981,7 +1015,6 @@ def main():
         tool_frame_name = cfg.tool_frame
 
         first_joint_position = bridge.wait_for_first_state(tool_frame_name, timeout=timeout_sec)
-        signal.signal(signal.SIGINT, functools.partial(_handle_sigint, bridge))
         if math.isnan(first_joint_position):
             bridge.shutdown()
             return
@@ -1329,6 +1362,14 @@ def main():
 
             try:
                 rtde_c.stopScript()
+            except Exception:
+                pass
+
+
+        if bridge is not None:
+
+            try:
+                bridge.shutdown()
             except Exception:
                 pass
 

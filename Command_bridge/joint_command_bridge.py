@@ -46,6 +46,7 @@ class JointStateCommandBridge(Node, BaseCommandBridgeABC):
         position_controller_name: str = "forward_position_controller",
         trajectory_controller_name: str = "scaled_joint_trajectory_controller",
         timeout_sec: float = 5.0,
+        start_executor: bool = True,
     ) -> None:
         # Ensure rclpy is initialized
         try:

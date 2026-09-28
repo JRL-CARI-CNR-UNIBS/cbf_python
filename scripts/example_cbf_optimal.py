@@ -118,7 +118,7 @@ def setup_controller(model_wrapper, config: Dict[str, Any]) -> Tuple[ControllerC
     keypoint_to_log = int(ctrl_cfg.get("keypoint_to_log", -1))
 
     ctrl = BCFOptimalController(
-        model_wrapper=model_wrapper,
+        model_or_wrapper=model_wrapper,
         cfg=cfg,
         useCbf=use_cbf,
         keypoint_to_log=keypoint_to_log,
