@@ -30,8 +30,11 @@ robot:
 # B-CBF Optimal Controller Parameters
 controller:
   use_cbf: true
+  has_plane_cbf: true
   keypoint_to_log: -1
   gamma: 5.95                   # CBF class-K gain (linear decay rate)
+  gamma_vel: 5.0                # HOCBF velocity class-K gain for plane avoidance
+  n_plane: []                   # Cartesian plane parameters [nx, ny, nz, d] for nx*x + d >= 0
   lambda_pos: 2098.0            # Nominal position tracking weight
   lambda_vel: 0.343             # Nominal velocity tracking weight
   lambda_scaling: 16.56         # Trajectory time scaling regularization weight

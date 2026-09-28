@@ -14,6 +14,7 @@ from Controller.Numba_scripts.ssm_cbf_acc import (
 
 # Import high-level optimal controller
 from Controller.optimal_cbf_task_controller import BCFOptimalController, ControllerConfig
+from Controller.Numba_scripts.numba_kernels import append_plane_cbf_rows
 import Controller.Numba_scripts.numba_kernels
 
 # Global numerical validation tolerances
@@ -285,3 +286,219 @@ def test_controller_fallback_on_infeasible_qp():
     finally:
         # Restore solver to avoid side effects on subsequent tests
         quadprog.solve_qp = original_solve_qp
+
+
+def test_plane_cbf_constraint_derivation():
+    """
+    Verifies that append_plane_cbf_rows computes the exact HOCBF constraint:
+        A_row = n^T * J
+        c_bound = - n^T * dJ * dq - (gamma + gamma_vel) * n^T * J * dq - gamma * gamma_vel * h_plane
+    for each monitored frame.
+    """
+    nq = 6
+    nF = 2
+    frames_p = np.array([
+        [0.2, 0.3, 0.5],
+        [0.4, 0.1, 0.8]
+    ], dtype=np.float64)
+
+    np.random.seed(42)
+    Jlins = np.random.randn(nF, 3, nq)
+    dJlins = np.random.randn(nF, 3, nq)
+    dq = np.random.randn(nq) * 0.5
+
+    n_plane = np.array([0.0, 0.0, 1.0, -0.2], dtype=np.float64)  # z >= 0.2
+    gamma = 5.0
+    gamma_vel = 3.0
+
+    A = np.zeros((nF, nq + 1), dtype=np.float64)
+    c = np.zeros(nF, dtype=np.float64)
+
+    row, h_plane_min = append_plane_cbf_rows(
+        A, c, 0, frames_p, Jlins, dJlins, dq, n_plane, gamma, gamma_vel
+    )
+
+    assert row == nF
+    expected_h_min = min(frames_p[0, 2] - 0.2, frames_p[1, 2] - 0.2)
+    assert_allclose(h_plane_min, expected_h_min, rtol=1e-5)
+
+    n_vec = n_plane[:3]
+    d_val = n_plane[3]
+
+    for f in range(nF):
+        h_f = float(np.dot(n_vec, frames_p[f]) + d_val)
+        n_J = n_vec @ Jlins[f]
+        n_dJ = n_vec @ dJlins[f]
+        n_J_dq = float(n_J @ dq)
+        n_dJ_dq = float(n_dJ @ dq)
+
+        expected_row = np.zeros(nq + 1)
+        expected_row[:nq] = n_J
+        expected_bound = -n_dJ_dq - (gamma + gamma_vel) * n_J_dq - (gamma * gamma_vel) * h_f
+
+        assert_allclose(A[f], expected_row, rtol=1e-5)
+        assert_allclose(c[f], expected_bound, rtol=1e-5)
+
+
+def test_plane_cbf_qp_satisfaction():
+    """
+    Verifies that quadprog strictly satisfies the HOCBF plane constraint
+    when an aggressive cost pulls towards the boundary.
+    """
+    nq = 6
+    nF = 2
+    frames_p = np.array([[0.0, 0.0, 0.25], [0.1, 0.0, 0.3]], dtype=np.float64)
+    Jlins = np.zeros((nF, 3, nq))
+    Jlins[:, 2, 0] = 1.0  # Joint 0 directly drives Z
+    dJlins = np.zeros((nF, 3, nq))
+    dq = np.array([-0.5, 0.0, 0.0, 0.0, 0.0, 0.0])  # Moving downwards towards plane
+
+    n_plane = np.array([0.0, 0.0, 1.0, -0.2], dtype=np.float64)  # z >= 0.2
+    gamma = 5.0
+    gamma_vel = 2.0
+
+    A = np.zeros((nF, nq + 1), dtype=np.float64)
+    c = np.zeros(nF, dtype=np.float64)
+
+    append_plane_cbf_rows(A, c, 0, frames_p, Jlins, dJlins, dq, n_plane, gamma, gamma_vel)
+
+    P = np.eye(nq + 1) * 0.1
+    b = np.zeros(nq + 1)
+    b[0] = -50.0  # Strong drive downwards (to violate constraint)
+
+    u, *_ = quadprog.solve_qp(P, b, A.T, c, 0)
+    ddq_opt = u[:nq]
+
+    for f in range(nF):
+        lhs = float(A[f, :nq] @ ddq_opt)
+        assert lhs >= c[f] - 1e-8, f"Plane CBF violated at frame {f}: {lhs} < {c[f]}"
+
+
+def test_controller_with_plane_cbf_step():
+    """
+    Verifies that BCFOptimalController executes step() correctly
+    when plane CBF parameters are configured.
+    """
+    import pinocchio as pin
+
+    cfg = ControllerConfig()
+    model = pin.buildSampleModelManipulator()
+    nq = model.nq
+
+    cfg.prefix = ""
+    cfg.tool_frame = model.frames[-1].name
+    cfg.elbow_frame = model.frames[-2].name
+    cfg.n_plane = [0.0, 0.0, 1.0, 0.5]  # Normal = [0, 0, 1], d = 0.5
+    cfg.gamma_vel = 4.0
+
+    wrapper = MagicMock()
+    wrapper.model = model
+
+    controller = BCFOptimalController(wrapper, cfg, useCbf=True)
+
+    out = controller.step(
+        obs_pos=np.zeros((0, 3)),
+        obs_vel=np.zeros((0, 3)),
+        obs_acc=np.zeros((0, 3)),
+        nominal_q=np.zeros(nq),
+        nominal_Dq=np.zeros(nq),
+        nominal_DDq=np.zeros(nq),
+    )
+
+    assert "h_plane_min" in out
+    assert np.isfinite(out["h_plane_min"])
+    assert out["unfeasible_cnt"] == "FEASIBLE"
+
+
+def test_cbf_switches_master_and_plane():
+    """
+    Verifies that:
+    1. If useCbf=False (master switch OFF): neither obstacle nor plane CBF rows are populated.
+    2. If useCbf=True and has_plane_cbf=False: obstacle CBF rows are populated, plane rows are NOT.
+    3. If useCbf=True and has_plane_cbf=True: both obstacle and plane CBF rows are populated.
+    """
+    import pinocchio as pin
+    from Controller.Numba_scripts.numba_kernels import assemble_qp_inplace
+
+    cfg = ControllerConfig()
+    model = pin.buildSampleModelManipulator()
+    nq = model.nq
+    Tc = 0.002
+
+    FreePos, ForcedPos, FreeVel, ForcedVel = \
+        Controller.Numba_scripts.numba_kernels.build_free_forced_one_step(Tc, nq)
+
+    nF = 2
+    n_obs = 1
+    frames_p = np.array([[0.5, 0.5, 0.5], [0.3, 0.3, 0.3]])
+    frames_v = np.zeros((nF, 3))
+    Jlins = np.ones((nF, 3, nq))
+    dJlins = np.zeros((nF, 3, nq))
+
+    obs_pos = np.array([[0.5, 0.8, 0.5]])
+    obs_vel = np.zeros((n_obs, 3))
+    obs_acc = np.zeros((n_obs, 3))
+
+    n_plane = np.array([0.0, 0.0, 1.0, 0.5])
+    gamma_vel = 4.0
+
+    base_rows = 3 + 2 * 3 * nq  # scaling (3) + tube (2*nq) + vel (2*nq) + acc (2*nq)
+    obs_rows = nF * n_obs       # 2 rows
+    plane_rows = nF             # 2 rows
+    n_constraints = base_rows + obs_rows + plane_rows
+
+    P_vel = np.zeros((nq + 1, nq + 1))
+    b_pos = np.zeros(nq + 1)
+    b_vel = np.zeros(nq + 1)
+    b_scaling = np.zeros(nq + 1)
+
+    q = np.zeros(nq)
+    dq = np.zeros(nq)
+    nom_q = np.zeros(nq)
+    nom_Dq = np.zeros(nq)
+
+    # Case 1: Master switch OFF (useCbf = False, has_plane_cbf = True)
+    A = np.zeros((n_constraints, nq + 1))
+    c = np.zeros(n_constraints)
+    row1, *_ = assemble_qp_inplace(
+        P_vel, b_pos, b_vel, b_scaling, A, c,
+        FreePos, ForcedPos, FreeVel, ForcedVel,
+        q, dq, nom_q, nom_Dq, 1.0, Tc,
+        cfg.Dq_max, cfg.DDq_max, cfg.delta_q_max,
+        frames_p, frames_v, Jlins, dJlins, obs_pos, obs_vel, obs_acc,
+        cfg.Tr, cfg.a_s, cfg.C, cfg.gamma, cfg.DDtrajectory_time_max, 1e-12, 1.0,
+        False, -1, n_plane, gamma_vel, True
+    )
+    assert row1 == base_rows, f"Master switch OFF must have 0 CBF rows. Expected {base_rows}, got {row1}"
+
+    # Case 2: Master switch ON, plane switch OFF (useCbf = True, has_plane_cbf = False)
+    A = np.zeros((n_constraints, nq + 1))
+    c = np.zeros(n_constraints)
+    row2, *_ = assemble_qp_inplace(
+        P_vel, b_pos, b_vel, b_scaling, A, c,
+        FreePos, ForcedPos, FreeVel, ForcedVel,
+        q, dq, nom_q, nom_Dq, 1.0, Tc,
+        cfg.Dq_max, cfg.DDq_max, cfg.delta_q_max,
+        frames_p, frames_v, Jlins, dJlins, obs_pos, obs_vel, obs_acc,
+        cfg.Tr, cfg.a_s, cfg.C, cfg.gamma, cfg.DDtrajectory_time_max, 1e-12, 1.0,
+        True, -1, n_plane, gamma_vel, False
+    )
+    assert row2 == base_rows + obs_rows, (
+        f"Master ON + Plane OFF must populate only obstacle CBFs. Expected {base_rows + obs_rows}, got {row2}"
+    )
+
+    # Case 3: Master switch ON, plane switch ON (useCbf = True, has_plane_cbf = True)
+    A = np.zeros((n_constraints, nq + 1))
+    c = np.zeros(n_constraints)
+    row3, *_ = assemble_qp_inplace(
+        P_vel, b_pos, b_vel, b_scaling, A, c,
+        FreePos, ForcedPos, FreeVel, ForcedVel,
+        q, dq, nom_q, nom_Dq, 1.0, Tc,
+        cfg.Dq_max, cfg.DDq_max, cfg.delta_q_max,
+        frames_p, frames_v, Jlins, dJlins, obs_pos, obs_vel, obs_acc,
+        cfg.Tr, cfg.a_s, cfg.C, cfg.gamma, cfg.DDtrajectory_time_max, 1e-12, 1.0,
+        True, -1, n_plane, gamma_vel, True
+    )
+    assert row3 == base_rows + obs_rows + plane_rows, (
+        f"Master ON + Plane ON must populate obstacle and plane CBFs. Expected {base_rows + obs_rows + plane_rows}, got {row3}"
+    )

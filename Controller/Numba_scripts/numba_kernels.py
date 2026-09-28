@@ -202,6 +202,60 @@ def append_cbf_rows_loop(
 # 3) Objective Assembly
 # ---------------------------------------------------------------------------
 @njit(cache=True, fastmath=True)
+def append_plane_cbf_rows(
+    A, c, row,
+    frames_p, Jlins, dJlins, dq,
+    n_plane, gamma, gamma_vel
+):
+    """
+    Appends High-Order Control Barrier Function (HOCBF) constraints for Cartesian plane avoidance:
+        n^T * (J * u + dJ * dq) + (gamma + gamma_vel) * n^T * J * dq + gamma * gamma_vel * (n^T * x + d) >= 0
+    where u = ddq is the joint acceleration.
+    In QP standard form (A_row * u_QP >= c_bound, with u_QP = [ddq^T, s_ddot]^T):
+        A[row, :nq] = n^T * J
+        A[row, nq] = 0.0
+        c[row] = - n^T * dJ * dq - (gamma + gamma_vel) * n^T * J * dq - gamma * gamma_vel * h_plane
+    """
+    h_plane_min = 1e9
+    if n_plane.shape[0] < 4:
+        return row, h_plane_min
+
+    nx = n_plane[0]
+    ny = n_plane[1]
+    nz = n_plane[2]
+    d_plane = n_plane[3]
+
+    nF = frames_p.shape[0]
+    nq = dq.size
+
+    for f in range(nF):
+        x = frames_p[f]
+        h_plane = nx * x[0] + ny * x[1] + nz * x[2] + d_plane
+        if h_plane < h_plane_min:
+            h_plane_min = h_plane
+
+        Jlin = Jlins[f]
+        dJlin = dJlins[f]
+
+        n_J_dq = 0.0
+        n_dJ_dq = 0.0
+        for j in range(nq):
+            n_J_j = nx * Jlin[0, j] + ny * Jlin[1, j] + nz * Jlin[2, j]
+            n_dJ_j = nx * dJlin[0, j] + ny * dJlin[1, j] + nz * dJlin[2, j]
+
+            A[row, j] = n_J_j
+            n_J_dq += n_J_j * dq[j]
+            n_dJ_dq += n_dJ_j * dq[j]
+
+        A[row, nq] = 0.0
+        bound = -n_dJ_dq - (gamma + gamma_vel) * n_J_dq - (gamma * gamma_vel) * h_plane
+        c[row] = bound
+        row += 1
+
+    return row, h_plane_min
+
+
+@njit(cache=True, fastmath=True)
 def assemble_objective_parts_inplace(
     P2, b_pos, b_vel, b_scaling,
     q, dq,
@@ -264,10 +318,12 @@ def assemble_qp_inplace(
     Dtraj, Tc,
     Dq_max, DDq_max, delta_q_max,
     frames_p, frames_vlin, Jlins, dJlins, obs_p, obs_v, obs_a,
-    Tr, a_s, C, gamma, DDtraj_max, atol, ref_scaling, HAS_CBF, keypoint_to_log
+    Tr, a_s, C, gamma, DDtraj_max, atol, ref_scaling, HAS_CBF, keypoint_to_log,
+    n_plane, gamma_vel, has_plane_cbf
 ):
     """
     Assembles complete QP objective and linear inequalities in-place for fast real-time execution.
+    Includes SSM human obstacle avoidance and Cartesian plane HOCBF avoidance.
     """
     nq = q.size
     for i in range(A.shape[0]):
@@ -304,7 +360,14 @@ def assemble_qp_inplace(
         i_h = 0
         i_d = 0
 
+    # Plane CBF constraint block (HOCBF)
+    h_plane_min = 1e9
+    if HAS_CBF and has_plane_cbf and n_plane.shape[0] >= 4 and frames_p.size != 0:
+        row, h_plane_min = append_plane_cbf_rows(
+            A, c, row, frames_p, Jlins, dJlins, dq, n_plane, gamma, gamma_vel
+        )
+
     # Objective blocks
     assemble_objective_parts_inplace(P2, b_pos, b_vel, b_scaling, q, dq, nominal_q, nominal_Dq, Dtraj, Tc, ref_scaling)
 
-    return row, hmin, dmin, vr_min, vh_min, htest, dtest, i_h, i_d
+    return row, hmin, dmin, vr_min, vh_min, htest, dtest, i_h, i_d, h_plane_min

@@ -94,6 +94,9 @@ def setup_controller(model_wrapper, config: Dict[str, Any]) -> Tuple[ControllerC
 
     # CBF & safety parameters
     cfg.gamma = float(ctrl_cfg.get("gamma", 5.95))
+    cfg.gamma_vel = float(ctrl_cfg.get("gamma_vel", 5.0))
+    if "n_plane" in ctrl_cfg and ctrl_cfg["n_plane"] is not None:
+        cfg.n_plane = list(ctrl_cfg["n_plane"])
     cfg.lambda_pos = float(ctrl_cfg.get("lambda_pos", 2098.0))
     cfg.lambda_vel = float(ctrl_cfg.get("lambda_vel", 0.343))
     cfg.lambda_scaling = float(ctrl_cfg.get("lambda_scaling", 16.56))
@@ -110,6 +113,8 @@ def setup_controller(model_wrapper, config: Dict[str, Any]) -> Tuple[ControllerC
         cfg.delta_q_max[i] = np.deg2rad(delta_deg * float(scales[i]))
 
     use_cbf = bool(ctrl_cfg.get("use_cbf", True))
+    has_plane_cbf = bool(ctrl_cfg.get("has_plane_cbf", True))
+    cfg.has_plane_cbf = has_plane_cbf
     keypoint_to_log = int(ctrl_cfg.get("keypoint_to_log", -1))
 
     ctrl = BCFOptimalController(
@@ -117,6 +122,7 @@ def setup_controller(model_wrapper, config: Dict[str, Any]) -> Tuple[ControllerC
         cfg=cfg,
         useCbf=use_cbf,
         keypoint_to_log=keypoint_to_log,
+        has_plane_cbf=has_plane_cbf,
     )
     return cfg, ctrl
 

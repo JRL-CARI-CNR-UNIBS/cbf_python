@@ -24,6 +24,10 @@ class ControllerConfig:
             Maximum deceleration capability in m/s^2.
         gamma : float
             Control Barrier Function class-K gain (linear decay rate).
+        gamma_vel : float
+            High-Order CBF velocity class-K gain for relative degree 2 constraints.
+        has_plane_cbf : bool
+            Flag to enable or disable the Cartesian plane HOCBF constraint.
         max_obstacles : int
             Upper bound on the number of obstacle points to allocate in QP constraints.
         delta_q_max : np.ndarray
@@ -50,12 +54,16 @@ class ControllerConfig:
             End-effector tool frame name.
         elbow_frame : str
             Elbow/forearm link frame name.
+        n_plane : list[float] 
+            List of plane parameters for obstacle avoidance.
     """
     Tc: float = 2e-3
     C: float = 0.25
     Tr: float = 0.15
     a_s: float = 2.5
     gamma: float = 5.0
+    gamma_vel: float = 5.0
+    has_plane_cbf: bool = True
     max_obstacles: int = 18 * 5
 
     delta_q_max: np.ndarray = field(
@@ -80,6 +88,7 @@ class ControllerConfig:
     prefix: str = "ur10e_"
     tool_frame: str = "tool0"
     elbow_frame: str = "forearm_link"
+    n_plane: list[float] = field(default_factory=list)
 
     def __str__(self) -> str:
         """Returns a formatted string summary of the configuration."""
@@ -94,6 +103,8 @@ class ControllerConfig:
             f"  Tr              : {self.Tr} s\n"
             f"  a_s             : {self.a_s} m/s^2\n"
             f"  gamma           : {self.gamma}\n"
+            f"  gamma_vel       : {self.gamma_vel}\n"
+            f"  has_plane_cbf   : {self.has_plane_cbf}\n"
             f"  max_obstacles   : {self.max_obstacles}\n\n"
             "  -- Kinematic Limits --\n"
             f"  delta_q_max     : {fmt_arr(self.delta_q_max)} rad\n"
@@ -108,7 +119,8 @@ class ControllerConfig:
             "  -- Robot Frames --\n"
             f"  prefix          : '{self.prefix}'\n"
             f"  tool_frame      : '{self.tool_frame}'\n"
-            f"  elbow_frame     : '{self.elbow_frame}'"
+            f"  elbow_frame     : '{self.elbow_frame}'\n"
+            f"  n_plane         : {self.n_plane}"
         )
 
 
@@ -135,7 +147,14 @@ class BCFOptimalController:
         - Speed & Separation Monitoring (SSM) Control Barrier Functions: L_g h * J_lin * ddq >= bound
     """
 
-    def __init__(self, model_or_wrapper: Union[pin.Model, Any], cfg: ControllerConfig, useCbf: bool = True, keypoint_to_log: int = 7):
+    def __init__(
+        self,
+        model_or_wrapper: Union[pin.Model, Any],
+        cfg: ControllerConfig,
+        useCbf: bool = True,
+        keypoint_to_log: int = 7,
+        has_plane_cbf: Optional[bool] = None,
+    ):
         self.cfg = cfg
         if isinstance(model_or_wrapper, pin.Model):
             self.model = model_or_wrapper
@@ -153,6 +172,7 @@ class BCFOptimalController:
 
         self.data = self.model.createData()
         self.useCbf = useCbf
+        self.has_plane_cbf = has_plane_cbf if has_plane_cbf is not None else getattr(cfg, "has_plane_cbf", True)
 
         # Monitored frames on the kinematic chain
         self.tool_frame_id = self.model.getFrameId(cfg.prefix + cfg.tool_frame)
@@ -191,7 +211,7 @@ class BCFOptimalController:
 
         # Constraint matrix sizes
         if useCbf:
-            self.n_constraints = 3 + 2 * 3 * nq + cfg.max_obstacles * len(self.frames_ids)
+            self.n_constraints = 3 + 2 * 3 * nq + cfg.max_obstacles * len(self.frames_ids) + len(self.frames_ids)
         else:
             self.n_constraints = 3 + 2 * 3 * nq
 
@@ -214,6 +234,15 @@ class BCFOptimalController:
     def set_ref_scaling(self, scaling: float) -> None:
         """Sets the reference trajectory velocity scaling factor, clamped to [0, 1]."""
         self.ref_scaling = float(np.clip(scaling, 0.0, 1.0))
+
+    def set_has_plane_cbf(self, enable: bool) -> None:
+        """Enables or disables the Cartesian plane HOCBF constraint."""
+        self.has_plane_cbf = bool(enable)
+        self.cfg.has_plane_cbf = bool(enable)
+
+    def set_use_cbf(self, enable: bool) -> None:
+        """Sets the master CBF switch enabling or disabling all barrier functions."""
+        self.useCbf = bool(enable)
 
     def reset_state(self, q0: np.ndarray, dq0: Optional[np.ndarray] = None) -> None:
         """Resets controller internal states to initial joint configuration."""
@@ -295,7 +324,9 @@ class BCFOptimalController:
             self.qp_scaling = 0.0
 
         # Assemble QP components with Numba kernel
-        row, h_min, d_min, vr_min, vh_min, htest, dtest, i_h, i_d = assemble_qp_inplace(
+        n_plane = np.asarray(cfg.n_plane, dtype=np.float64) if len(cfg.n_plane) >= 4 else np.empty(0, dtype=np.float64)
+        has_plane = bool(self.has_plane_cbf if hasattr(self, "has_plane_cbf") else getattr(cfg, "has_plane_cbf", True))
+        row, h_min, d_min, vr_min, vh_min, htest, dtest, i_h, i_d, h_plane_min = assemble_qp_inplace(
             self.P_vel, self.b_pos, self.b_vel, self.b_scaling,
             self.A, self.c,
             self.FreePos, self.ForcedPos, self.FreeVel, self.ForcedVel,
@@ -305,7 +336,8 @@ class BCFOptimalController:
             cfg.Dq_max, cfg.DDq_max, self.delta_q_max,
             frames_p, frames_v, Jlins, dJlins, obs_pos, obs_vel, obs_acc,
             cfg.Tr, cfg.a_s, cfg.C, cfg.gamma, cfg.DDtrajectory_time_max, 1e-12, self.qp_scaling, self.useCbf,
-            self.keypoint_to_log
+            self.keypoint_to_log,
+            n_plane, cfg.gamma_vel, has_plane
         )
 
         if row < self.n_constraints:
@@ -390,6 +422,7 @@ class BCFOptimalController:
 
         return {
             "h_min": float(h_min),
+            "h_plane_min": float(h_plane_min),
             "d_min": float(d_min),
             "vr_min": float(vr_min),
             "vh_min": float(vh_min),
