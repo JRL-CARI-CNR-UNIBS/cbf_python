@@ -57,6 +57,11 @@ planner:
 bridge:
   threshold: 1.1                # Joint position divergence threshold (radians)
   timeout_sec: 5.0              # Timeout when waiting for initial robot state
+  # Raw /skeletons is zed_msgs/ObjectsStamped and is consumed by the
+  # kinematics node. The CBF bridge consumes its processed output below.
+  obstacles_topics: []
+  kinematics_topics:
+    - "/zed/zed_node/body_trk/skeletons_kinematics"
   offline_dataset:
     csv_path: "../skeleton_vectors/skeleton_vectors_23.csv"
     slowdown_factor: 1.0

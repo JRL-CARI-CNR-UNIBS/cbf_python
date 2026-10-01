@@ -174,9 +174,26 @@ class BCFOptimalController:
         self.useCbf = useCbf
         self.has_plane_cbf = has_plane_cbf if has_plane_cbf is not None else getattr(cfg, "has_plane_cbf", True)
 
-        # Monitored frames on the kinematic chain
-        self.tool_frame_id = self.model.getFrameId(cfg.prefix + cfg.tool_frame)
-        self.elbow_frame_id = self.model.getFrameId(cfg.prefix + cfg.elbow_frame)
+        # Accept both fully qualified frame names (for example,
+        # "ur10e_wrist_3_joint") and short names that need cfg.prefix.
+        def resolve_frame_id(configured_name: str) -> int:
+            configured_name = str(configured_name)
+            candidates = [configured_name]
+            if cfg.prefix and not configured_name.startswith(cfg.prefix):
+                candidates.append(cfg.prefix + configured_name)
+
+            for frame_name in candidates:
+                frame_id = self.model.getFrameId(frame_name)
+                if frame_id < self.model.nframes:
+                    return frame_id
+
+            raise ValueError(
+                f"Robot frame not found. Tried {candidates}; "
+                f"model contains {self.model.nframes} frames."
+            )
+
+        self.tool_frame_id = resolve_frame_id(cfg.tool_frame)
+        self.elbow_frame_id = resolve_frame_id(cfg.elbow_frame)
         self.frames_ids = [self.tool_frame_id, self.elbow_frame_id]
 
         # 1-step discrete integration matrices

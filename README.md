@@ -4,6 +4,11 @@ This repository provides the implementation of an Optimal CBF controller for rob
 
 The framework enforces ISO/TS 15066 compliant **Speed and Separation Monitoring (SSM)** safety guarantees while tracking a nominal joint trajectory via dynamic time parameterization (trajectory time scaling) and Cartesian bounding tube constraints.
 
+To run the code:
+
+```bash
+ros2 launch zed_skeleton_kinematics zed_skeleton_kinematics_logging.launch.py fcutoff_hz:=35.0 output_csv:=/home/nyquist/projects/cells_ws/src/zed_skeleton_kinematics/csv_files/skeleton_vectors.csv enable_skeleton_logging:=false
+```
 ---
 
 ## Key Features

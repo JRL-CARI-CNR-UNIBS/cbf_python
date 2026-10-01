@@ -111,6 +111,12 @@ class JointStateCommandBridge(Node, BaseCommandBridgeABC):
                 self._obstacles_last_recv_[topic] = rclpy.time.Time()
 
         # Subscriptions for kinematics
+        if kinematics_topics and ObjectsKinematicsStamped is None:
+            raise RuntimeError(
+                "Kinematics topics were configured, but "
+                "zed_skeleton_kinematics_msgs is not importable. Source the "
+                "workspace that installs this message package before running."
+            )
         self._kin_subs = []
         for topic in kinematics_topics:
             topic = str(topic)
@@ -279,8 +285,13 @@ class JointStateCommandBridge(Node, BaseCommandBridgeABC):
         msg.data = q.tolist()
         self._pub.publish(msg)
 
-    def getObstacles(self,elapsed  = 0.0,  max_age_sec: float = 0.5) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Aggregate recent kinematics into (pos, vel, acc) as in the original node:contentReference[oaicite:2]{index=2}."""
+    def getObstacles(self, elapsed: float = 0.0, max_age_sec: float = 0.5) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return fresh obstacle points in world coordinates.
+
+        Kinematics topics provide position, velocity, and acceleration. Fresh
+        PoseArray topics are also accepted; their unavailable velocity and
+        acceleration values are represented as zero.
+        """
         now = self.get_clock().now()
         pos_all, vel_all, acc_all = [], [], []
 
@@ -296,15 +307,29 @@ class JointStateCommandBridge(Node, BaseCommandBridgeABC):
                 if age_sec <= float(max_age_sec):
                     p, v, a = triple
                     if p.size:
-                        pos_all.append(p)
-                        vel_all.append(v)
-                        acc_all.append(a)
+                        pos_all.append(np.asarray(p, dtype=float))
+                        vel_all.append(np.asarray(v, dtype=float))
+                        acc_all.append(np.asarray(a, dtype=float))
+
+            for topic, points in self.obstacles_.items():
+                last = self._obstacles_last_recv_.get(topic)
+                if last is None:
+                    continue
+                try:
+                    age_sec = float((now - last).nanoseconds) * 1e-9
+                except Exception:
+                    age_sec = float("inf")
+                if age_sec <= float(max_age_sec) and points:
+                    p = np.asarray(points, dtype=float).reshape(-1, 3)
+                    pos_all.append(p)
+                    vel_all.append(np.zeros_like(p))
+                    acc_all.append(np.zeros_like(p))
 
         if pos_all:
-            return (np.vstack(pos_all), np.vstack(vel_all), np.vstack(acc_all))
-        else:
-            z = np.zeros((0, 3), dtype=float)
-            return (z, z.copy(), z.copy())
+            return np.vstack(pos_all), np.vstack(vel_all), np.vstack(acc_all)
+
+        z = np.zeros((0, 3), dtype=float)
+        return z, z.copy(), z.copy()
 
     # ---------------------------- TF + utilities (ROS-specific) ----------------------------
     def _get_transform_matrix_to_world(self, frame_id: str, stamp) -> Optional[np.ndarray]:
