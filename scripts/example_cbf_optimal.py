@@ -89,6 +89,16 @@ def setup_controller(model_wrapper, config: Dict[str, Any]) -> Tuple[ControllerC
     # Frame assignments
     cfg.prefix = str(robot_cfg.get("prefix", "ur10e_"))
     cfg.tool_frame = str(robot_cfg.get("tool_frame", "ur10e_wrist_3_joint"))
+    cfg.tcp_frame = str(robot_cfg.get("tcp_frame", ctrl_cfg.get("tcp_frame", "open_tip")))
+    cfg.z_threshold = float(
+        robot_cfg.get("z_threshold", robot_cfg.get("z-threshold", ctrl_cfg.get("z_threshold", ctrl_cfg.get("z-threshold", 0.9))))
+    )
+    cfg.z_threshold_time = float(
+        robot_cfg.get(
+            "z_threshold_time",
+            robot_cfg.get("z_debounce_time", robot_cfg.get("z_timer", ctrl_cfg.get("z_threshold_time", ctrl_cfg.get("z_debounce_time", 0.1)))),
+        )
+    )
     cfg.elbow_frame = str(robot_cfg.get("elbow_frame", "ur10e_upper_arm_link"))
     cfg.shoulder_frame = str(robot_cfg.get("shoulder_frame", "ur10e_shoulder_link"))
 

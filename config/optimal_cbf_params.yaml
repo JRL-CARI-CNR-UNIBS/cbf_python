@@ -16,6 +16,9 @@ simulation:
 robot:
   prefix: "ur10e_"
   tool_frame: "ur10e_wrist_3_joint"
+  tcp_frame: "open_tip"
+  z_threshold: 0.9
+  z_threshold_time: 0.1
   elbow_frame: "ur10e_upper_arm_link"
   shoulder_frame: "ur10e_shoulder_link"
   joint_names:

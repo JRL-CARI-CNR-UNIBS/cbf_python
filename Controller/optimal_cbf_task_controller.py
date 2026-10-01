@@ -88,6 +88,9 @@ class ControllerConfig:
     prefix: str = "ur10e_"
     tool_frame: str = "tool0"
     elbow_frame: str = "forearm_link"
+    tcp_frame: str = "open_tip"
+    z_threshold: float = 0.9
+    z_threshold_time: float = 0.1
     n_plane: list[float] = field(default_factory=list)
 
     def __str__(self) -> str:
@@ -226,11 +229,8 @@ class BCFOptimalController:
         self.b_acc = np.zeros(nq + 1, dtype=np.float64)
         self.bunfeasible = np.zeros(nq + 1, dtype=np.float64)
 
-        # Constraint matrix sizes
-        if useCbf:
-            self.n_constraints = 3 + 2 * 3 * nq + cfg.max_obstacles * len(self.frames_ids) + len(self.frames_ids)
-        else:
-            self.n_constraints = 3 + 2 * 3 * nq
+        # Constraint matrix sizes (always allocate full capacity to safely allow dynamic useCbf toggling)
+        self.n_constraints = 3 + 2 * 3 * nq + cfg.max_obstacles * len(self.frames_ids) + len(self.frames_ids)
 
         self.A = np.zeros((self.n_constraints, nq + 1), dtype=np.float64)
         self.c = np.zeros(self.n_constraints, dtype=np.float64)
@@ -327,13 +327,16 @@ class BCFOptimalController:
         if not self.check_delta:
             if not self.useCbf:
                 ref_scaling = ext_scaling.compute_velocity_scaling_for_human_proximity(
-                    model=self.model.copy(),
-                    data=self.data.copy(),
+                    model=self.model,
+                    data=self.data,
                     q=self.q,
                     dq=self.dq,
                     ddq=self.ddq,
                     tool_frame_ids=self.frames_ids,
                     human_positions_world=obs_pos,
+                    minimum_distance=self.cfg.C,
+                    reaction_time=self.cfg.Tr,
+                    max_deceleration=self.cfg.a_s,
                 )
                 self.set_ref_scaling(ref_scaling)
             self.qp_scaling = self.ref_scaling

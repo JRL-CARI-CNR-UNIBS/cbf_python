@@ -12,8 +12,9 @@ import math
 import signal
 import sys
 from pathlib import Path
+from typing import Optional, Dict, Any, List, Tuple
 from scipy.interpolate import CubicSpline
-
+import pinocchio as pin
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -715,6 +716,12 @@ def execute_chunk_500hz(
     chunk_duration: float,
     last_gripper_raw: int,
     max_wall_time_scale: float = 3.0,
+    tcp_frame_id: Optional[int] = None,
+    base_frame_id: Optional[int] = None,
+    z_threshold: float = 0.9,
+    z_threshold_time: float = 0.1,
+    initial_use_cbf: bool = True,
+    debounce_state: Optional[Dict[str, float]] = None,
 ):
     """
     Executes the 500 Hz B-CBF optimal control loop over the chunk spline.
@@ -727,6 +734,35 @@ def execute_chunk_500hz(
     3. Controller unfeasibility: out["unfeasible_cnt"] == "UNFEASIBLE"
     4. Obstacle stagnation: wall time > chunk_duration * max_wall_time_scale with scaling < 0.2
     """
+    model = ctrl.model
+    fk_data = model.createData()
+
+    if tcp_frame_id is None:
+        tcp_frame_name = getattr(ctrl.cfg, "tcp_frame", "open_tip")
+        if model.existFrame(tcp_frame_name):
+            tcp_frame_id = model.getFrameId(tcp_frame_name)
+        elif hasattr(ctrl.cfg, "prefix") and model.existFrame(f"{ctrl.cfg.prefix}{tcp_frame_name}"):
+            tcp_frame_id = model.getFrameId(f"{ctrl.cfg.prefix}{tcp_frame_name}")
+        else:
+            tcp_frame_id = ctrl.tool_frame_id
+
+    if base_frame_id is None:
+        base_candidates = [
+            getattr(ctrl.cfg, "base_frame", None),
+            f"{getattr(ctrl.cfg, 'prefix', 'ur10e_')}base_link",
+            "ur10e_base_link",
+            "base_link",
+            "ur10e_base",
+        ]
+        base_frame_id = 0
+        for b_name in base_candidates:
+            if b_name and model.existFrame(b_name):
+                base_frame_id = model.getFrameId(b_name)
+                break
+
+    if debounce_state is None:
+        debounce_state = {"time_above": 0.0, "time_below": 0.0}
+
     step_count = 0
     start_wall_time = time.perf_counter()
     replan_triggered = False
@@ -737,6 +773,7 @@ def execute_chunk_500hz(
     h_min_overall = float("inf")
     d_min_overall = float("inf")
     scalings = []
+    tcp_z = 0.0
 
     max_wall_time = chunk_duration * max_wall_time_scale
 
@@ -795,7 +832,28 @@ def execute_chunk_500hz(
             )
 
             # ----------------------------------------------------
-            # 6. Step B-CBF Optimal Controller
+            # 6. Evaluate TCP height w.r.t robot base with debounce timer
+            # ----------------------------------------------------
+            pin.framesForwardKinematics(model, fk_data, ctrl.q)
+            base_M_tcp = fk_data.oMf[base_frame_id].inverse() * fk_data.oMf[tcp_frame_id]
+            tcp_z = float(base_M_tcp.translation[2])
+
+            # Debounce timer: switch CBF mode only if TCP z remains over or under threshold
+            # continuously for z_threshold_time seconds (0.1 s) to avoid chattering/jitter.
+            dt = SERVO_DT
+            if tcp_z > z_threshold:
+                debounce_state["time_above"] += dt
+                debounce_state["time_below"] = 0.0
+                if debounce_state["time_above"] >= z_threshold_time and ctrl.useCbf:
+                    ctrl.set_use_cbf(False)
+            else:
+                debounce_state["time_below"] += dt
+                debounce_state["time_above"] = 0.0
+                if debounce_state["time_below"] >= z_threshold_time and not ctrl.useCbf and initial_use_cbf:
+                    ctrl.set_use_cbf(True)
+
+            # ----------------------------------------------------
+            # 7. Step B-CBF Optimal Controller / Scaling Safety Filter
             # ----------------------------------------------------
             out = ctrl.step(
                 obs_pos=obs_pos,
@@ -878,7 +936,7 @@ def execute_chunk_500hz(
                     proximity = "d_min=N/A | h_min=N/A | PERCEPTION EMPTY"
                 print(
                     f"\r[500Hz] tau={new_tau:5.2f}/{chunk_duration:.2f}s | "
-                    f"CBF={'ON' if ctrl.useCbf else 'OFF'} | obs={obstacle_count} | "
+                    f"CBF={'ON' if ctrl.useCbf else 'OFF'} | tcp_z={tcp_z:.3f}m | obs={obstacle_count} | "
                     f"scale={scaling:.3f} | {proximity} | "
                     f"err={tracking_error:.4f} rad (J{worst_joint + 1}) | "
                     f"{unfeasible_status}",
@@ -1218,6 +1276,48 @@ def main():
         cfg.Tc = SERVO_DT
         print(cfg)
 
+        ctrl_cfg = config.get("controller", {})
+        tcp_frame_name = str(robot_cfg.get("tcp_frame", ctrl_cfg.get("tcp_frame", "open_tip")))
+        z_threshold = float(
+            robot_cfg.get("z_threshold", robot_cfg.get("z-threshold", ctrl_cfg.get("z_threshold", ctrl_cfg.get("z-threshold", 0.9))))
+        )
+        z_threshold_time = float(
+            robot_cfg.get(
+                "z_threshold_time",
+                robot_cfg.get(
+                    "z_debounce_time",
+                    robot_cfg.get("z_timer", ctrl_cfg.get("z_threshold_time", ctrl_cfg.get("z_debounce_time", 0.1))),
+                ),
+            )
+        )
+        base_frame_name = str(
+            robot_cfg.get(
+                "base_frame",
+                f"{cfg.prefix}base_link" if model.existFrame(f"{cfg.prefix}base_link") else "ur10e_base_link",
+            )
+        )
+
+        if model.existFrame(tcp_frame_name):
+            tcp_frame_id = model.getFrameId(tcp_frame_name)
+        elif model.existFrame(f"{cfg.prefix}{tcp_frame_name}"):
+            tcp_frame_id = model.getFrameId(f"{cfg.prefix}{tcp_frame_name}")
+        else:
+            tcp_frame_id = ctrl.tool_frame_id
+
+        if model.existFrame(base_frame_name):
+            base_frame_id = model.getFrameId(base_frame_name)
+        elif model.existFrame(f"{cfg.prefix}{base_frame_name}"):
+            base_frame_id = model.getFrameId(f"{cfg.prefix}{base_frame_name}")
+        else:
+            base_frame_id = 0
+
+        initial_use_cbf = bool(ctrl_cfg.get("use_cbf", True))
+        print(
+            f"[TCP Safety Switch] TCP: '{model.frames[tcp_frame_id].name}' (id={tcp_frame_id}), "
+            f"Base: '{model.frames[base_frame_id].name}' (id={base_frame_id}), "
+            f"z-threshold: {z_threshold:.3f} m, debounce: {z_threshold_time:.3f} s, Safety distance C: {cfg.C:.3f} m"
+        )
+
         bridge_cfg = config.get("bridge", {})
         threshold = float(bridge_cfg.get("threshold", 1.1))
         timeout_sec = float(bridge_cfg.get("timeout_sec", 5.0))
@@ -1264,6 +1364,9 @@ def main():
             )
         except Exception:
             dq_actual = np.zeros(6, dtype=np.float64)
+
+        # Debounce timer state maintained across consecutive chunks
+        debounce_state = {"time_above": 0.0, "time_below": 0.0}
 
         while True:
 
@@ -1316,6 +1419,12 @@ def main():
                 gripper_actions=gripper_actions,
                 chunk_duration=chunk_duration,
                 last_gripper_raw=last_gripper_raw,
+                tcp_frame_id=tcp_frame_id,
+                base_frame_id=base_frame_id,
+                z_threshold=z_threshold,
+                z_threshold_time=z_threshold_time,
+                initial_use_cbf=initial_use_cbf,
+                debounce_state=debounce_state,
             )
 
             # ------------------------------------------------
