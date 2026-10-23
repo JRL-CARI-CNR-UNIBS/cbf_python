@@ -2,7 +2,7 @@
 
 database:
   url: "postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db"
-  use_sqlite_fallback: true
+  use_sqlite_fallback: false
   sqlite_path: "optuna_gpr_grid.db"
 
 study:
