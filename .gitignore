@@ -230,3 +230,4 @@ params_csv
 params_csv/
 cbf_python_params/
 *.csv
+*.db
