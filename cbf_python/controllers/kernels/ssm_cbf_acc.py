@@ -1,7 +1,32 @@
-# ssm_cbf_acc.py — ordered and comment‑cleaned
-# ------------------------------------------------------------
-# Imports & setup
-# ------------------------------------------------------------
+"""
+Speed and Separation Monitoring (SSM) Control Barrier Function (CBF) Kernels.
+
+This module provides Numba-accelerated functions to compute the predictive
+stopping-horizon separation distance, its analytic sensitivities (Jacobian),
+Lie derivatives along control-affine system dynamics, and robust barrier inequality
+constraints on robot joint accelerations.
+
+Theoretical Principles:
+    1. Stopping-Horizon Trajectory Model:
+       Given the relative distance, projected velocities, and estimated human
+       acceleration along the line of sight, the system predicts the minimum separation
+       distance d_min that would occur during an open-loop reaction and braking procedure.
+       - Reaction phase: duration Tr, robot moves at constant velocity v_r.
+       - Braking phase: uniform deceleration at capability a_s until coming to a complete stop.
+    2. Candidate Extrema:
+       By the extreme value theorem, d_min occurs either at the evaluation boundaries
+       or at stationary points where the relative closing speed cancels out:
+       - t0: initial causality lower bound (t0 >= tc)
+       - t1: stationary point during reaction phase [t0, Tr]
+       - t2: reaction time Tr (braking onset)
+       - t3: stationary point during braking phase (Tr, Tf]
+       - t4: terminal full stop instant Tf = Tr + |v_r| / a_s
+    3. Robust Barrier Formulation:
+       The barrier function is defined as h = d_min - C_safe.
+       The barrier condition L_f h + L_g h * mu >= -gamma * (h - margin) restricts
+       the commanded Cartesian acceleration to guarantee forward invariance of the safe set.
+"""
+
 import math
 import numpy as np
 from numba import njit, float64, boolean
@@ -9,16 +34,23 @@ from numba import njit, float64, boolean
 
 
 # ------------------------------------------------------------
-# 1) Dynamics: f(x) and g(x)
+# 1) Dynamics: Drift Vector f(x) and Input Matrix g(x)
 # ------------------------------------------------------------
 @njit(cache=True)
 def range_state_derivative_numba(v_r: np.ndarray, v_h: np.ndarray):
     """
-    Numba version of range_state_derivative.
-    v_r, v_h: shape (3,)
+    Compute state derivative components for relative kinematic dynamics.
+
+    State vector x in R^12: [p_r (3), p_h (3), v_r (3), v_h (3)]
+    Control input mu in R^3: robot Cartesian acceleration (dv_r/dt)
+
+    Parameters:
+        v_r: Robot Cartesian velocity vector in R^3 [m/s]
+        v_h: Human Cartesian velocity vector in R^3 [m/s]
+
     Returns:
-        f: (12,)
-        g: (12,3)
+        f: Drift vector in R^12 representing unforced state velocity
+        g: Input mapping matrix in R^(12x3) mapping Cartesian acceleration to state derivative
     """
     f = np.zeros(12, dtype=np.float64)
     f[0:3] = v_r
@@ -32,26 +64,63 @@ def range_state_derivative_numba(v_r: np.ndarray, v_h: np.ndarray):
 
 
 # ------------------------------------------------------------
-# 2) Core distance computations
+# 2) Core Distance and Stopping-Horizon Extrema
 # ------------------------------------------------------------
-@njit((float64, float64, float64, float64, float64, float64, float64), cache=True)
-def dmin_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, atol):
-    # Guard (Numba supports raises in nopython)
+@njit(cache=True, fastmath=True)
+def dmin_and_jacobian_numba(
+    d: float,
+    v_r: float,
+    v_h: float,
+    a_h: float,
+    tr: float,
+    a_max: float,
+    atol: float,
+    tc: float = 0.0,
+):
+    """
+    Calculate the predicted minimum separation distance and its analytic Jacobian.
+
+    Evaluates prospective distance along the line-of-sight stopping trajectory:
+        Phase 1: tau in [t0, tr] (Reaction Phase)
+            d(tau) = d + (v_r - v_h)*tau - 0.5*a_h*tau^2
+        Phase 2: tau in (tr, tf] (Braking Phase)
+            d(tau) = d + (v_r - v_h)*tau - 0.5*a_h*tau^2 + 0.5*a_max*(tau - tr)^2
+
+    Parameters:
+        d: Current distance between robot and human keypoint [m]
+        v_r: Robot projected velocity along line of sight [m/s] (< 0 approaches human)
+        v_h: Human projected velocity along line of sight [m/s] (> 0 approaches robot)
+        a_h: Human projected acceleration along line of sight [m/s^2]
+        tr: System reaction time [s] (sensing, communication, and actuation delay)
+        a_max: Robot maximum braking deceleration capability [m/s^2] (positive scalar)
+        atol: Numerical tolerance for zero comparisons and deduplication
+        tc: Control cycle sampling period [s]; enforces causality lower bound (t0 >= tc)
+
+    Returns:
+        d_min: Minimum separation distance over the prospective horizon [m]
+        jac: Sensitivity vector [dd_min/dd, dd_min/dv_r, dd_min/dv_h, dd_min/da_h]
+    """
     if a_max <= 0.0:
         raise ValueError("a_max must be positive.")
 
-    t0 = 0.0
+    # Lower bound on prospective evaluation horizon:
+    # Under discrete zero-order hold control, the earliest instant the current acceleration
+    # command possesses control authority is tau = tc. When tc=0 (e.g. continuous tests), t0=0.
+    t0 = max(tc, 0.0)
+
+    # Reaction horizon boundary
     t2 = tr
-    t_dec = - v_r / a_max
+
+    # Braking duration until complete standstill (active only if robot approaches human, v_r < 0)
+    t_dec = -v_r / a_max
     if t_dec < 0.0:
         t_dec = 0.0
-    t4 = t2 + t_dec
-    # print("VR: ", v_r)
-    # print("Debug Tempi - t0:", t0, " t2:", t2, " t4:", t4)
+    t4 = t2 + t_dec  # Terminal stopping time Tf
+
     m = a_h - a_max
     v_diff = v_r - v_h
 
-    # Intersections (use boolean flags instead of NaN sentinels)
+    # Stationary point during reaction phase: dot{d}(tau) = 0 <=> v_diff - a_h * tau = 0
     has_t1 = False
     t1 = 0.0
     if abs(a_h) > atol:
@@ -60,6 +129,7 @@ def dmin_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, atol):
             t1 = t1_raw
             has_t1 = True
 
+    # Stationary point during braking phase: dot{d}(tau) = 0 <=> v_diff - a_h*tau + a_max*(tau - tr) = 0
     has_t3 = False
     t3 = 0.0
     if abs(m) > atol and (t4 - t2) > atol:
@@ -68,10 +138,7 @@ def dmin_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, atol):
             t3 = t3_raw
             has_t3 = True
 
-    C1 = has_t1
-    C3 = has_t3
-
-    # Candidates (fixed-size buffers; no Python lists)
+    # Collect candidate extrema
     uniq = np.empty(4, dtype=np.float64)
     n = 0
 
@@ -84,29 +151,30 @@ def dmin_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, atol):
         n += 1
 
     if v_r < 0.0:
+        # Robot moving toward human: braking phase is relevant
         add_candidate(t0)
         add_candidate(t4)
-        if C1:
+        if has_t1:
             add_candidate(t1)
-        if C3:
+        if has_t3:
             add_candidate(t3)
     else:
+        # Robot moving away or stationary: evaluation bounded by reaction phase
         add_candidate(t0)
         add_candidate(t2)
-        if C1:
+        if has_t1:
             add_candidate(t1)
 
-    # d_t2 = d + v_diff * t2 - 0.5 * a_h * (t2 * t2)
-
+    # Evaluate distance trajectory at each candidate instant
     vals = np.empty(n, dtype=np.float64)
     for i in range(n):
         tt = uniq[i]
         if tt <= t2 + atol:
             vals[i] = d + v_diff * tt - 0.5 * a_h * (tt * tt)
         else:
-            vals[i] = d + v_diff * tt - 0.5 * a_h * (tt *tt) + 0.5 * a_max * (tt - t2) * (tt - t2)
+            vals[i] = d + v_diff * tt - 0.5 * a_h * (tt * tt) + 0.5 * a_max * (tt - t2) * (tt - t2)
 
-    # Argmin without np.argmin (keeps typing simple)
+    # Identify active global minimizer
     i_min = 0
     best = vals[0]
     for i in range(1, n):
@@ -117,11 +185,16 @@ def dmin_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, atol):
     t_star = uniq[i_min]
     d_min = best
 
-    # Jacobian (order: [d, v_r, v_h, a_h])
+    # Analytic sensitivity of d_min w.r.t [d, v_r, v_h, a_h]
+    # By Danskin's Envelope Theorem, at stationary extrema (dot{d} = 0), total derivative equals partial derivative.
     jac = np.zeros(4, dtype=np.float64)
 
     if abs(t_star - t0) <= atol:
         jac[0] = 1.0
+        if t0 > atol:
+            jac[1] = t0
+            jac[2] = -t0
+            jac[3] = -0.5 * (t0 * t0)
         return d_min, jac
 
     if has_t1 and abs(t_star - t1) <= atol:
@@ -132,11 +205,10 @@ def dmin_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, atol):
         return d_min, jac
 
     if abs(t_star - t2) <= atol:
-        # t2_sq = t2 * t2
         jac[0] = 1.0
         jac[1] = t2
         jac[2] = -t2
-        jac[3] = -0.5 * t2 * t2
+        jac[3] = -0.5 * (t2 * t2)
         return d_min, jac
 
     if has_t3 and abs(t_star - t3) <= atol:
@@ -146,7 +218,7 @@ def dmin_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, atol):
         jac[3] = -0.5 * (t3 * t3)
         return d_min, jac
 
-    # t4
+    # Terminal stopping boundary instant t4 = tr - v_r / a_max
     if abs(t_star - t4) <= atol:
         t4_sq = t4 * t4
         jac[0] = 1.0
@@ -155,19 +227,51 @@ def dmin_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, atol):
         jac[3] = -0.5 * t4_sq
         if t_dec > atol:
             dotd_t4_now = v_diff - a_max * t2 - m * t4
-            jac[1] += - dotd_t4_now / a_max
+            jac[1] += -dotd_t4_now / a_max
         return d_min, jac
 
-    # Fallback
     return d_min, jac
 
 
 # ------------------------------------------------------------
-# 3) Barrier function
+# 3) Control Barrier Function Evaluation
 # ------------------------------------------------------------
-@njit((float64, float64, float64, float64, float64, float64, float64, float64), cache=True)
-def h_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, C, atol):
-    d_min, dist_jac = dmin_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, atol)
+@njit(cache=True, fastmath=True)
+def h_and_jacobian_numba(
+    d: float,
+    v_r: float,
+    v_h: float,
+    a_h: float,
+    tr: float,
+    a_max: float,
+    C: float,
+    atol: float,
+    tc: float = 0.0,
+):
+    """
+    Compute the Control Barrier Function h and its gradient w.r.t [d, v_r, v_h, a_h].
+
+    The safe set C_safe is defined as:
+        C_safe = { x | h(x) >= 0 }
+    where:
+        h = d_min - C
+    with C representing the minimum required clearance distance [m].
+
+    Parameters:
+        d: Current separation distance [m]
+        v_r, v_h: Projected velocities along line of sight [m/s]
+        a_h: Projected human acceleration [m/s^2]
+        tr: Reaction time [s]
+        a_max: Braking deceleration capability [m/s^2]
+        C: Safety separation threshold [m]
+        atol: Numerical comparison tolerance
+        tc: Sampling period [s]
+
+    Returns:
+        h_val: Barrier margin value [m] (h >= 0 indicates membership in safe set)
+        h_jac: Barrier gradient vector [dh/dd, dh/dv_r, dh/dv_h, dh/da_h]
+    """
+    d_min, dist_jac = dmin_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, atol, tc)
 
     h_val = d_min - C
     h_jac = np.empty(4, dtype=np.float64)
@@ -176,15 +280,8 @@ def h_and_jacobian_numba(d, v_r, v_h, a_h, tr, a_max, C, atol):
     h_jac[2] = dist_jac[2]
     h_jac[3] = dist_jac[3]
 
-    if d_min < C:
-        factor = (tr / C) * v_r
-        h_val += ((C - d_min) / C) * tr * v_r
-        h_jac[0] += -factor * dist_jac[0]
-        h_jac[1] += -factor * dist_jac[1] + ((C - d_min) * tr / C)
-        h_jac[2] += -factor * dist_jac[2]
-        h_jac[3] += -factor * dist_jac[3]
-
     return h_val, h_jac
+
 
 # ------------------------------------------------------------
 # 4) Geometric Jacobian blocks
@@ -368,73 +465,162 @@ def compute_g_Lie_terms_numba(
 
 
 @njit(cache=True, fastmath=True)
-def compute_h_and_lie_numba(translation_bt, obs_pos, vel_lineare, v_obs, Tr, a_s, C, obs_acc, atol):
+def compute_h_and_lie_numba(
+    translation_bt: np.ndarray,
+    obs_pos: np.ndarray,
+    vel_lineare: np.ndarray,
+    v_obs: np.ndarray,
+    Tr: float,
+    a_s: float,
+    C: float,
+    obs_acc: np.ndarray,
+    atol: float,
+    tc: float = 0.0,
+):
     """
+    Compute barrier margin h, its drift Lie derivative L_f h, and its control Lie derivative L_g h.
+
+    Mathematical Formulation:
+        Let chi = [p_r, p_h, v_r, v_h, a_h] be the system state, and psi(chi) = [d, v_r, v_h, a_h]
+        be the projected features along the unit line-of-sight vector u_rh = (p_r - p_h) / d.
+        By the chain rule:
+            dot{h} = grad_psi h * (dpsi/dt)
+                   = grad_psi h * (J_psi * f(chi)) + grad_psi h * (J_psi * g(chi)) * mu
+                   = L_f h + L_g h * mu
+        where mu = dot{v}_r is the robot Cartesian acceleration.
+
+    Parameters:
+        translation_bt: Robot link point position in world frame [m] (3,)
+        obs_pos: Obstacle / human keypoint position in world frame [m] (3,)
+        vel_lineare: Robot link point linear velocity in world frame [m/s] (3,)
+        v_obs: Human keypoint velocity in world frame [m/s] (3,)
+        Tr: Reaction time latency [s]
+        a_s: Maximum braking capability [m/s^2] (positive scalar)
+        C: Minimum protective clearance distance [m]
+        obs_acc: Human keypoint acceleration in world frame [m/s^2] (3,)
+        atol: Numerical zero tolerance
+        tc: Sampling period [s] (causality lower bound for look-ahead horizon)
+
     Returns:
-        h: float
-        Lie_f_h: float
-        Lie_g_h: (3,) ndarray
-        d: float
-        v_r: float
-        v_h: float
-        h_chi: float (sensitivity dh/dd)
+        h: Barrier function value [m] (h >= 0 indicates safe state)
+        Lie_f_h: Drift Lie derivative along unforced dynamics [m/s]
+        Lie_g_h: Control Lie derivative along Cartesian acceleration [s] (3,)
+        d: Instantaneous 3D separation distance [m]
+        v_r: Projected robot velocity along line of sight [m/s]
+        v_h: Projected human velocity along line of sight [m/s]
+        h_chi: Gradient w.r.t distance dh/dd (used for scalar uncertainty weighting)
     """
     r0 = translation_bt[0] - obs_pos[0]
     r1 = translation_bt[1] - obs_pos[1]
     r2 = translation_bt[2] - obs_pos[2]
-    d = np.sqrt(r0*r0 + r1*r1 + r2*r2)
+    d = np.sqrt(r0 * r0 + r1 * r1 + r2 * r2)
 
+    # Unit line-of-sight direction vector u pointing from human to robot
     if d <= atol:
         u0, u1, u2 = 1.0, 0.0, 0.0
         if d < atol:
             d = atol
     else:
         invd = 1.0 / d
-        u0, u1, u2 = r0*invd, r1*invd, r2*invd
+        u0, u1, u2 = r0 * invd, r1 * invd, r2 * invd
 
-    v_r = u0*vel_lineare[0] + u1*vel_lineare[1] + u2*vel_lineare[2]
-    v_h = u0*v_obs[0]       + u1*v_obs[1]       + u2*v_obs[2]
-    a_h = u0*obs_acc[0]     + u1*obs_acc[1]     + u2*obs_acc[2]
+    # Project velocities and accelerations onto line-of-sight vector
+    v_r = u0 * vel_lineare[0] + u1 * vel_lineare[1] + u2 * vel_lineare[2]
+    v_h = u0 * v_obs[0] + u1 * v_obs[1] + u2 * v_obs[2]
+    a_h = u0 * obs_acc[0] + u1 * obs_acc[1] + u2 * obs_acc[2]
 
-    h, Jh_psi = h_and_jacobian_numba(d, v_r, v_h, a_h, Tr, a_s, C, atol)
+    # Evaluate predictive stopping-horizon barrier and its feature-space gradient
+    h, Jh_psi = h_and_jacobian_numba(d, v_r, v_h, a_h, Tr, a_s, C, atol, tc)
 
+    # Fast contraction of feature Jacobian with system drift f and input matrix g
     Jpsi_f, Jpsi_g = jacobian_psi_times_fg_fast_numba(translation_bt, obs_pos, vel_lineare, v_obs, obs_acc, atol)
 
+    # Drift Lie derivative: L_f h = sum_k (dh/dpsi_k) * (dpsi_k/dt)_drift
     Lie_f_h = Jh_psi[0] * Jpsi_f[0] + Jh_psi[1] * Jpsi_f[1] + Jh_psi[2] * (Jpsi_f[2] + a_h) + Jh_psi[3] * Jpsi_f[3]
 
+    # Control Lie derivative: L_g h = sum_k (dh/dpsi_k) * (Jpsi_g)_k
+    # Since only row 1 (v_r) is directly coupled to robot acceleration, L_g h simplifies to (dh/dv_r) * u_rh^T
     Lie_g_h = np.zeros(3, dtype=np.float64)
-    Lie_g_h[0] += Jh_psi[0] * Jpsi_g[0, 0]; Lie_g_h[1] += Jh_psi[0] * Jpsi_g[0, 1]; Lie_g_h[2] += Jh_psi[0] * Jpsi_g[0, 2]
-    Lie_g_h[0] += Jh_psi[1] * Jpsi_g[1, 0]; Lie_g_h[1] += Jh_psi[1] * Jpsi_g[1, 1]; Lie_g_h[2] += Jh_psi[1] * Jpsi_g[1, 2]
-    Lie_g_h[0] += Jh_psi[2] * Jpsi_g[2, 0]; Lie_g_h[1] += Jh_psi[2] * Jpsi_g[2, 1]; Lie_g_h[2] += Jh_psi[2] * Jpsi_g[2, 2]
-    Lie_g_h[0] += Jh_psi[3] * Jpsi_g[3, 0]; Lie_g_h[1] += Jh_psi[3] * Jpsi_g[3, 1]; Lie_g_h[2] += Jh_psi[3] * Jpsi_g[3, 2]
+    Lie_g_h[0] += Jh_psi[0] * Jpsi_g[0, 0] + Jh_psi[1] * Jpsi_g[1, 0] + Jh_psi[2] * Jpsi_g[2, 0] + Jh_psi[3] * Jpsi_g[3, 0]
+    Lie_g_h[1] += Jh_psi[0] * Jpsi_g[0, 1] + Jh_psi[1] * Jpsi_g[1, 1] + Jh_psi[2] * Jpsi_g[2, 1] + Jh_psi[3] * Jpsi_g[3, 1]
+    Lie_g_h[2] += Jh_psi[0] * Jpsi_g[0, 2] + Jh_psi[1] * Jpsi_g[1, 2] + Jh_psi[2] * Jpsi_g[2, 2] + Jh_psi[3] * Jpsi_g[3, 2]
 
     h_chi = Jh_psi[0]
     return h, Lie_f_h, Lie_g_h, d, v_r, v_h, h_chi
 
+
 # ------------------------------------------------------------
-# 7) Full constraint assembly
+# 7) Full Joint-Space Constraint Assembly
 # ------------------------------------------------------------
 @njit(cache=True, fastmath=True)
 def compute_h_and_constraints_numba(
-    translation_bt, obs_pos, vel_lineare, v_obs,
-    Tr, a_s, C, obs_acc, atol, Jlin, dJlin, dq, gamma, HAS_CBF,
-    delta_H=0.0
+    translation_bt: np.ndarray,
+    obs_pos: np.ndarray,
+    vel_lineare: np.ndarray,
+    v_obs: np.ndarray,
+    Tr: float,
+    a_s: float,
+    C: float,
+    obs_acc: np.ndarray,
+    atol: float,
+    Jlin: np.ndarray,
+    dJlin: np.ndarray,
+    dq: np.ndarray,
+    gamma: float,
+    HAS_CBF: bool,
+    delta_H: float = 0.0,
+    tc: float = 0.0,
+    sigma_psi: np.ndarray = np.zeros(4, dtype=np.float64),
+    beta: float = 3.0,
 ):
     """
+    Assemble the linear inequality row and lower bound for the QP joint-acceleration optimization.
+
+    Mathematical Mapping:
+        The Cartesian acceleration mu = dot{v}_r is related to joint acceleration u = ddot{q} via:
+            mu = J_lin * u + dJ_lin * dq
+        Substituting into the Robust Control Barrier Function inequality:
+            L_f h + L_g h * (J_lin * u + dJ_lin * dq) >= -gamma * (h - margin)
+        Rearranging into standard QP constraint form (A_cbf * u >= bound):
+            (L_g h * J_lin) * u >= - (L_g h * dJ_lin * dq) - L_f h - gamma * (h - margin)
+
+    Parameters:
+        translation_bt: Monitored robot frame position [m] (3,)
+        obs_pos: Obstacle / keypoint position [m] (3,)
+        vel_lineare: Robot linear velocity [m/s] (3,)
+        v_obs: Obstacle velocity [m/s] (3,)
+        Tr: Reaction time [s]
+        a_s: Braking capability [m/s^2]
+        C: Safety separation clearance [m]
+        obs_acc: Obstacle acceleration [m/s^2] (3,)
+        atol: Comparison tolerance
+        Jlin: Translational Jacobian of the monitored robot frame (3, nq)
+        dJlin: Time derivative of translational Jacobian (3, nq)
+        dq: Current robot joint velocities [rad/s] (nq,)
+        gamma: Barrier filter responsiveness gain [1/s]
+        HAS_CBF: Boolean flag enabling barrier enforcement
+        delta_H: Scalar uncertainty margin [m]
+        tc: Sampling period [s]
+        sigma_psi: Standard deviations [sigma_d, sigma_vr, sigma_vh, sigma_ah] for ellipsoidal uncertainty
+        beta: Confidence scaling factor (e.g. 3.0 for 99.7% Gaussian confidence)
+
     Returns:
-        h, constraint_row, constraint_bound, d, vr, vh
-    Where:
-        constraint_row  = Lie_g_h @ Jlin
-        constraint_bound= -(Lie_g_h @ dJlin @ dq) - Lie_f_h - gamma*h - h_chi*delta_H
+        h: Barrier margin [m]
+        constraint_row: Gradient row vector w.r.t joint accelerations in R^(nq)
+        constraint_bound: Scalar lower bound for QP inequality constraint
+        d: Current distance [m]
+        vr, vh: Projected velocities along line of sight [m/s]
     """
     h, Lie_f_h, Lie_g_h, d, vr, vh, h_chi = compute_h_and_lie_numba(
-        translation_bt, obs_pos, vel_lineare, v_obs, Tr, a_s, C, obs_acc, atol
+        translation_bt, obs_pos, vel_lineare, v_obs, Tr, a_s, C, obs_acc, atol, tc
     )
 
     n = Jlin.shape[1]
     constraint_row = np.zeros(n, dtype=np.float64)
     constraint_bound = 0.0
+
     if HAS_CBF:
+        # Compute row vector: constraint_row = Lie_g_h @ Jlin
         for j in range(n):
             constraint_row[j] = (
                 Lie_g_h[0] * Jlin[0, j] +
@@ -442,6 +628,7 @@ def compute_h_and_constraints_numba(
                 Lie_g_h[2] * Jlin[2, j]
             )
 
+        # Compute apparent acceleration contribution: Lie_g_h @ (dJlin @ dq)
         tmp = np.zeros(n, dtype=np.float64)
         for j in range(n):
             tmp[j] = (
@@ -454,5 +641,20 @@ def compute_h_and_constraints_numba(
         for j in range(n):
             lg_dJ_dq += tmp[j] * dq[j]
 
-        constraint_bound = -lg_dJ_dq - Lie_f_h - gamma * h - h_chi * delta_H
+        # Calculate robust margin:
+        # If full covariance/standard deviations are provided, use state-dependent quadratic form
+        has_covariance = (sigma_psi[0] > 0.0 or sigma_psi[1] > 0.0 or sigma_psi[2] > 0.0 or sigma_psi[3] > 0.0)
+        if has_covariance:
+            sigma_eff = np.sqrt(
+                (sigma_psi[0]) ** 2 +
+                (sigma_psi[1]) ** 2 +
+                (sigma_psi[2]) ** 2 +
+                (sigma_psi[3]) ** 2
+            )
+            robust_margin = beta * sigma_eff
+            constraint_bound = -lg_dJ_dq - Lie_f_h - gamma * (h - robust_margin)
+        else:
+            # Scalar uncertainty bound
+            constraint_bound = -lg_dJ_dq - Lie_f_h - gamma * h - h_chi * delta_H
+
     return h, constraint_row, constraint_bound, d, vr, vh

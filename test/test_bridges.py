@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from cbf_python.bridges.fake_bridge import FakeCommandBridge
+from cbf_python.bridges.fake_bridge import FakeCommandBridge, MultiRegionGestureSequencer
 from cbf_python.bridges.joint_bridge import JointStateCommandBridge
 from cbf_python.utils.simulation_helpers import HOME, UR10E_JOINTS
 
@@ -36,3 +36,26 @@ def test_bridge_threshold_validation():
     jump_q = HOME + 1.0
     with pytest.raises(ValueError, match="exceeds configured threshold"):
         bridge.sendCommand(jump_q)
+
+
+def test_multi_region_gesture_sequencer():
+    """Verify predictive multi-region gesture sequencing advances correctly."""
+    bridge = FakeCommandBridge(ordered_joint_names=UR10E_JOINTS)
+    sequencer = MultiRegionGestureSequencer(bridge, T_total=10.0)
+
+    assert len(sequencer.gestures) == 3
+
+    # Step at t=0, robot at s=0 -> should be waiting at rest
+    pos, vel, acc, ev = sequencer.step(t=0.0, trajectory_time=0.0, curr_scaling=1.0)
+    assert pos.shape[1] == 3
+    assert np.all(vel == 0.0)
+    assert ev is None
+
+    # Step when robot approaches target 0 (target_s = 4.75, lead_time = 2.30)
+    # At curr_s = 2.50, t_eta = 2.25 <= 2.30 -> should trigger!
+    pos, vel, acc, ev = sequencer.step(t=2.50, trajectory_time=2.50, curr_scaling=1.0)
+    assert ev is not None
+    assert "Center Workstation Reach" in ev
+    assert sequencer.active_gesture is not None
+
+    bridge.shutdown()

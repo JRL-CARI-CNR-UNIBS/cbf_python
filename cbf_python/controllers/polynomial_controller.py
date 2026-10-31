@@ -1,10 +1,30 @@
 """
 Polynomial dynamic parameter CBF controller and configuration.
+
+This module implements a dynamic parameter modulation strategy for the Quadratic Program (QP)
+Control Barrier Function controller. The controller objective weights (lambda_pos, lambda_vel,
+lambda_scaling, lambda_acc) and barrier responsiveness gain (gamma) are continuously adjusted
+as smooth piecewise-polynomial functions of the barrier certificate margin h.
+
+Theoretical Overview:
+    When the robot is far from obstacles (h >= h_t), the controller prioritizes nominal trajectory
+    progression and path tracking (using parameter values lambda_f). As an obstacle approaches
+    and the barrier margin decreases toward the safety boundary (0 <= h < h_t), the weights
+    smoothly transition to safety-oriented values (lambda_0):
+        - lambda(h) = lambda_0,                                       if h < 0
+        - lambda(h) = lambda_0 + (lambda_f - lambda_0) * P(h / h_t),  if 0 <= h < h_t
+        - lambda(h) = lambda_f,                                       if h >= h_t
+    where the blending polynomial is parameterized by exponents n, m >= 1 and convex weight w in [0, 1]:
+        P(s) = w * s^n + (1 - w) * s^m,  with s = h / h_t in [0, 1].
+
+    Integrity Checking:
+        The configuration class verifies that the polynomial transition is monotonic, non-negative,
+        and free from derivative discontinuities or undesirable undershoot/overshoot extrema.
 """
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Sequence
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -15,16 +35,16 @@ from cbf_python.controllers.base_optimal_controller import (
 
 
 def compute_generic_lambda(h: float, ht: float, params: Sequence[float]) -> float:
-    """Compute generic piece-wise polynomial lambda parameter as a function of barrier margin h.
+    """
+    Compute piece-wise polynomial weight parameter as a function of barrier margin h.
 
-    Parameters
-    ----------
-    h : float
-        Current barrier certificate value.
-    ht : float
-        Transition threshold margin.
-    params : sequence of float
-        [lambda_0, lambda_f, n, m, w]
+    Parameters:
+        h: Current barrier certificate margin [m] (h >= 0 indicates safe set)
+        ht: Transition threshold margin [m]
+        params: Sequence of polynomial parameters [lambda_0, lambda_f, n, m, w]
+
+    Returns:
+        Interpolated parameter value.
     """
     lambda_0 = params[0]
     lambda_f = params[1]
@@ -33,10 +53,13 @@ def compute_generic_lambda(h: float, ht: float, params: Sequence[float]) -> floa
     w = params[4]
 
     if h < 0.0:
+        # Incursion inside protective boundary: clamp to maximum safety weight
         return lambda_0
     elif h >= ht:
+        # Sufficient clearance: maintain nominal tracking weight
         return lambda_f
     else:
+        # Smooth polynomial transition
         norm_h = h / ht if ht > 0.0 else 0.0
         return lambda_0 + (lambda_f - lambda_0) * (w * (norm_h ** n) + (1.0 - w) * (norm_h ** m))
 
@@ -86,7 +109,7 @@ class PolynomialControllerConfig(ControllerConfig):
         self.polynomial_dict["vel"] = [self.lambda_0_vel, self.lambda_f_vel, self.n_vel, self.m_vel, self.w_vel]
         self.polynomial_dict["acc"] = [self.lambda_0_acc, self.lambda_f_acc, self.n_acc, self.m_acc, self.w_acc]
         self.polynomial_dict["scaling"] = [self.lambda_0_scaling, self.lambda_f_scaling, self.n_scaling, self.m_scaling, self.w_scaling]
-        self.polynomial_dict["gamma"] = [self.gamma_0, self.gamma_f, self.n_gamma, self.n_gamma, self.w_gamma]
+        self.polynomial_dict["gamma"] = [self.gamma_0, self.gamma_f, self.n_gamma, self.m_gamma, self.w_gamma]
 
     def __str__(self) -> str:
         base_str = super().__str__().replace("ControllerConfig:", "PolynomialControllerConfig:")

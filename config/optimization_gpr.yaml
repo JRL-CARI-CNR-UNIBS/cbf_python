@@ -54,10 +54,10 @@ grid:
 
 # Controller Hyperparameter Optimization Search Ranges
 ranges:
-  lambda_pos: [10.0, 100000.0]
-  lambda_vel: [0.001, 1000.0]
-  lambda_acc: [1.0e-15, 1.0e-4]
-  lambda_scaling: [10.0, 1000.0]
-  gamma: [0.1, 20.0]
+  lambda_pos: [100.0, 100000.0]
+  lambda_vel: [0.01, 100.0]
+  lambda_acc: [1.0e-11, 1.0e-4]
+  lambda_scaling: [5.0, 500.0]
+  gamma: [0.5, 15.0]
   delta_deg: [1.0, 10.0]
 

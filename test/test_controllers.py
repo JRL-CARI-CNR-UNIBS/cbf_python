@@ -325,7 +325,7 @@ def test_deadline_missed_cycles(model_wrapper):
         deadline_missed=True,
     )
     assert ctrl.N_miss == 1
-    assert np.allclose(out2["ddq"], u_prev[:-1])
+    assert np.allclose(out2["ddq"], u_prev[:ctrl.nq])
 
     # Step 3: N_miss = 2 -> Emergency braking u^bk
     dq_before = ctrl.dq.copy()

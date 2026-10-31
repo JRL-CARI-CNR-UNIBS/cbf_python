@@ -26,7 +26,7 @@ common:
   controller:
     Tc: 0.002
     C: 0.25
-    C_0: 0.250
+    C_0: 0.10
     beta: 3.291
     T_f_bar: 0.3
     sigma_p: 0.015
@@ -46,7 +46,7 @@ common:
 # 1. Optimal CBF Controller (run_cbf_optimal)
 cbf_optimal:
   parameters:
-    test_name: "recorded_skeleton_23_h_-0.1_par"
+    test_name: "recorded_skeleton_23"
     h_cfg: "article"
     v_cfg: "article"
 

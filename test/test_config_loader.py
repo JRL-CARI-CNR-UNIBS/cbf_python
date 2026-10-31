@@ -51,11 +51,15 @@ def test_populate_controller_config():
         "Tc": 0.005,
         "gamma": 8.0,
         "lambda_pos": 1234.5,
+        "use_soft_tube": True,
+        "lambda_tube": 50000.0,
     }
     populate_controller_config(cfg, data)
     assert cfg.Tc == 0.005
     assert cfg.gamma == 8.0
     assert cfg.lambda_pos == 1234.5
+    assert cfg.use_soft_tube is True
+    assert cfg.lambda_tube == 50000.0
 
 
 def test_populate_polynomial_config():

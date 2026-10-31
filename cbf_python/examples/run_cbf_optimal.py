@@ -16,7 +16,7 @@ from pinocchio.visualize import MeshcatVisualizer
 import rclpy
 from sharework import loadSharework
 
-from cbf_python.bridges.fake_bridge import FakeCommandBridge
+from cbf_python.bridges.fake_bridge import FakeCommandBridge, MultiRegionGestureSequencer
 from cbf_python.bridges.joint_bridge import JointStateCommandBridge
 from cbf_python.controllers.base_optimal_controller import BCFOptimalController, ControllerConfig
 from cbf_python.trajectory.joint_interpolator import SegmentedJointTrap
@@ -193,10 +193,72 @@ def main(config_file: str = "run.yaml") -> None:
     trj_error_log: List[float] = []
     scaling_log: List[float] = []
 
+    mode = str(fake_cfg.get("mode", "multi_region")).lower()
+    sequencer: Optional[MultiRegionGestureSequencer] = None
+    if not use_bridge and mode == "multi_region":
+        sequencer = MultiRegionGestureSequencer(bridge, gestures=fake_cfg.get("gestures"), T_total=T_total)
+
+    target_xi = float(fake_cfg.get("target_xi", 0.475))
+    lead_time = float(fake_cfg.get("lead_time", 2.80))
+    gesture_duration = float(fake_cfg.get("gesture_duration", 7.0))
+    rearm_for_next_lap = bool(fake_cfg.get("rearm_for_next_lap", True))
+
+    target_s = target_xi * T_total
+    triggered = False
+    t_trigger = 0.0
+    curr_scaling = 1.0
+
     print(f"Starting CBF Optimal Control Loop for duration = {duration}s...")
+    if not use_bridge and mode == "multi_region":
+        print(f"Obstacle mode: MULTI-REGION GESTURE SEQUENCING ({len(sequencer.gestures)} authentic sectors)")
+    elif not use_bridge and mode == "predictive_trigger":
+        print(f"Obstacle mode: SINGLE PREDICTIVE TRIGGER (target_xi={target_xi:.3f}, lead_time={lead_time:.2f}s)")
+    else:
+        print("Obstacle mode: TIME-INDEXED replay")
+
     while t < duration and not stop_event.is_set():
         loop_start = time.perf_counter()
-        obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=t)
+
+        if not use_bridge and sequencer is not None:
+            obs_pos, obs_vel, obs_acc, ev_msg = sequencer.step(t, trajectory_time, curr_scaling)
+            if ev_msg:
+                print(ev_msg)
+        elif not use_bridge and mode == "predictive_trigger":
+            curr_s = trajectory_time % T_total
+            v_est = max(0.05, curr_scaling)
+
+            if not triggered:
+                if curr_s < target_s:
+                    t_eta = (target_s - curr_s) / v_est
+                else:
+                    t_eta = (target_s + T_total - curr_s) / v_est
+
+                if t_eta <= lead_time:
+                    triggered = True
+                    t_trigger = t
+                    print(f"[Smooth Predictive Trigger] Launched authentic human gesture at t={t:.2f}s (robot s={curr_s:.2f}s, xi={curr_s/T_total:.3f}, ETA={t_eta:.2f}s)")
+
+            if triggered:
+                tau = t - t_trigger
+                if gesture_duration > 0.0 and tau >= gesture_duration:
+                    if rearm_for_next_lap and (curr_s < target_s - 1.0 or curr_s > target_s + 2.0):
+                        triggered = False
+                        obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=0.0)
+                        obs_vel = np.zeros_like(obs_vel)
+                        obs_acc = np.zeros_like(obs_acc)
+                    else:
+                        obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=0.0)
+                        obs_vel = np.zeros_like(obs_vel)
+                        obs_acc = np.zeros_like(obs_acc)
+                else:
+                    obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=tau)
+            else:
+                obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=0.0)
+                obs_vel = np.zeros_like(obs_vel)
+                obs_acc = np.zeros_like(obs_acc)
+        else:
+            obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=t)
+
         nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
 
         out = ctrl.step(
@@ -207,6 +269,8 @@ def main(config_file: str = "run.yaml") -> None:
             nominal_Dq=nominal_Dq,
             nominal_DDq=nominal_DDq,
         )
+
+        curr_scaling = out["Dtrajectory_time"]
 
         q = out["q"]
         bridge.sendCommand(q)
@@ -233,8 +297,14 @@ def main(config_file: str = "run.yaml") -> None:
         computation_times.append(elapsed)
 
         if viz_daemon:
-            hud_text = f"Scaling: {out['Dtrajectory_time']:.2f}\nh_min: {out['h_min']:.3f}m"
-            viz_daemon.push_state(q=q, Tgoal=out["Tbt_nominal"], obstacles=[p for p in obs_pos], obstacle_velocities=[v for v in obs_vel], viz_string=hud_text)
+            hud_text = f"Scaling: {out['Dtrajectory_time']:.2f}\nh_min: {out['h_min']:.3f}m\nS_idx: {s_index:.3f}m"
+            viz_daemon.push_state(
+                q=q,
+                Tgoal=out["Tbt_nominal"],
+                obstacles=[p for p in obs_pos],
+                obstacle_velocities=[v for v in obs_vel],
+                viz_string=hud_text,
+            )
 
         t += cfg.Tc
         trajectory_time = out["trajectory_time"]

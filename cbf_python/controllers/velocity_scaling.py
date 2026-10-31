@@ -86,17 +86,23 @@ def compute_velocity_scaling_for_human_proximity(
             if approach_speed <= 0.0:
                 continue
 
+            # Evaluate maximum permissible robot approach speed under ISO/TS 15066 SSM standard:
+            # Separation model: d >= C + (v_r + v_h)*T_r + v_r^2 / (2*a_s)
+            # Rearranging as a quadratic equation in v_r:
+            #     v_r^2 + 2*a_s*T_r * v_r - 2*a_s*(d - C - v_h*T_r) = 0
+            # Quadratic formula root for maximum permissible speed:
+            #     v_r_max = sqrt((v_h + a_s*T_r)^2 + 2*a_s*(d - C)) - (v_h + a_s*T_r)
             radicand = (
-                human_max_speed ** 2
-                + (max_deceleration * reaction_time) ** 2
-                - (2.0 * max_deceleration * (minimum_distance - dist))
+                (human_max_speed + max_deceleration * reaction_time) ** 2
+                + 2.0 * max_deceleration * (dist - minimum_distance)
             )
             radicand = max(radicand, 0.0)
 
-            max_allowed = (radicand ** 0.5) - (max_deceleration * reaction_time) - human_max_speed
+            max_allowed = np.sqrt(radicand) - (max_deceleration * reaction_time + human_max_speed)
             max_allowed = max(max_allowed, 0.0)
 
             if approach_speed > max_allowed:
+                # Scale down path velocity proportionally to respect safety clearance
                 velocity_scaling = min(velocity_scaling, max_allowed / approach_speed)
                 if velocity_scaling <= 0.0:
                     return 0.0

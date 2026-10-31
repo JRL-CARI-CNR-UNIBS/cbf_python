@@ -37,20 +37,26 @@ def get_config_path(config_name: str) -> Path:
 
 
 def resolve_path(relative_or_absolute_path: Union[str, Path]) -> Path:
-    """Resolve a relative data or config path against the package root if not absolute."""
+    """Resolve a relative data or config path against the package root or params directory."""
     p = Path(relative_or_absolute_path)
-    if p.is_absolute():
+    if p.is_absolute() and p.exists():
         return p
+
     root = get_package_root()
-    # Check directly from root
-    candidate = root / p
-    if candidate.exists():
-        return candidate
-    # Check in cbf_python subfolder (for data directories)
-    candidate_sub = root / "cbf_python" / p
-    if candidate_sub.exists():
-        return candidate_sub
-    return candidate
+
+    # Search candidates in priority order
+    candidates = [
+        root / p,
+        root / "cbf_python" / p,
+        root / "cbf_python_params" / p,
+        Path.cwd() / p,
+    ]
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+
+    return (root / p).resolve()
 
 
 def deep_merge_dicts(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
@@ -166,6 +172,10 @@ def populate_controller_config(
         cfg.lambda_acc = float(data["lambda_acc"])
     if "DDtrajectory_time_max" in data:
         cfg.DDtrajectory_time_max = float(data["DDtrajectory_time_max"])
+    if "use_soft_tube" in data:
+        cfg.use_soft_tube = bool(data["use_soft_tube"])
+    if "lambda_tube" in data:
+        cfg.lambda_tube = float(data["lambda_tube"])
 
     if "prefix" in data:
         cfg.prefix = str(data["prefix"])

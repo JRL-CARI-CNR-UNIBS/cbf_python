@@ -12,6 +12,23 @@ fake_bridge:
   csv_path: "skeleton_vectors/skeleton_vectors_23.csv"
   slowdown_factor: 1.0
   t0: 0.0
+  mode: "multi_region"           # "multi_region" (segmented predictive reaches across center, left edge, and return), "continuous", or "predictive_trigger"
+  gestures:
+    - name: "Center Workstation Reach"
+      target_xi: 0.475
+      lead_time: 2.30
+      csv_start: 0.50
+      csv_end: 6.20
+    - name: "Left Edge Reach"
+      target_xi: 0.770
+      lead_time: 2.00
+      csv_start: 7.50
+      csv_end: 10.50
+    - name: "Return Sweep Reach"
+      target_xi: 0.890
+      lead_time: 0.90
+      csv_start: 10.80
+      csv_end: 13.20
   camera_pose:
     quaternion: [0.83, 0.185, 0.513, 0.12]
     type_0_translation: [-0.094, -0.93, 2.309]
