@@ -319,6 +319,30 @@ pytest test/ -v
 
 ---
 
+### F. Distributed Optimization with Optuna & PostgreSQL
+
+To run multi-threaded or distributed Optuna parameter studies, launch a local PostgreSQL container:
+
+```bash
+docker run --name optuna-postgres \
+  -e POSTGRES_USER=optuna \
+  -e POSTGRES_PASSWORD=optuna_pw \
+  -e POSTGRES_DB=optuna_db \
+  -v optuna_postgres_data:/var/lib/postgresql \
+  -p 5432:5432 \
+  -d postgres
+```
+
+To restart the container:
+
+```bash
+docker start optuna-postgres
+```
+
+The studies in `run_optimization.py`, `run_optimization_poly.py`, and `run_optimization_gpr.py` will automatically connect to `postgresql+psycopg2://optuna:optuna_pw@localhost:5432/optuna_db` (or fall back to SQLite if offline).
+
+---
+
 ## 7. License & Citation
 
 This software is distributed under the Apache-2.0 License.

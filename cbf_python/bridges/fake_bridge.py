@@ -27,7 +27,7 @@ class FakeCommandBridge(BaseCommandBridgeABC):
         threshold: float = 0.05,
         csv_path: Optional[str] = None,
         Tworld_to_cam: Optional[pin.SE3] = None,
-        slowdown_factor: float = 0.4,
+        slowdown_factor: float = 1.0,
         on_publish: Optional[Callable[[np.ndarray], None]] = None,
         auto_diff_if_missing: bool = False,
         t0: Optional[float] = None,
@@ -115,3 +115,112 @@ class FakeCommandBridge(BaseCommandBridgeABC):
     def shutdown(self) -> None:
         """Shut down fake bridge (no-op as it does not spawn background ROS executors)."""
         pass
+
+
+class MultiRegionGestureSequencer:
+    """Manages multi-region predictive human disturbance sequencing across nominal path segments.
+
+    Enables high-density, multi-waypoint collaborative human-robot interactions without
+    artificial freezing or time-drift desynchronization. Predictively launches authentic
+    recorded motion-capture gestures so their peak intrusions align with the robot's
+    arrival at specific sectors (e.g. center workstation, left edge, return boundary).
+    """
+
+    def __init__(
+        self,
+        bridge: FakeCommandBridge,
+        gestures: Optional[List[dict]] = None,
+        T_total: float = 14.93,
+    ) -> None:
+        self.bridge = bridge
+        self.T_total = float(T_total)
+
+        if not gestures:
+            self.gestures = [
+                {
+                    "name": "Center Workstation Reach",
+                    "target_xi": 0.475,
+                    "lead_time": 2.30,
+                    "csv_start": 0.50,
+                    "csv_end": 6.20,
+                },
+                {
+                    "name": "Left Edge Reach",
+                    "target_xi": 0.770,
+                    "lead_time": 2.00,
+                    "csv_start": 7.50,
+                    "csv_end": 10.50,
+                },
+                {
+                    "name": "Return Sweep Reach",
+                    "target_xi": 0.890,
+                    "lead_time": 0.90,
+                    "csv_start": 10.80,
+                    "csv_end": 13.20,
+                },
+            ]
+        else:
+            self.gestures = [dict(g) for g in gestures]
+
+        for g in self.gestures:
+            g["target_s"] = float(g.get("target_xi", 0.5)) * self.T_total
+            g["lead_time"] = float(g.get("lead_time", 2.0))
+            g["csv_start"] = float(g.get("csv_start", 0.0))
+            g["csv_end"] = float(g.get("csv_end", 5.0))
+            g["duration"] = g["csv_end"] - g["csv_start"]
+
+        self.current_idx = 0
+        self.active_gesture: Optional[dict] = None
+        self.t_trigger: float = 0.0
+
+    def step(
+        self, t: float, trajectory_time: float, curr_scaling: float
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Optional[str]]:
+        """Advance the sequencer and return (obs_pos, obs_vel, obs_acc, event_msg)."""
+        curr_s = trajectory_time % self.T_total
+        v_est = max(0.05, curr_scaling)
+        event_msg: Optional[str] = None
+
+        g = self.gestures[self.current_idx]
+
+        if self.active_gesture is None:
+            target_s = g["target_s"]
+            lead_time = g["lead_time"]
+
+            if curr_s < target_s:
+                t_eta = (target_s - curr_s) / v_est
+            else:
+                t_eta = (target_s + self.T_total - curr_s) / v_est
+
+            if t_eta <= lead_time and (target_s - curr_s) > -0.5:
+                self.active_gesture = g
+                self.t_trigger = t
+                event_msg = (
+                    f"[Multi-Region Trigger] Launched {g['name']} at t={t:.2f}s "
+                    f"(robot s={curr_s:.2f}s, xi={curr_s/self.T_total:.3f}, ETA={t_eta:.2f}s)"
+                )
+
+        if self.active_gesture is not None:
+            elapsed_in_g = t - self.t_trigger
+            if elapsed_in_g >= self.active_gesture["duration"]:
+                self.active_gesture = None
+                self.current_idx = (self.current_idx + 1) % len(self.gestures)
+                pos, vel, acc = self.bridge.getObstacles(elapsed=0.0)
+                vel = np.zeros_like(vel)
+                acc = np.zeros_like(acc)
+            else:
+                csv_t = self.active_gesture["csv_start"] + elapsed_in_g
+                pos, vel, acc = self.bridge.getObstacles(elapsed=csv_t)
+        else:
+            pos, vel, acc = self.bridge.getObstacles(elapsed=0.0)
+            vel = np.zeros_like(vel)
+            acc = np.zeros_like(acc)
+
+        return pos, vel, acc, event_msg
+
+    def reset(self) -> None:
+        """Reset sequencer state."""
+        self.current_idx = 0
+        self.active_gesture = None
+        self.t_trigger = 0.0
+

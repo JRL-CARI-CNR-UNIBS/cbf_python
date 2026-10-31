@@ -1,31 +1,98 @@
 """
 CBF Python Package: Modular, high-performance Control Barrier Functions for robot manipulators.
+
+This package provides:
+    - Optimization-based motion controllers enforcing Speed and Separation Monitoring (SSM)
+    - High-performance Numba Lie-derivative and QP assembly kernels
+    - Real-time parameter adaptation via piecewise polynomial and Gaussian mixture blending
+    - Robot command and sensor bridges for both hardware execution and simulated human tracking
 """
 
-import sys
+from __future__ import annotations
 import os
+import sys
 from pathlib import Path
 
-# Automatically ensure CMEEL libraries from virtual environment have precedence over conflicting system paths
-_venv_cmeel_py = Path("/home/galileo/projects/python_venv/galileo_venv/lib/python3.12/site-packages/cmeel.prefix/lib/python3.12/site-packages")
-if _venv_cmeel_py.exists():
-    _venv_cmeel_str = str(_venv_cmeel_py)
-    if _venv_cmeel_str in sys.path:
-        sys.path.remove(_venv_cmeel_str)
-    sys.path.insert(0, _venv_cmeel_str)
 
-_venv_cmeel_lib = Path("/home/galileo/projects/python_venv/galileo_venv/lib/python3.12/site-packages/cmeel.prefix/lib")
-if _venv_cmeel_lib.exists():
-    _cmeel_lib_str = str(_venv_cmeel_lib)
-    _ld_parts = os.environ.get("LD_LIBRARY_PATH", "").split(":")
-    if _ld_parts[0] != _cmeel_lib_str and not os.environ.get("_CMEEL_REEXEC"):
-        os.environ["LD_LIBRARY_PATH"] = f"{_cmeel_lib_str}:{os.environ.get('LD_LIBRARY_PATH', '')}".rstrip(":")
-        os.environ["_CMEEL_REEXEC"] = "1"
-        try:
-            if hasattr(sys, "orig_argv") and sys.orig_argv:
-                os.execv(sys.orig_argv[0], sys.orig_argv)
-            else:
-                os.execv(sys.executable, [sys.executable] + sys.argv)
-        except Exception:
-            pass
+def _configure_cmeel_environment() -> None:
+    """Dynamically configure sys.path and LD_LIBRARY_PATH for CMEEL-packaged Pinocchio."""
+    candidate_prefixes = [Path(sys.prefix)]
 
+    if "VIRTUAL_ENV" in os.environ:
+        candidate_prefixes.append(Path(os.environ["VIRTUAL_ENV"]))
+
+    # Check local workspace python_venv if present
+    workspace_venv = Path(__file__).resolve().parent.parent.parent / "python_venv" / "galileo_venv"
+    if workspace_venv.exists():
+        candidate_prefixes.append(workspace_venv)
+
+    py_ver = f"python{sys.version_info.major}.{sys.version_info.minor}"
+
+    for prefix in candidate_prefixes:
+        cmeel_root = prefix / "lib" / py_ver / "site-packages" / "cmeel.prefix"
+        if not cmeel_root.exists():
+            cmeel_root = prefix / "lib" / "site-packages" / "cmeel.prefix"
+
+        if cmeel_root.exists():
+            cmeel_py = cmeel_root / "lib" / py_ver / "site-packages"
+            if cmeel_py.exists():
+                cmeel_py_str = str(cmeel_py)
+                if cmeel_py_str in sys.path:
+                    sys.path.remove(cmeel_py_str)
+                sys.path.insert(0, cmeel_py_str)
+
+            cmeel_lib = cmeel_root / "lib"
+            if cmeel_lib.exists():
+                cmeel_lib_str = str(cmeel_lib)
+                ld_parts = os.environ.get("LD_LIBRARY_PATH", "").split(":")
+                if ld_parts[0] != cmeel_lib_str and not os.environ.get("_CMEEL_REEXEC"):
+                    os.environ["LD_LIBRARY_PATH"] = f"{cmeel_lib_str}:{os.environ.get('LD_LIBRARY_PATH', '')}".rstrip(":")
+                    os.environ["_CMEEL_REEXEC"] = "1"
+                    try:
+                        if hasattr(sys, "orig_argv") and sys.orig_argv:
+                            os.execv(sys.orig_argv[0], sys.orig_argv)
+                        else:
+                            os.execv(sys.executable, [sys.executable] + sys.argv)
+                    except Exception:
+                        pass
+            break
+
+
+_configure_cmeel_environment()
+
+__version__ = "0.1.0"
+
+# Public API convenience imports
+from cbf_python.controllers.base_optimal_controller import (
+    BCFOptimalController,
+    ControllerConfig,
+)
+from cbf_python.controllers.polynomial_controller import (
+    PolynomialOptimalController,
+    PolynomialControllerConfig,
+)
+from cbf_python.controllers.gaussian_controller import (
+    GaussianController,
+    GaussianControllerConfig,
+    GaussianSet,
+)
+from cbf_python.controllers.pid_cbf_controller import UR10CBFController
+from cbf_python.bridges.fake_bridge import FakeCommandBridge
+from cbf_python.bridges.joint_bridge import JointStateCommandBridge
+from cbf_python.utils.config_loader import resolve_path, load_yaml
+
+__all__ = [
+    "BCFOptimalController",
+    "ControllerConfig",
+    "PolynomialOptimalController",
+    "PolynomialControllerConfig",
+    "GaussianController",
+    "GaussianControllerConfig",
+    "GaussianSet",
+    "UR10CBFController",
+    "FakeCommandBridge",
+    "JointStateCommandBridge",
+    "resolve_path",
+    "load_yaml",
+    "__version__",
+]

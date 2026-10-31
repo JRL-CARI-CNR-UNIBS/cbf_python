@@ -1,5 +1,26 @@
 """
 Gaussian mixture parameter blending CBF controller and configuration.
+
+This module implements continuous parameter adaptation using a Gaussian Mixture Model (GMM)
+or Radial Basis Function network over the feature state:
+    x_feat = [h, d, v_rel]^T in R^3
+where:
+    - h: Control barrier function margin [m]
+    - d: Minimum separation distance [m]
+    - v_rel: Relative velocity along the line of sight [m/s]
+
+Theoretical Overview:
+    A set of N predefined Gaussian clusters {N(mu_i, Sigma_i)}_{i=1}^N partition the operational
+    state space into distinct interaction regimes (e.g. nominal tracking, moderate deceleration,
+    close-proximity evasion). Each cluster carries a dedicated set of controller objective weights
+    lambda_ref_i and barrier gain gamma_ref_i.
+    At runtime, the controller evaluates the multivariate Gaussian density for each cluster:
+        w_raw_i = (1 / sqrt((2*pi)^3 * |Sigma_i|)) * exp(-0.5 * (x - mu_i)^T * Sigma_i^-1 * (x - mu_i))
+    Normalizing the weights:
+        w_i = w_raw_i / sum_k w_raw_k
+    yields a partition of unity, producing smoothly blended parameters:
+        lambda = sum_i w_i * lambda_ref_i
+        gamma = sum_i w_i * gamma_ref_i
 """
 
 from __future__ import annotations

@@ -208,6 +208,13 @@ marimo/_lsp/
 __marimo__/
 
 
+# Build & IDE artifacts
+.idea/
+.vscode/
+*.egg-info/
+.pytest_cache/
+
+# Numba compiler cache
 *.nbc
 *.nbi
 *.nbo
@@ -215,8 +222,12 @@ __marimo__/
 *.dist/
 *.lprof
 
-resullts/
+# Simulation results & Large motion capture datasets
+results/
+skeleton_vectors
 skeleton_vectors/
-
+params_csv
+params_csv/
+cbf_python_params/
 *.csv
 *.db

@@ -70,10 +70,6 @@ def save_data_multiobj(
         print("Not enough completed trials to normalize and save.")
         return
 
-    v_rate = df_success["values_mean_tv_cartesian"] if "values_mean_tv_cartesian" in df_success else df_success.iloc[:, 0]
-    m_scale = df_success["values_mean_scaling"] if "values_mean_scaling" in df_success else df_success.iloc[:, 1]
-    m_err = df_success["values_mean_trajectory_error"] if "values_mean_trajectory_error" in df_success else df_success.iloc[:, 2]
-
     def normalize(series: pd.Series, minimize: bool = False) -> pd.Series:
         s_min, s_max = float(series.min()), float(series.max())
         if s_max == s_min:
@@ -81,13 +77,25 @@ def save_data_multiobj(
         norm = (series - s_min) / (s_max - s_min)
         return 1.0 - norm if minimize else norm
 
-    norm_v_rate = normalize(v_rate, minimize=True)
-    norm_m_scale = normalize(m_scale, minimize=False)
-    norm_m_err = normalize(m_err, minimize=True)
+    val_cols = [c for c in df_success.columns if c.startswith("values_")]
+    if not val_cols:
+        val_cols = [c for c in df_success.columns if c in ["value"]]
 
-    df_success["calculated_cost"] = (
-        (weights[1] * norm_m_scale) + (weights[0] * norm_v_rate) + (weights[2] * norm_m_err)
-    )
+    directions = getattr(study, "directions", None)
+    n_objs = len(val_cols)
+    w_list = list(weights)[:n_objs] if weights is not None else [1.0] * n_objs
+    if len(w_list) < n_objs:
+        w_list.extend([1.0] * (n_objs - len(w_list)))
+
+    cost = pd.Series(0.0, index=df_success.index)
+    for idx, col in enumerate(val_cols):
+        is_min = True
+        if directions is not None and idx < len(directions):
+            is_min = "min" in str(directions[idx]).lower()
+        norm_series = normalize(df_success[col], minimize=is_min)
+        cost += w_list[idx] * norm_series
+
+    df_success["calculated_cost"] = cost
 
     df_sorted = df_success.sort_values(by="calculated_cost", ascending=False)
     cols_for_uniqueness = [c for c in df_sorted.columns if c.startswith("values_") or c.startswith("params_")]

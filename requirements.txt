@@ -1,0 +1,13 @@
+# Core runtime dependencies
+numpy>=1.24.0
+scipy>=1.10.0
+numba>=0.58.0
+quadprog>=0.1.11
+pyyaml>=6.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+
+# Optional / Simulation dependencies
+optuna>=3.0.0
+meshcat>=0.3.2
+pytest>=7.0
