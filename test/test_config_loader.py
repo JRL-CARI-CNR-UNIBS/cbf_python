@@ -12,6 +12,8 @@ from cbf_python.utils.config_loader import (
     populate_controller_config,
     resolve_path,
     get_config_path,
+    load_controller_params_from_csv,
+    populate_controller_from_params_config,
 )
 
 
@@ -81,3 +83,59 @@ def test_resolve_path():
     resolved = resolve_path("config/bridges.yaml")
     assert resolved.exists()
     assert resolved.is_file()
+
+
+def test_load_controller_params_from_csv():
+    """Verify loading optimal controller parameters from CSV with various selectors."""
+    cfg = ControllerConfig()
+
+    # 1. By Rank (1 = best)
+    meta = load_controller_params_from_csv(cfg, "params_csv/best_10_trials.csv", rank=1, verbose=False)
+    assert meta["rank"] == 1
+    assert meta["trial_number"] == 2528
+    assert abs(cfg.gamma - 2.38196) < 1e-4
+    assert abs(cfg.lambda_pos - 67337.3) < 1.0
+
+    # 2. By Rank (2 = 2nd best)
+    meta2 = load_controller_params_from_csv(cfg, "params_csv/best_10_trials.csv", rank=2, verbose=False)
+    assert meta2["rank"] == 2
+    assert meta2["trial_number"] == 4001
+    assert abs(cfg.gamma - 2.1979) < 1e-4
+
+    # 3. By Trial Number
+    meta3 = load_controller_params_from_csv(cfg, "params_csv/best_10_trials.csv", trial_number=4001, verbose=False)
+    assert meta3["trial_number"] == 4001
+    assert meta3["rank"] == 2
+
+    # 4. By set_id matching trial number
+    meta4 = load_controller_params_from_csv(cfg, "params_csv/best_10_trials.csv", set_id="2528", verbose=False)
+    assert meta4["trial_number"] == 2528
+
+    # 5. Out of bounds rank
+    with pytest.raises(IndexError):
+        load_controller_params_from_csv(cfg, "params_csv/best_10_trials.csv", rank=999, verbose=False)
+
+    # 6. Non-existent trial number
+    with pytest.raises(ValueError):
+        load_controller_params_from_csv(cfg, "params_csv/best_10_trials.csv", trial_number=999999, verbose=False)
+
+
+def test_populate_controller_from_params_config():
+    """Verify populating ControllerConfig from a parameters dictionary."""
+    cfg = ControllerConfig(gamma=99.0)
+
+    # Disabled loading
+    res_disabled = populate_controller_from_params_config(
+        cfg, {"load_from_csv": False, "params_filename": "params_csv/best_10_trials.csv"}, verbose=False
+    )
+    assert res_disabled is None
+    assert cfg.gamma == 99.0
+
+    # Enabled loading with rank selector
+    res_enabled = populate_controller_from_params_config(
+        cfg, {"load_from_csv": True, "params_filename": "params_csv/best_10_trials.csv", "rank": 1}, verbose=False
+    )
+    assert res_enabled is not None
+    assert res_enabled["trial_number"] == 2528
+    assert abs(cfg.gamma - 2.38196) < 1e-4
+

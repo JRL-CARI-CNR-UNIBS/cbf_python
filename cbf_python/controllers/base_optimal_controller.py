@@ -86,6 +86,11 @@ class ControllerConfig:
     tool_frame: str = "tool0"
     elbow_frame: str = "forearm_link"
 
+    # Volumetric Capsule Distance Model
+    use_capsules: bool = False                # Enable continuous segment-to-segment capsule checking
+    robot_capsule_radius: float = 0.08        # Robot link cylindrical capsule radius [m]
+    human_capsule_radius: float = 0.08        # Human keypoint/limb sphere/capsule radius [m]
+
     @property
     def delta_H(self) -> float:
         """
@@ -177,6 +182,10 @@ class BCFOptimalController:
         self.elbow_frame_id = self.model.getFrameId(elbow_name)
         # Order frames from base to end-effector so that index -1 corresponds to the tool frame
         self.frames_ids = [self.elbow_frame_id, self.tool_frame_id]
+        # Volumetric capsule segments: segment (0, 1) spans between elbow and tool
+        self.capsule_segments = (
+            np.array([[0, 1]], dtype=np.int64) if cfg.use_capsules else np.empty((0, 2), dtype=np.int64)
+        )
 
         nq = self.model.nq
         self.nq = nq
@@ -222,10 +231,11 @@ class BCFOptimalController:
 
         # Total constraint rows:
         # Scaling (3) + Position (2*nq) + Tube (2*nq) + Velocity (2*nq) + Acceleration (2*nq)
-        # + Slack non-negativity (nq, if enabled) + Pairwise CBFs (max_obstacles * frames)
+        # + Slack non-negativity (nq, if enabled) + Pairwise CBFs (max_obstacles * monitored entities)
         base_constraints = 3 + 2 * 4 * nq + (nq if cfg.use_soft_tube else 0)
+        n_monitored = max(len(self.capsule_segments), 1) if cfg.use_capsules else len(self.frames_ids)
         if useCbf:
-            self.n_constraints = base_constraints + cfg.max_obstacles * len(self.frames_ids)
+            self.n_constraints = base_constraints + cfg.max_obstacles * n_monitored
         else:
             self.n_constraints = base_constraints
 
@@ -348,6 +358,8 @@ class BCFOptimalController:
         # Assemble QP constraints and cost parts in-place
         margin_C0 = cfg.C_0 if getattr(cfg, "C_0", None) is not None else cfg.C
         delta_H = getattr(cfg, "delta_H", 0.0)
+        sigma_psi = np.array([cfg.sigma_p, 0.0, cfg.sigma_v, cfg.sigma_a], dtype=np.float64)
+
         row, h_min, d_min, vr_min, vh_min, htest, dtest, i_h, i_d = assemble_qp_inplace(
             self.P_vel, self.b_pos, self.b_vel, self.b_scaling,
             self.A, self.c,
@@ -360,6 +372,8 @@ class BCFOptimalController:
             frames_p, frames_v, Jlins, dJlins, obs_pos, obs_vel, obs_acc,
             cfg.Tr, cfg.a_s, margin_C0, cfg.gamma, cfg.DDtrajectory_time_max, 1e-12, self.qp_scaling, self.useCbf,
             self.keypoint_to_log, delta_H,
+            sigma_psi, cfg.beta,
+            self.capsule_segments, cfg.robot_capsule_radius, cfg.human_capsule_radius,
         )
 
         if row < self.n_constraints:

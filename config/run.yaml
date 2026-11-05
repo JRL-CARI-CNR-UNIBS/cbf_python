@@ -18,9 +18,7 @@ common:
     duration: 30.0
 
   parameters:
-    set_id: "0"
     parameters_type: "0"
-    params_filename: "params_csv/parameters_set.csv"
     log_path: "results/simulation/scaling"
 
   controller:
@@ -32,12 +30,18 @@ common:
     sigma_p: 0.015
     sigma_v: 0.072
     sigma_a: 0.196
+    use_soft_tube: true
+    lambda_tube: 1.0e5
     gamma: 5.949803744662194
     lambda_pos: 2098.0150948315577
     lambda_vel: 0.34298548889519453
     lambda_scaling: 16.558982747305556
     lambda_acc: 1.4551402158959938e-10
     delta_deg: 4.5
+    # Volumetric Capsule Distance Model (set to true to enable continuous link cylinder collision checking)
+    use_capsules: false
+    robot_capsule_radius: 0.08
+    human_capsule_radius: 0.08
 
 # ------------------------------------------------------------------------------
 # Script-Specific Parameters and Overrides
@@ -49,6 +53,14 @@ cbf_optimal:
     test_name: "recorded_skeleton_23"
     h_cfg: "article"
     v_cfg: "article"
+    # Parameter Loading from Optimization CSV:
+    load_from_csv: true
+    params_filename: "params_csv/best_10_trials.csv"
+    # Identify which parameter set to run:
+    # Option A (Recommended): By rank (1 = top utility trial, 2 = 2nd best, ..., 10 = 10th best)
+    rank: 1
+    # Option B: By exact Optuna trial number (e.g. 2528, 4001, 2204, etc.)
+    # trial_number: 2528
 
 # 2. Cartesian PID + CBF Controller (run_cbf_pid)
 cbf_pid:

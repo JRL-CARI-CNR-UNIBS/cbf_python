@@ -20,7 +20,13 @@ from cbf_python.bridges.fake_bridge import FakeCommandBridge, MultiRegionGesture
 from cbf_python.bridges.joint_bridge import JointStateCommandBridge
 from cbf_python.controllers.base_optimal_controller import BCFOptimalController, ControllerConfig
 from cbf_python.trajectory.joint_interpolator import SegmentedJointTrap
-from cbf_python.utils.config_loader import load_run_config, load_yaml, populate_controller_config, resolve_path
+from cbf_python.utils.config_loader import (
+    load_run_config,
+    load_yaml,
+    populate_controller_config,
+    populate_controller_from_params_config,
+    resolve_path,
+)
 from cbf_python.utils.metrics import StatisticsCalculator, compute_dynamic_risk_index
 from cbf_python.utils.publishers import (
     DoubleArrayCsvPublisher,
@@ -81,7 +87,14 @@ def main(config_file: str = "run.yaml") -> None:
     if "controller" in config:
         populate_controller_config(cfg, config["controller"])
 
-    delta_deg = float(config.get("controller", {}).get("delta_deg", 4.5))
+    # Load parameters from CSV if enabled in config (overwrites baseline weights with optimized set)
+    csv_meta = populate_controller_from_params_config(cfg, params, verbose=True)
+
+    delta_deg = float(
+        csv_meta.get("delta_deg")
+        if (csv_meta and csv_meta.get("delta_deg") is not None)
+        else config.get("controller", {}).get("delta_deg", 4.5)
+    )
     cfg.delta_q_max[0:2] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta_deg)
     cfg.delta_q_max[2:4] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta_deg) * 2
     cfg.delta_q_max[4:6] = np.deg2rad(np.array([1, 1], dtype=np.float64) * delta_deg) * 4

@@ -465,7 +465,7 @@ def compute_g_Lie_terms_numba(
 
 
 @njit(cache=True, fastmath=True)
-def compute_h_and_lie_numba(
+def compute_h_lie_and_grad_numba(
     translation_bt: np.ndarray,
     obs_pos: np.ndarray,
     vel_lineare: np.ndarray,
@@ -478,37 +478,8 @@ def compute_h_and_lie_numba(
     tc: float = 0.0,
 ):
     """
-    Compute barrier margin h, its drift Lie derivative L_f h, and its control Lie derivative L_g h.
-
-    Mathematical Formulation:
-        Let chi = [p_r, p_h, v_r, v_h, a_h] be the system state, and psi(chi) = [d, v_r, v_h, a_h]
-        be the projected features along the unit line-of-sight vector u_rh = (p_r - p_h) / d.
-        By the chain rule:
-            dot{h} = grad_psi h * (dpsi/dt)
-                   = grad_psi h * (J_psi * f(chi)) + grad_psi h * (J_psi * g(chi)) * mu
-                   = L_f h + L_g h * mu
-        where mu = dot{v}_r is the robot Cartesian acceleration.
-
-    Parameters:
-        translation_bt: Robot link point position in world frame [m] (3,)
-        obs_pos: Obstacle / human keypoint position in world frame [m] (3,)
-        vel_lineare: Robot link point linear velocity in world frame [m/s] (3,)
-        v_obs: Human keypoint velocity in world frame [m/s] (3,)
-        Tr: Reaction time latency [s]
-        a_s: Maximum braking capability [m/s^2] (positive scalar)
-        C: Minimum protective clearance distance [m]
-        obs_acc: Human keypoint acceleration in world frame [m/s^2] (3,)
-        atol: Numerical zero tolerance
-        tc: Sampling period [s] (causality lower bound for look-ahead horizon)
-
-    Returns:
-        h: Barrier function value [m] (h >= 0 indicates safe state)
-        Lie_f_h: Drift Lie derivative along unforced dynamics [m/s]
-        Lie_g_h: Control Lie derivative along Cartesian acceleration [s] (3,)
-        d: Instantaneous 3D separation distance [m]
-        v_r: Projected robot velocity along line of sight [m/s]
-        v_h: Projected human velocity along line of sight [m/s]
-        h_chi: Gradient w.r.t distance dh/dd (used for scalar uncertainty weighting)
+    Compute barrier margin h, drift Lie derivative L_f h, control Lie derivative L_g h,
+    and full feature gradient Jh_psi = grad_psi h = [dh/dd, dh/dvr, dh/dvh, dh/dah].
     """
     r0 = translation_bt[0] - obs_pos[0]
     r1 = translation_bt[1] - obs_pos[1]
@@ -539,13 +510,34 @@ def compute_h_and_lie_numba(
     Lie_f_h = Jh_psi[0] * Jpsi_f[0] + Jh_psi[1] * Jpsi_f[1] + Jh_psi[2] * (Jpsi_f[2] + a_h) + Jh_psi[3] * Jpsi_f[3]
 
     # Control Lie derivative: L_g h = sum_k (dh/dpsi_k) * (Jpsi_g)_k
-    # Since only row 1 (v_r) is directly coupled to robot acceleration, L_g h simplifies to (dh/dv_r) * u_rh^T
     Lie_g_h = np.zeros(3, dtype=np.float64)
     Lie_g_h[0] += Jh_psi[0] * Jpsi_g[0, 0] + Jh_psi[1] * Jpsi_g[1, 0] + Jh_psi[2] * Jpsi_g[2, 0] + Jh_psi[3] * Jpsi_g[3, 0]
     Lie_g_h[1] += Jh_psi[0] * Jpsi_g[0, 1] + Jh_psi[1] * Jpsi_g[1, 1] + Jh_psi[2] * Jpsi_g[2, 1] + Jh_psi[3] * Jpsi_g[3, 1]
     Lie_g_h[2] += Jh_psi[0] * Jpsi_g[0, 2] + Jh_psi[1] * Jpsi_g[1, 2] + Jh_psi[2] * Jpsi_g[2, 2] + Jh_psi[3] * Jpsi_g[3, 2]
 
     h_chi = Jh_psi[0]
+    return h, Lie_f_h, Lie_g_h, d, v_r, v_h, h_chi, Jh_psi
+
+
+@njit(cache=True, fastmath=True)
+def compute_h_and_lie_numba(
+    translation_bt: np.ndarray,
+    obs_pos: np.ndarray,
+    vel_lineare: np.ndarray,
+    v_obs: np.ndarray,
+    Tr: float,
+    a_s: float,
+    C: float,
+    obs_acc: np.ndarray,
+    atol: float,
+    tc: float = 0.0,
+):
+    """
+    Compute barrier margin h, its drift Lie derivative L_f h, and its control Lie derivative L_g h.
+    """
+    h, Lie_f_h, Lie_g_h, d, v_r, v_h, h_chi, _ = compute_h_lie_and_grad_numba(
+        translation_bt, obs_pos, vel_lineare, v_obs, Tr, a_s, C, obs_acc, atol, tc
+    )
     return h, Lie_f_h, Lie_g_h, d, v_r, v_h, h_chi
 
 
@@ -611,7 +603,7 @@ def compute_h_and_constraints_numba(
         d: Current distance [m]
         vr, vh: Projected velocities along line of sight [m/s]
     """
-    h, Lie_f_h, Lie_g_h, d, vr, vh, h_chi = compute_h_and_lie_numba(
+    h, Lie_f_h, Lie_g_h, d, vr, vh, h_chi, Jh_psi = compute_h_lie_and_grad_numba(
         translation_bt, obs_pos, vel_lineare, v_obs, Tr, a_s, C, obs_acc, atol, tc
     )
 
@@ -643,18 +635,105 @@ def compute_h_and_constraints_numba(
 
         # Calculate robust margin:
         # If full covariance/standard deviations are provided, use state-dependent quadratic form
+        # sigma_eff = sqrt(grad_psi_h * Sigma_psi * grad_psi_h^T)
         has_covariance = (sigma_psi[0] > 0.0 or sigma_psi[1] > 0.0 or sigma_psi[2] > 0.0 or sigma_psi[3] > 0.0)
         if has_covariance:
             sigma_eff = np.sqrt(
-                (sigma_psi[0]) ** 2 +
-                (sigma_psi[1]) ** 2 +
-                (sigma_psi[2]) ** 2 +
-                (sigma_psi[3]) ** 2
+                (Jh_psi[0] * sigma_psi[0]) ** 2 +
+                (Jh_psi[1] * sigma_psi[1]) ** 2 +
+                (Jh_psi[2] * sigma_psi[2]) ** 2 +
+                (Jh_psi[3] * sigma_psi[3]) ** 2
             )
             robust_margin = beta * sigma_eff
+            # Correct robust CBF constraint: minus sign, dimensional consistency [m/s]
             constraint_bound = -lg_dJ_dq - Lie_f_h - gamma * (h - robust_margin)
         else:
-            # Scalar uncertainty bound
+            # Scalar uncertainty bound (backward-compatible)
             constraint_bound = -lg_dJ_dq - Lie_f_h - gamma * h - h_chi * delta_H
 
     return h, constraint_row, constraint_bound, d, vr, vh
+
+
+# ------------------------------------------------------------
+# 8) Volumetric Capsule Segment-to-Segment Distance (Ericson)
+# ------------------------------------------------------------
+@njit(cache=True, fastmath=True)
+def segment_to_segment_distance(
+    p1: np.ndarray,
+    p2: np.ndarray,
+    q1: np.ndarray,
+    q2: np.ndarray,
+    r1: float = 0.0,
+    r2: float = 0.0,
+    atol: float = 1e-12,
+):
+    """
+    Compute closest distance and closest points between two 3D line segments (or capsules).
+
+    Implements Christer Ericson's algorithm (Real-Time Collision Detection, Sec. 5.1.9).
+    Segment 1: S1(s) = p1 + s * (p2 - p1),  s in [0, 1] with capsule radius r1
+    Segment 2: S2(t) = q1 + t * (q2 - q1),  t in [0, 1] with capsule radius r2
+
+    Parameters:
+        p1, p2: Endpoints of Segment 1 (e.g. robot link frame origins) [m] (3,)
+        q1, q2: Endpoints of Segment 2 (e.g. human limb keypoints or obstacle) [m] (3,)
+        r1: Radius of Segment 1 capsule [m]
+        r2: Radius of Segment 2 capsule [m]
+        atol: Numerical zero tolerance
+
+    Returns:
+        d_surf: Signed surface distance d = d_centerline - (r1 + r2) [m]
+        c1: Closest point on S1 centerline [m] (3,)
+        c2: Closest point on S2 centerline [m] (3,)
+        p_r_surf: Closest point on S1 capsule surface [m] (3,)
+        p_h_surf: Closest point on S2 capsule surface [m] (3,)
+        s: Parameter s in [0, 1] along segment 1
+        t: Parameter t in [0, 1] along segment 2
+    """
+    d1 = p2 - p1
+    d2 = q2 - q1
+    r = p1 - q1
+    a = float(np.dot(d1, d1))
+    e = float(np.dot(d2, d2))
+    f = float(np.dot(d2, r))
+
+    if a <= atol and e <= atol:
+        s = 0.0
+        t = 0.0
+    elif a <= atol:
+        s = 0.0
+        t = min(max(f / e, 0.0), 1.0)
+    elif e <= atol:
+        t = 0.0
+        c = float(np.dot(d1, r))
+        s = min(max(-c / a, 0.0), 1.0)
+    else:
+        c = float(np.dot(d1, r))
+        b = float(np.dot(d1, d2))
+        denom = a * e - b * b
+        if denom > atol:
+            s = min(max((b * f - c * e) / denom, 0.0), 1.0)
+        else:
+            s = 0.0
+        t = (b * s + f) / e
+        if t < 0.0:
+            t = 0.0
+            s = min(max(-c / a, 0.0), 1.0)
+        elif t > 1.0:
+            t = 1.0
+            s = min(max((b - c) / a, 0.0), 1.0)
+
+    c1 = p1 + s * d1
+    c2 = q1 + t * d2
+    diff = c1 - c2
+    d_center = float(np.sqrt(np.dot(diff, diff)))
+    d_surf = d_center - (r1 + r2)
+
+    if d_center > atol:
+        u = diff / d_center
+    else:
+        u = np.array([1.0, 0.0, 0.0])
+
+    p_r_surf = c1 - r1 * u
+    p_h_surf = c2 + r2 * u
+    return d_surf, c1, c2, p_r_surf, p_h_surf, s, t
