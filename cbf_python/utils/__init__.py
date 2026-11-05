@@ -1,6 +1,12 @@
 """Utility modules for CBF controllers, configuration loading, bridges, metrics, and visualization."""
 
-from .config_loader import load_yaml_config, resolve_path, populate_dataclass_from_dict
+from .config_loader import (
+    load_yaml_config,
+    resolve_path,
+    populate_dataclass_from_dict,
+    load_controller_params_from_csv,
+    populate_controller_from_params_config,
+)
 from .obstacle_generators import (
     generate_velocity,
     generate_d_value,
@@ -67,6 +73,8 @@ __all__ = [
     "load_yaml_config",
     "resolve_path",
     "populate_dataclass_from_dict",
+    "load_controller_params_from_csv",
+    "populate_controller_from_params_config",
     "generate_velocity",
     "generate_d_value",
     "compute_required_d",

@@ -8,7 +8,9 @@ from cbf_python.controllers.kernels.ssm_cbf_acc import (
     dmin_and_jacobian_numba,
     jacobian_psi_times_fg_fast_numba,
     compute_h_and_lie_numba,
+    compute_h_lie_and_grad_numba,
     compute_h_and_constraints_numba,
+    segment_to_segment_distance,
 )
 from cbf_python.controllers.kernels.numba_kernels import (
     build_free_forced_one_step,
@@ -187,4 +189,86 @@ def test_fill_pos_rows():
 
         assert np.all(ineq_satisfaction[:nq] == limits_satisfaction_upper)
         assert np.all(ineq_satisfaction[nq:] == limits_satisfaction_lower)
+
+
+def test_segment_to_segment_distance():
+    """Verify Ericson segment-to-segment distance algorithm across parallel, skew, and point cases."""
+    # 1. Parallel segments with radii
+    p1 = np.array([0.0, 0.0, 0.0])
+    p2 = np.array([1.0, 0.0, 0.0])
+    q1 = np.array([0.0, 1.0, 0.0])
+    q2 = np.array([1.0, 1.0, 0.0])
+    r1, r2 = 0.1, 0.1
+    d_surf, c1, c2, pr, ph, s, t = segment_to_segment_distance(p1, p2, q1, q2, r1, r2)
+    assert abs(d_surf - 0.8) < 1e-10
+    assert abs(s - 0.0) < 1e-10
+    assert abs(t - 0.0) < 1e-10
+    assert_allclose(c1, np.array([0.0, 0.0, 0.0]), atol=1e-10)
+    assert_allclose(c2, np.array([0.0, 1.0, 0.0]), atol=1e-10)
+
+    # 2. Orthogonal skew segments crossing at midpoints
+    p1 = np.array([0.0, 0.5, 0.0])
+    p2 = np.array([1.0, 0.5, 0.0])
+    q1 = np.array([0.5, 0.0, 1.0])
+    q2 = np.array([0.5, 1.0, 1.0])
+    d_surf, c1, c2, pr, ph, s, t = segment_to_segment_distance(p1, p2, q1, q2, 0.0, 0.0)
+    assert abs(d_surf - 1.0) < 1e-10
+    assert abs(s - 0.5) < 1e-10
+    assert abs(t - 0.5) < 1e-10
+    assert_allclose(c1, np.array([0.5, 0.5, 0.0]), atol=1e-10)
+    assert_allclose(c2, np.array([0.5, 0.5, 1.0]), atol=1e-10)
+
+    # 3. Point to line segment
+    p1 = np.array([0.0, 0.0, 0.0])
+    p2 = np.array([1.0, 0.0, 0.0])
+    q_pt = np.array([0.5, 0.5, 0.0])
+    d_surf, c1, c2, pr, ph, s, t = segment_to_segment_distance(p1, p2, q_pt, q_pt, 0.05, 0.05)
+    assert abs(d_surf - 0.4) < 1e-10
+    assert abs(s - 0.5) < 1e-10
+    assert abs(t - 0.0) < 1e-10
+
+
+def test_robust_covariance_constraint_assembly():
+    """Verify that robust covariance term correctly scales with feature gradient and beta."""
+    nq = 6
+    p_r = np.array([0.8, 0.1, 0.5])
+    p_h = np.array([1.0, 0.2, 0.4])
+    v_r = np.array([-0.2, 0.0, 0.1])
+    v_obs = np.array([0.1, -0.05, 0.0])
+    obs_acc = np.array([0.05, 0.0, 0.0])
+    Tr, a_s, C, atol = 0.15, 2.5, 0.25, 1e-12
+    gamma = 5.0
+    tc = 0.002
+
+    np.random.seed(123)
+    Jlin = np.random.randn(3, nq)
+    dJlin = np.random.randn(3, nq)
+    dq = np.random.randn(nq)
+
+    sigma_psi = np.array([0.015, 0.0, 0.072, 0.196])
+    beta = 3.291
+
+    h, row, bound_cov, d, vr, vh = compute_h_and_constraints_numba(
+        p_r, p_h, v_r, v_obs, Tr, a_s, C, obs_acc, atol, Jlin, dJlin, dq, gamma, True,
+        delta_H=0.0, tc=tc, sigma_psi=sigma_psi, beta=beta,
+    )
+
+    h_zero, row_zero, bound_zero, _, _, _ = compute_h_and_constraints_numba(
+        p_r, p_h, v_r, v_obs, Tr, a_s, C, obs_acc, atol, Jlin, dJlin, dq, gamma, True,
+        delta_H=0.0, tc=tc, sigma_psi=np.zeros(4), beta=beta,
+    )
+
+    # Adding uncertainty must tighten the constraint (increase the lower bound)
+    assert bound_cov > bound_zero
+    # Difference must equal gamma * beta * sigma_eff
+    _, _, _, _, _, _, _, Jh_psi = compute_h_lie_and_grad_numba(p_r, p_h, v_r, v_obs, Tr, a_s, C, obs_acc, atol, tc)
+    sigma_eff = np.sqrt(
+        (Jh_psi[0] * sigma_psi[0]) ** 2 +
+        (Jh_psi[1] * sigma_psi[1]) ** 2 +
+        (Jh_psi[2] * sigma_psi[2]) ** 2 +
+        (Jh_psi[3] * sigma_psi[3]) ** 2
+    )
+    expected_diff = gamma * (beta * sigma_eff)
+    assert_allclose(bound_cov - bound_zero, expected_diff, rtol=RTOL, atol=ATOL)
+
 

@@ -35,25 +35,35 @@ def run_episode(
     cfg: ControllerConfig,
     duration: float = 60.0,
     scaling_threshold: float = 0.5,
-) -> Tuple[float, float, float, float, float, float, float, float, float, float, int, float, float]:
+) -> Tuple[
+    float, float, float, float, float, float, float, float, float, float, int, float, float, float, float, float, int
+]:
     """
     Execute a single simulation trial for multi-objective parameter optimization.
 
+    Objectives are physically and dimensionally homogenized into two consistent domains:
+        - Spatial Deviations: Measured in task-space Meters [m] (penetration and tool tracking error)
+        - Dynamic Efficiency: Measured as Normalized Dimensionless Ratios [0, 1] (scaling and normalized jerk)
+
     Returns:
         Tuple containing:
-            - mean_penetration: Mean ISO 15066 dynamic safety penetration depth [m] (minimize)
-            - mean_scale: Average progression rate dot{xi} [0, 1] (maximize)
-            - smoothness: Composite physical jerk and recovery oscillation penalty (minimize)
-            - mean_traj_err: Mean joint tracking error norm [rad] (minimize)
-            - viol_rate: Fraction of control steps penetrating ISO protective distance
+            - safety_penetration: Non-diluted composite intrusion penetration depth [m] (minimize)
+            - mean_scale: Average progression rate dot{xi} in [0, 1] (maximize)
+            - normalized_jerk: Normalized joint jerk and oscillation penalty [dimensionless] (minimize)
+            - mean_cart_err: Mean Cartesian tracking error of the tool [m] (minimize)
+            - viol_rate: Fraction of total control steps penetrating ISO protective distance
             - worst_s_index: Worst-case SSM dynamic safety margin across episode [m]
-            - rms_jerk: Root Mean Square joint jerk norm [rad/s^3]
+            - rms_jerk: Raw Root Mean Square joint jerk norm [rad/s^3]
             - mean_osc: Velocity tracking error sign reversal oscillation index
             - max_slack: Maximum soft-tube slack norm [rad]
             - mean_slack: Mean soft-tube slack norm [rad]
             - unfeasible_count: Count of control steps triggering emergency fallback
-            - mean_cart_err: Mean Cartesian tracking error of the tool [m]
+            - mean_traj_err: Mean joint tracking error norm [rad]
             - lap_count: Total fractional loops completed along nominal path
+            - peak_penetration: Worst-case instantaneous penetration depth [m]
+            - mean_intrusion_penetration: Average penetration depth during active intrusions [m]
+            - intrusion_viol_rate: Fraction of intrusion steps with barrier violation
+            - intrusion_steps: Total count of active human intrusion control steps
     """
     model_wrapper = loadSharework(UR10E_JOINTS)
     ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
@@ -83,6 +93,8 @@ def run_episode(
     t = 0.0
     trajectory_time = 0.0
     violations = 0
+    intrusion_steps = 0
+    sum_intrusion_penetration = 0.0
     unfeasible_count = 0
     nsteps = 0
     sum_scale = 0.0
@@ -116,8 +128,10 @@ def run_episode(
     curr_scaling = 1.0
 
     while t < duration:
+        is_intrusion = False
         if sequencer is not None:
             obs_pos, obs_vel, obs_acc, _ = sequencer.step(t, trajectory_time, curr_scaling)
+            is_intrusion = (sequencer.active_gesture is not None)
         elif mode == "predictive_trigger":
             curr_s = trajectory_time % T_total
             v_est = max(0.05, curr_scaling)
@@ -134,6 +148,7 @@ def run_episode(
             if triggered:
                 tau = t - t_trigger
                 if gesture_duration > 0.0 and tau >= gesture_duration:
+                    is_intrusion = False
                     if rearm_for_next_lap and (curr_s < target_s - 1.0 or curr_s > target_s + 2.0):
                         triggered = False
                         obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=0.0)
@@ -144,13 +159,16 @@ def run_episode(
                         obs_vel = np.zeros_like(obs_vel)
                         obs_acc = np.zeros_like(obs_acc)
                 else:
+                    is_intrusion = True
                     obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=tau)
             else:
+                is_intrusion = False
                 obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=0.0)
                 obs_vel = np.zeros_like(obs_vel)
                 obs_acc = np.zeros_like(obs_acc)
         else:
             obs_pos, obs_vel, obs_acc = bridge.getObstacles(elapsed=t)
+            is_intrusion = True
 
         nominal_q, nominal_Dq, nominal_DDq = planner.getMotionLaw(trajectory_time % T_total)
 
@@ -186,10 +204,13 @@ def run_episode(
             if s_index < min_s_index:
                 min_s_index = s_index
 
-            # Safety penetration below the ISO 15066 protective separation
-            if s_index < 0.0:
-                sum_penetration += (-s_index)
-                violations += 1
+            # Safety penetration accounting (conditioned on active intrusion or active violation)
+            in_intrusion = is_intrusion or (s_index < 0.0)
+            if in_intrusion:
+                intrusion_steps += 1
+                if s_index < 0.0:
+                    sum_intrusion_penetration += (-s_index)
+                    violations += 1
 
             # 3. Physical Joint Jerk (du/dt)
             ddq = out["ddq"]
@@ -218,7 +239,9 @@ def run_episode(
 
         except Exception as err:
             # Fallback on numerical failure or integration divergence
-            return 10.0, 0.0, 1e4, 10.0, 1.0, -10.0, 1e4, 10.0, 10.0, 10.0, 1000, 10.0, 0.0
+            return (
+                10.0, 0.0, 1e4, 10.0, 1.0, -10.0, 1e4, 10.0, 10.0, 10.0, 1000, 10.0, 0.0, 10.0, 10.0, 1.0, 0
+            )
 
         t += cfg.Tc
         trajectory_time = out["trajectory_time"]
@@ -227,15 +250,22 @@ def run_episode(
         trajectory_error_sum += float(out["trajectory_error"])
 
     steps_safe = max(1, nsteps)
-    mean_penetration = sum_penetration / steps_safe
+    safe_intrusion_steps = max(1, intrusion_steps)
+
+    peak_penetration = float(max(0.0, -min_s_index)) if min_s_index != float("inf") else 0.0
+    mean_intrusion_penetration = float(sum_intrusion_penetration / safe_intrusion_steps)
+    composite_penetration = float(peak_penetration + mean_intrusion_penetration)
+    intrusion_viol_rate = float(violations / safe_intrusion_steps)
+
     mean_scale = sum_scale / steps_safe
     mean_traj_err = trajectory_error_sum / steps_safe
     mean_cart_err = sum_cart_error / steps_safe
 
-    # Physical RMS Jerk and Oscillation Index
+    # Physical RMS Jerk and Normalized Smoothness Index
     rms_jerk = float(np.sqrt(sum_jerk_sq / max(1, nsteps - 1))) if nsteps > 1 else 0.0
     mean_osc = float(sum_osc / max(1, nsteps - 1)) if nsteps > 1 else 0.0
-    smoothness = rms_jerk + 100.0 * mean_osc
+    # J_nom = 1000.0 rad/s^3 normalizes physical joint jerk to homogeneous scale [0, ~1-2]
+    normalized_jerk = float((rms_jerk + 100.0 * mean_osc) / 1000.0)
 
     viol_rate = violations / steps_safe
     worst_s_index = min_s_index if min_s_index != float("inf") else 10.0
@@ -244,10 +274,10 @@ def run_episode(
     lap_count = float(trajectory_time / max(1e-6, T_total))
 
     return (
-        mean_penetration,
+        composite_penetration,
         mean_scale,
-        smoothness,
-        mean_traj_err,
+        normalized_jerk,
+        mean_cart_err,
         viol_rate,
         worst_s_index,
         rms_jerk,
@@ -255,8 +285,12 @@ def run_episode(
         max_slack,
         mean_slack,
         unfeasible_count,
-        mean_cart_err,
+        mean_traj_err,
         lap_count,
+        peak_penetration,
+        mean_intrusion_penetration,
+        intrusion_viol_rate,
+        intrusion_steps,
     )
 
 
@@ -302,10 +336,10 @@ def make_objective(opt_cfg: dict):
 
         try:
             (
-                mean_penetration,
+                safety_penetration,
                 mean_scale,
-                smoothness,
-                mean_traj_err,
+                normalized_jerk,
+                mean_cart_err,
                 viol_rate,
                 worst_s_index,
                 rms_jerk,
@@ -313,27 +347,36 @@ def make_objective(opt_cfg: dict):
                 max_slack,
                 mean_slack,
                 unfeasible_count,
-                mean_cart_err,
+                mean_traj_err,
                 lap_count,
+                peak_penetration,
+                mean_intrusion_penetration,
+                intrusion_viol_rate,
+                intrusion_steps,
             ) = run_episode_with_timeout(
                 run_episode, cfg=cfg, duration=duration, timeout=timeout
             )
             trial.set_user_attr("violation_rate", viol_rate)
             trial.set_user_attr("min_s_index", worst_s_index)
-            trial.set_user_attr("rms_jerk", rms_jerk)
-            trial.set_user_attr("mean_osc", mean_osc)
-            trial.set_user_attr("max_slack", max_slack)
-            trial.set_user_attr("mean_slack", mean_slack)
-            trial.set_user_attr("unfeasible_count", unfeasible_count)
-            trial.set_user_attr("cartesian_error_mean", mean_cart_err)
-            trial.set_user_attr("lap_count", lap_count)
+            trial.set_user_attr("peak_penetration_cm", float(peak_penetration * 100.0))
+            trial.set_user_attr("mean_intrusion_penetration_cm", float(mean_intrusion_penetration * 100.0))
+            trial.set_user_attr("intrusion_violation_rate", float(intrusion_viol_rate))
+            trial.set_user_attr("intrusion_steps", int(intrusion_steps))
+            trial.set_user_attr("rms_jerk_rad_s3", float(rms_jerk))
+            trial.set_user_attr("mean_osc", float(mean_osc))
+            trial.set_user_attr("joint_traj_err_rad", float(mean_traj_err))
+            trial.set_user_attr("cartesian_error_mean_m", float(mean_cart_err))
+            trial.set_user_attr("max_slack", float(max_slack))
+            trial.set_user_attr("mean_slack", float(mean_slack))
+            trial.set_user_attr("unfeasible_count", int(unfeasible_count))
+            trial.set_user_attr("lap_count", float(lap_count))
         except TimeoutError:
-            return 10.0, 0.0, 1e4, 10.0
+            return 10.0, 0.0, 10.0, 10.0
         except Exception:
             # Prevent unexpected worker termination or process errors from aborting the entire study
-            return 10.0, 0.0, 1e4, 10.0
+            return 10.0, 0.0, 10.0, 10.0
 
-        return mean_penetration, mean_scale, smoothness, mean_traj_err
+        return safety_penetration, mean_scale, normalized_jerk, mean_cart_err
 
     return objective
 
@@ -360,10 +403,10 @@ def main(config_file: str = "optimization.yaml") -> None:
         load_if_exists=True,
     )
     study.set_metric_names([
-        "safety_penetration",
+        "safety_penetration_m",
         "mean_scaling",
-        "smoothness_jerk",
-        "mean_trajectory_error",
+        "normalized_jerk",
+        "cartesian_error_m",
     ])
 
     n_trials = int(study_cfg.get("n_trials", 100))

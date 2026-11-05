@@ -8,7 +8,9 @@ from cbf_python.controllers.kernels.ssm_cbf_acc import (
     jacobian_psi_numba,
     jacobian_psi_times_fg_fast_numba,
     compute_h_and_lie_numba,
+    compute_h_lie_and_grad_numba,
     compute_h_and_constraints_numba,
+    segment_to_segment_distance,
 )
 from cbf_python.controllers.kernels.numba_kernels import (
     build_free_forced_one_step,
@@ -18,6 +20,7 @@ from cbf_python.controllers.kernels.numba_kernels import (
     fill_vel_rows,
     fill_acc_rows,
     append_cbf_rows_loop,
+    fill_cbf_rows,
     assemble_objective_parts_inplace,
     assemble_qp_inplace,
 )
@@ -33,7 +36,9 @@ __all__ = [
     "jacobian_psi_numba",
     "jacobian_psi_times_fg_fast_numba",
     "compute_h_and_lie_numba",
+    "compute_h_lie_and_grad_numba",
     "compute_h_and_constraints_numba",
+    "segment_to_segment_distance",
     "build_free_forced_one_step",
     "fill_scaling_rows",
     "fill_pos_rows",
@@ -41,6 +46,7 @@ __all__ = [
     "fill_vel_rows",
     "fill_acc_rows",
     "append_cbf_rows_loop",
+    "fill_cbf_rows",
     "assemble_objective_parts_inplace",
     "assemble_qp_inplace",
     "assemble_qp_PID_problem",

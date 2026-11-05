@@ -52,6 +52,42 @@ def test_optimal_controller_step(model_wrapper):
     assert out["unfeasible"] == "FEASIBLE"
 
 
+def test_optimal_controller_capsule_step(model_wrapper):
+    """Verify BCFOptimalController step with continuous volumetric link capsules."""
+    cfg = ControllerConfig(Tc=0.002, use_capsules=True, robot_capsule_radius=0.08, human_capsule_radius=0.08)
+    cfg.lambda_pos = 2000.0
+    cfg.lambda_vel = 1.0
+    cfg.lambda_scaling = 20.0
+    cfg.lambda_acc = 1e-10
+    cfg.gamma = 5.0
+    ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
+    ctrl.reset_state(HOME)
+
+    # Obstacle located close to the forearm cylinder
+    obs_pos = np.array([[0.5, 0.2, 0.5]])
+    obs_vel = np.array([[0.0, 0.0, 0.0]])
+    obs_acc = np.array([[0.0, 0.0, 0.0]])
+
+    nominal_q = HOME.copy()
+    nominal_Dq = np.zeros(6)
+    nominal_DDq = np.zeros(6)
+
+    out = ctrl.step(
+        obs_pos=obs_pos,
+        obs_vel=obs_vel,
+        obs_acc=obs_acc,
+        nominal_q=nominal_q,
+        nominal_Dq=nominal_Dq,
+        nominal_DDq=nominal_DDq,
+    )
+
+    assert "q" in out
+    assert "ddq" in out
+    assert out["unfeasible"] == "FEASIBLE"
+    assert out["d_min"] is not None
+
+
+
 def test_polynomial_controller_step(model_wrapper):
     """Verify PolynomialOptimalController updates weights dynamically."""
     cfg = PolynomialControllerConfig(Tc=0.002)

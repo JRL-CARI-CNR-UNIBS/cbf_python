@@ -26,7 +26,10 @@ from __future__ import annotations
 import numpy as np
 from numba import njit
 
-from cbf_python.controllers.kernels.ssm_cbf_acc import compute_h_and_constraints_numba
+from cbf_python.controllers.kernels.ssm_cbf_acc import (
+    compute_h_and_constraints_numba,
+    segment_to_segment_distance,
+)
 
 
 # ------------------------------------------------------------
@@ -246,14 +249,19 @@ def append_cbf_rows_loop(
     Tr, a_s, C, gamma, atol, HAS_CBF, keypoint_to_log,
     delta_H=0.0,
     tc=0.0,
+    sigma_psi=np.zeros(4, dtype=np.float64),
+    beta=3.291,
+    capsule_segments=np.empty((0, 2), dtype=np.int64),
+    r_robot=0.0,
+    r_human=0.0,
 ):
     """
-    Iterate over all monitored robot kinematic frames and obstacle points to assemble CBF constraints.
+    Iterate over monitored robot kinematic frames or cylindrical capsules and obstacles to assemble CBFs.
 
     Evaluates pairwise separation barriers and writes inequality rows:
         Lie_g_h * Jlin * ddq >= bound
     where:
-        bound = - Lie_g_h * dJlin * dq - Lie_f_h - gamma * h - h_chi * delta_H
+        bound = - Lie_g_h * dJlin * dq - Lie_f_h - gamma * (h - beta * sigma_eff)
     """
     hmin = 1e9
     htest = 1e9
@@ -265,53 +273,117 @@ def append_cbf_rows_loop(
     vr_min = 0.0
     vh_min = 0.0
 
-    nF = frames_p.shape[0]
     nO = obs_p.shape[0]
     nq = dq.size
 
-    for f in range(nF):
-        p_bt = frames_p[f]
-        vlin = frames_vlin[f]
-        Jlin = Jlins[f]
-        dJlin = dJlins[f]
-        for o in range(nO):
-            op = obs_p[o]
-            ov = obs_v[o]
-            oa = obs_a[o]
-            h, row_vec, bound, d, vr, vh = compute_h_and_constraints_numba(
-                p_bt, op, vlin, ov, Tr, a_s, C, oa, atol, Jlin, dJlin, dq, gamma, HAS_CBF, delta_H, tc
-            )
+    use_caps = (capsule_segments.shape[0] > 0)
 
-            # Logging keypoint selection
-            if keypoint_to_log >= 0:
-                if o == min(keypoint_to_log, nO - 1) and f == frames_p.shape[0] - 1:
-                    vr_min = vr
-                    vh_min = vh
-                    dmin = d
-                    hmin = h
-            else:
-                if h < hmin:
-                    vr_min = vr
-                    vh_min = vh
-                    dmin = d
-                    hmin = h
+    if use_caps:
+        nSeg = capsule_segments.shape[0]
+        for s in range(nSeg):
+            f1 = capsule_segments[s, 0]
+            f2 = capsule_segments[s, 1]
+            p1 = frames_p[f1]
+            p2 = frames_p[f2]
+            for o in range(nO):
+                op = obs_p[o]
+                ov = obs_v[o]
+                oa = obs_a[o]
 
-            if d < dtest:
-                dtest = d
-                i_d = o
-            if h < htest:
-                htest = h
-                i_h = o
+                # Volumetric segment-to-point capsule distance
+                d_surf, c1, c2, p_r_surf, p_h_surf, s_star, t_star = segment_to_segment_distance(
+                    p1, p2, op, op, r_robot, r_human, atol
+                )
 
-            if HAS_CBF:
-                for j in range(A.shape[1]):
-                    A[row, j] = 0.0
-                for j in range(nq):
-                    A[row, j] = row_vec[j]
-                c[row] = bound
-                row += 1
+                # Linearly interpolate translational Jacobian and link velocity along cylinder centerline
+                Jlin_star = (1.0 - s_star) * Jlins[f1] + s_star * Jlins[f2]
+                dJlin_star = (1.0 - s_star) * dJlins[f1] + s_star * dJlins[f2]
+                vlin_star = (1.0 - s_star) * frames_vlin[f1] + s_star * frames_vlin[f2]
+
+                h, row_vec, bound, d, vr, vh = compute_h_and_constraints_numba(
+                    p_r_surf, p_h_surf, vlin_star, ov, Tr, a_s, C, oa, atol,
+                    Jlin_star, dJlin_star, dq, gamma, HAS_CBF, delta_H, tc,
+                    sigma_psi, beta
+                )
+
+                if keypoint_to_log >= 0:
+                    if o == min(keypoint_to_log, nO - 1) and s == nSeg - 1:
+                        vr_min = vr
+                        vh_min = vh
+                        dmin = d
+                        hmin = h
+                else:
+                    if h < hmin:
+                        vr_min = vr
+                        vh_min = vh
+                        dmin = d
+                        hmin = h
+
+                if d < dtest:
+                    dtest = d
+                    i_d = o
+                if h < htest:
+                    htest = h
+                    i_h = o
+
+                if HAS_CBF:
+                    for j in range(A.shape[1]):
+                        A[row, j] = 0.0
+                    for j in range(nq):
+                        A[row, j] = row_vec[j]
+                    c[row] = bound
+                    row += 1
+    else:
+        nF = frames_p.shape[0]
+        for f in range(nF):
+            p_bt = frames_p[f]
+            vlin = frames_vlin[f]
+            Jlin = Jlins[f]
+            dJlin = dJlins[f]
+            for o in range(nO):
+                op = obs_p[o]
+                ov = obs_v[o]
+                oa = obs_a[o]
+                h, row_vec, bound, d, vr, vh = compute_h_and_constraints_numba(
+                    p_bt, op, vlin, ov, Tr, a_s, C, oa, atol, Jlin, dJlin, dq, gamma, HAS_CBF, delta_H, tc,
+                    sigma_psi, beta
+                )
+
+                # Logging keypoint selection
+                if keypoint_to_log >= 0:
+                    if o == min(keypoint_to_log, nO - 1) and f == frames_p.shape[0] - 1:
+                        vr_min = vr
+                        vh_min = vh
+                        dmin = d
+                        hmin = h
+                else:
+                    if h < hmin:
+                        vr_min = vr
+                        vh_min = vh
+                        dmin = d
+                        hmin = h
+
+                if d < dtest:
+                    dtest = d
+                    i_d = o
+                if h < htest:
+                    htest = h
+                    i_h = o
+
+                if HAS_CBF:
+                    for j in range(A.shape[1]):
+                        A[row, j] = 0.0
+                    for j in range(nq):
+                        A[row, j] = row_vec[j]
+                    c[row] = bound
+                    row += 1
 
     return row, hmin, dmin, vr_min, vh_min, htest, dtest, i_h, i_d
+
+
+# Convenient alias
+fill_cbf_rows = append_cbf_rows_loop
+
 
 
 # ------------------------------------------------------------
@@ -384,41 +456,14 @@ def assemble_qp_inplace(
     frames_p, frames_vlin, Jlins, dJlins, obs_p, obs_v, obs_a,
     Tr, a_s, C, gamma, DDtraj_max, atol, ref_scaling, HAS_CBF, keypoint_to_log,
     delta_H=0.0,
+    sigma_psi=np.zeros(4, dtype=np.float64),
+    beta=3.291,
+    capsule_segments=np.empty((0, 2), dtype=np.int64),
+    r_robot=0.0,
+    r_human=0.0,
 ):
     """
     Zero out QP matrices and populate all constraints and objective components in-place.
-
-    Parameters:
-        P2: Velocity tracking coupling Hessian block
-        b_pos, b_vel, b_scaling: Linear gradient vectors for cost components
-        A, c: Linear inequality constraint matrix and lower bound vector (A * x >= c)
-        FreePos, ForcedPos, FreeVel, ForcedVel: Discrete integration transition matrices
-        q, dq: Current joint configuration and velocity vectors
-        nominal_q, nominal_Dq: Reference trajectory waypoint and velocity
-        Dtraj: Current path-scaling rate dot{xi} in [0, 1]
-        Tc: Control loop cycle duration [s]
-        q_min, q_max: Joint position physical boundaries
-        Dq_max, DDq_max: Joint velocity and acceleration limits
-        delta_q_max: Joint-space deviation tube half-widths
-        frames_p, frames_vlin: Positions and linear velocities of monitored robot links
-        Jlins, dJlins: Translational Jacobians and their time derivatives
-        obs_p, obs_v, obs_a: Positions, velocities, and accelerations of monitored obstacles
-        Tr: Reaction time latency [s]
-        a_s: Maximum braking deceleration [m/s^2]
-        C: Safety separation margin [m]
-        gamma: Barrier filter responsiveness gain [1/s]
-        DDtraj_max: Maximum allowed scaling acceleration
-        atol: Numerical zero tolerance
-        ref_scaling: Target reference path-scaling factor in [0, 1]
-        HAS_CBF: Flag indicating whether CBF constraints should be enforced
-        keypoint_to_log: Index of obstacle keypoint to monitor for metrics
-        delta_H: Uncertainty compensation offset [m]
-
-    Returns:
-        row: Total number of active inequality constraint rows assembled
-        hmin, dmin: Global minimum barrier value and physical separation distance
-        vr_min, vh_min: Projected speeds associated with the active critical pair
-        htest, dtest, i_h, i_d: Diagnostic metrics for logging
     """
     nq = q.size
     for i in range(A.shape[0]):
@@ -442,7 +487,9 @@ def assemble_qp_inplace(
     if frames_p.size != 0 and obs_p.size != 0:
         row, hmin, dmin, vr_min, vh_min, htest, dtest, i_h, i_d = append_cbf_rows_loop(
             A, c, row, frames_p, frames_vlin, obs_p, obs_v, obs_a, Jlins, dJlins, dq, Tr, a_s, C, gamma, atol, HAS_CBF,
-            keypoint_to_log, delta_H, tc=Tc
+            keypoint_to_log, delta_H, tc=Tc,
+            sigma_psi=sigma_psi, beta=beta,
+            capsule_segments=capsule_segments, r_robot=r_robot, r_human=r_human,
         )
     else:
         hmin = 1e9
@@ -453,7 +500,14 @@ def assemble_qp_inplace(
         dtest = 1e9
         i_h = 0
         i_d = 0
+        i_h = 0
+        i_d = 0
 
     assemble_objective_parts_inplace(P2, b_pos, b_vel, b_scaling, q, dq, nominal_q, nominal_Dq, Dtraj, Tc, ref_scaling)
     return row, hmin, dmin, vr_min, vh_min, htest, dtest, i_h, i_d
+
+
+# Convenient alias
+fill_cbf_rows = append_cbf_rows_loop
+
 

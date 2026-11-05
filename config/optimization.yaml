@@ -36,6 +36,16 @@ controller:
   C_0: 0.10
   use_soft_tube: true
   lambda_tube: 1.0e5
+  # Robust Covariance Parameters (99.9% Gaussian confidence)
+  beta: 3.291
+  sigma_p: 0.015
+  sigma_v: 0.072
+  sigma_a: 0.196
+  # Volumetric Capsule Distance Model
+  # Set use_capsules to true to optimize against continuous 3D cylindrical link capsules
+  use_capsules: false
+  robot_capsule_radius: 0.08
+  human_capsule_radius: 0.08
 
 ranges:
   lambda_pos: [100.0, 100000.0]
