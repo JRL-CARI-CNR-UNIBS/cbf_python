@@ -18,7 +18,7 @@ lambda_acc: 1.4551402158959938e-10
 DDtrajectory_time_max: 5.0
 prefix: "ur10e_"
 tool_frame: "ur10e_wrist_3_joint"
-elbow_frame: "ur10e_upper_arm_link"
+elbow_frame: "forearm_link"
 delta_deg: 4.5
 
 # Joint velocity limits (rad/s) and acceleration limits (rad/s^2)

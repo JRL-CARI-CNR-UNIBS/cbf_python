@@ -272,3 +272,44 @@ def test_robust_covariance_constraint_assembly():
     assert_allclose(bound_cov - bound_zero, expected_diff, rtol=RTOL, atol=ATOL)
 
 
+def test_relative_degree_restoration_at_causality_lower_bound():
+    """Verify that setting the evaluation horizon lower bound to tc = dt restores relative degree 1."""
+    d_val = 1.0
+    v_r = 0.5   # Robot moving away
+    v_h = -0.5  # Human moving away
+    a_h = 0.0
+    tr = 0.15
+    a_max = 2.5
+    atol = 1e-12
+
+    # Case A: Legacy / Paper Formulation (tc = 0)
+    # Minimizer is at tau* = 0, causing d(d_min)/d(v_r) = 0 and vanishing control Lie derivative
+    d_min_0, jac_0 = dmin_and_jacobian_numba(d_val, v_r, v_h, a_h, tr, a_max, atol, tc=0.0)
+    assert_allclose(d_min_0, 1.0)
+    assert_allclose(jac_0[1], 0.0)  # Relative degree loss: zero sensitivity to velocity!
+
+    # Case B: Implemented Formulation (tc = dt = 0.002 s)
+    # Evaluation horizon is tau in [tc, Tf], ensuring tau* = tc > 0
+    tc = 0.002
+    d_min_tc, jac_tc = dmin_and_jacobian_numba(d_val, v_r, v_h, a_h, tr, a_max, atol, tc=tc)
+    assert d_min_tc > d_val
+    assert_allclose(jac_tc[1], tc)   # Uniform relative degree 1 restored: d(d_min)/d(v_r) = tc!
+    assert_allclose(jac_tc[2], -tc)
+    assert_allclose(jac_tc[3], -0.5 * (tc ** 2))
+
+    # Verify control Lie derivative L_g h is strictly non-zero
+    p_r = np.array([1.0, 0.0, 0.0])
+    p_h = np.array([0.0, 0.0, 0.0])
+    v_r_vec = np.array([0.5, 0.0, 0.0])
+    v_h_vec = np.array([-0.5, 0.0, 0.0])
+    a_h_vec = np.array([0.0, 0.0, 0.0])
+    C = 0.25
+
+    _, Lf_0, Lg_0, _, _, _, _, _ = compute_h_lie_and_grad_numba(p_r, p_h, v_r_vec, v_h_vec, tr, a_max, C, a_h_vec, atol, tc=0.0)
+    _, Lf_tc, Lg_tc, _, _, _, _, _ = compute_h_lie_and_grad_numba(p_r, p_h, v_r_vec, v_h_vec, tr, a_max, C, a_h_vec, atol, tc=tc)
+
+    assert_allclose(np.linalg.norm(Lg_0), 0.0)
+    assert_allclose(np.linalg.norm(Lg_tc), tc)  # Exactly equals dt along unit line of sight!
+
+
+

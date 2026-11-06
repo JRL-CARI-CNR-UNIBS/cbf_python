@@ -39,7 +39,7 @@ common:
     lambda_acc: 1.4551402158959938e-10
     delta_deg: 4.5
     # Volumetric Capsule Distance Model (set to true to enable continuous link cylinder collision checking)
-    use_capsules: false
+    use_capsules: true
     robot_capsule_radius: 0.08
     human_capsule_radius: 0.08
 
@@ -55,7 +55,7 @@ cbf_optimal:
     v_cfg: "article"
     # Parameter Loading from Optimization CSV:
     load_from_csv: true
-    params_filename: "params_csv/best_10_trials.csv"
+    params_filename: "params_csv/best_10_trials_v2.csv"
     # Identify which parameter set to run:
     # Option A (Recommended): By rank (1 = top utility trial, 2 = 2nd best, ..., 10 = 10th best)
     rank: 1
