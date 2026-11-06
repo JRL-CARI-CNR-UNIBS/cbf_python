@@ -187,6 +187,11 @@ def populate_controller_config(
     if "elbow_frame" in data:
         cfg.elbow_frame = str(data["elbow_frame"])
 
+    for k in ["robot_links", "monitored_links", "capsule_links", "links"]:
+        if k in data and data[k] is not None:
+            cfg.robot_links = list(data[k])
+            break
+
     if "use_capsules" in data:
         cfg.use_capsules = bool(data["use_capsules"])
     if "robot_capsule_radius" in data:

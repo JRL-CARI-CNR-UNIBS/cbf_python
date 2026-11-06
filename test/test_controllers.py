@@ -85,6 +85,33 @@ def test_optimal_controller_capsule_step(model_wrapper):
     assert "ddq" in out
     assert out["unfeasible"] == "FEASIBLE"
     assert out["d_min"] is not None
+    assert len(ctrl.frames_ids) == 4
+    assert np.array_equal(ctrl.capsule_segments, [[0, 1], [1, 2], [2, 3]])
+
+
+def test_configurable_robot_links(model_wrapper):
+    """Verify that robot_links can be configured via ControllerConfig and YAML dictionary."""
+    from cbf_python.utils.config_loader import populate_controller_config
+
+    # Custom 2-segment configuration: Upper arm and Forearm
+    custom_links = ["upper_arm_link", "forearm_link", "tool0"]
+    cfg = ControllerConfig(use_capsules=True)
+    populate_controller_config(cfg, {"robot_links": custom_links})
+
+    ctrl = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg, useCbf=True)
+    assert len(ctrl.frames_ids) == 3
+    assert np.array_equal(ctrl.capsule_segments, [[0, 1], [1, 2]])
+    assert ctrl.tool_frame_id == ctrl.frames_ids[-1]
+
+    # Test scrambled order: auto-sort must restore proximal -> distal order
+    scrambled = ["tool0", "forearm_link", "wrist_2_link", "wrist_1_link"]
+    cfg_scrambled = ControllerConfig(use_capsules=True, robot_links=scrambled)
+    ctrl_scrambled = BCFOptimalController(model_wrapper=model_wrapper, cfg=cfg_scrambled, useCbf=True)
+    expected_names = ["ur10e_forearm_link", "ur10e_wrist_1_link", "ur10e_wrist_2_link", "ur10e_tool0"]
+    actual_names = [model_wrapper.model.frames[fid].name for fid in ctrl_scrambled.frames_ids]
+    assert actual_names == expected_names
+    assert ctrl_scrambled.tool_frame_id == model_wrapper.model.getFrameId("ur10e_tool0")
+    assert np.array_equal(ctrl_scrambled.capsule_segments, [[0, 1], [1, 2], [2, 3]])
 
 
 

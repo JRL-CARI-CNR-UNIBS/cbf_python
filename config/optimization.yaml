@@ -46,6 +46,11 @@ controller:
   use_capsules: false
   robot_capsule_radius: 0.08
   human_capsule_radius: 0.08
+  robot_links:
+    - "forearm_link"
+    - "wrist_1_link"
+    - "wrist_2_link"
+    - "tool0"
 
 ranges:
   lambda_pos: [100.0, 100000.0]
