@@ -6,7 +6,7 @@ database:
   sqlite_path: "optuna_study.db"
 
 study:
-  name_prefix: "params_optimal"
+  name_prefix: "params_optimal_capsule"
   n_trials: 5000
   n_jobs: 4
   timeout: 600.0
