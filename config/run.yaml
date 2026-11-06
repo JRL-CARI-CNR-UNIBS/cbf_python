@@ -40,8 +40,13 @@ common:
     delta_deg: 4.5
     # Volumetric Capsule Distance Model (set to true to enable continuous link cylinder collision checking)
     use_capsules: true
-    robot_capsule_radius: 0.08
-    human_capsule_radius: 0.08
+    robot_capsule_radius: 0.025
+    human_capsule_radius: 0.025
+    robot_links:
+      - "forearm_link"
+      - "wrist_1_link"
+      - "wrist_2_link"
+      - "tool0"
 
 # ------------------------------------------------------------------------------
 # Script-Specific Parameters and Overrides

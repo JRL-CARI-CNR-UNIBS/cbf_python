@@ -30,7 +30,7 @@ Theoretical Overview:
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import numpy as np
 import quadprog
 import pinocchio as pin
@@ -85,6 +85,9 @@ class ControllerConfig:
     prefix: str = "ur10e_"
     tool_frame: str = "tool0"
     elbow_frame: str = "forearm_link"
+    robot_links: List[str] = field(
+        default_factory=lambda: ["forearm_link", "wrist_1_link", "wrist_2_link", "tool0"]
+    )
 
     # Volumetric Capsule Distance Model
     use_capsules: bool = False                # Enable continuous segment-to-segment capsule checking
@@ -156,7 +159,8 @@ class ControllerConfig:
             "  -- Robot Frames --\n"
             f"  prefix          : '{self.prefix}'\n"
             f"  tool_frame      : '{self.tool_frame}'\n"
-            f"  elbow_frame     : '{self.elbow_frame}'"
+            f"  elbow_frame     : '{self.elbow_frame}'\n"
+            f"  robot_links     : {self.robot_links}"
         )
 
 
@@ -176,16 +180,50 @@ class BCFOptimalController:
         self.data = self.model.createData()
 
         self.useCbf = useCbf
-        tool_name = cfg.tool_frame if cfg.tool_frame.startswith(cfg.prefix) else cfg.prefix + cfg.tool_frame
-        elbow_name = cfg.elbow_frame if cfg.elbow_frame.startswith(cfg.prefix) else cfg.prefix + cfg.elbow_frame
-        self.tool_frame_id = self.model.getFrameId(tool_name)
-        self.elbow_frame_id = self.model.getFrameId(elbow_name)
+
+        # Resolve monitored robot links/frames
+        links = cfg.robot_links if (cfg.robot_links is not None and len(cfg.robot_links) > 0) else [cfg.elbow_frame, cfg.tool_frame]
+        self.frames_ids = []
+        for name in links:
+            candidates = [name]
+            if not name.startswith(cfg.prefix):
+                candidates.append(cfg.prefix + name)
+            elif name.startswith(cfg.prefix):
+                candidates.append(name.removeprefix(cfg.prefix))
+
+            matched_id = None
+            for cand in candidates:
+                if self.model.existFrame(cand):
+                    matched_id = self.model.getFrameId(cand)
+                    break
+
+            if matched_id is None:
+                raise ValueError(f"Robot link frame '{name}' (tested {candidates}) not found in robot model.")
+            self.frames_ids.append(matched_id)
+
+        # Automatically sort frames along the robot kinematic chain using the model hierarchy
+        def _get_kinematic_depth(fid: int):
+            frame = self.model.frames[fid]
+            parent_joint = frame.parentJoint
+            depth = 0
+            curr = parent_joint
+            while curr != 0:
+                depth += 1
+                curr = self.model.parents[curr]
+            return (depth, parent_joint, fid)
+
+        self.frames_ids.sort(key=_get_kinematic_depth)
+
         # Order frames from base to end-effector so that index -1 corresponds to the tool frame
-        self.frames_ids = [self.elbow_frame_id, self.tool_frame_id]
-        # Volumetric capsule segments: segment (0, 1) spans between elbow and tool
-        self.capsule_segments = (
-            np.array([[0, 1]], dtype=np.int64) if cfg.use_capsules else np.empty((0, 2), dtype=np.int64)
-        )
+        self.tool_frame_id = self.frames_ids[-1]
+        self.elbow_frame_id = self.frames_ids[0]
+
+        # Consecutive volumetric capsule segments: [[0, 1], [1, 2], ..., [N-2, N-1]]
+        if cfg.use_capsules and len(self.frames_ids) >= 2:
+            n_links = len(self.frames_ids)
+            self.capsule_segments = np.array([[i, i + 1] for i in range(n_links - 1)], dtype=np.int64)
+        else:
+            self.capsule_segments = np.empty((0, 2), dtype=np.int64)
 
         nq = self.model.nq
         self.nq = nq
