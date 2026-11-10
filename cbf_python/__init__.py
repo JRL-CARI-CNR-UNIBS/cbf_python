@@ -15,16 +15,33 @@ from pathlib import Path
 
 
 def _configure_cmeel_environment() -> None:
-    """Dynamically configure sys.path and LD_LIBRARY_PATH for CMEEL-packaged Pinocchio."""
-    candidate_prefixes = [Path(sys.prefix)]
+    """Dynamically configure sys.path and LD_LIBRARY_PATH for CMEEL-packaged Pinocchio if needed.
+
+    Checks first if Pinocchio can already be loaded from the current environment (e.g. system
+    ROS 2 packages). Only activates and configures the CMEEL bundle when Pinocchio cannot
+    be imported otherwise.
+    """
+    # 1. Fast check: if Pinocchio is already functional in the active environment, do nothing.
+    try:
+        import pinocchio  # noqa: F401
+        return
+    except Exception:
+        pass
+
+    # 2. Discover potential virtualenv prefixes dynamically (no hardcoded user paths)
+    candidate_prefixes: list[Path] = [Path(sys.prefix)]
 
     if "VIRTUAL_ENV" in os.environ:
         candidate_prefixes.append(Path(os.environ["VIRTUAL_ENV"]))
 
-    # Check local workspace python_venv if present
-    workspace_venv = Path(__file__).resolve().parent.parent.parent / "python_venv" / "galileo_venv"
-    if workspace_venv.exists():
-        candidate_prefixes.append(workspace_venv)
+    # Look for virtualenvs in parent directories if present
+    curr = Path(__file__).resolve().parent
+    for _ in range(4):
+        curr = curr.parent
+        for venv_name in ["cbf_venv", "venv", ".venv"]:
+            v_path = curr / venv_name
+            if v_path.exists() and v_path not in candidate_prefixes:
+                candidate_prefixes.append(v_path)
 
     py_ver = f"python{sys.version_info.major}.{sys.version_info.minor}"
 
