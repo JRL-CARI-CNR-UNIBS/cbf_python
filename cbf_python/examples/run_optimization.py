@@ -231,7 +231,7 @@ def run_episode(
             if out["unfeasible_cnt"] != "FEASIBLE":
                 unfeasible_count += 1
 
-            if "slack" in out and out["slack"] is not None:
+            if cfg.use_soft_tube and "slack" in out and out["slack"] is not None:
                 slack_mag = float(np.max(np.abs(out["slack"])))
                 if slack_mag > max_slack:
                     max_slack = slack_mag
@@ -270,7 +270,7 @@ def run_episode(
     viol_rate = violations / steps_safe
     worst_s_index = min_s_index if min_s_index != float("inf") else 10.0
     worst_s_index = float(np.clip(worst_s_index, -10.0, 10.0))
-    mean_slack = sum_slack / steps_safe
+    mean_slack = (sum_slack / steps_safe) if cfg.use_soft_tube else 0.0
     lap_count = float(trajectory_time / max(1e-6, T_total))
 
     return (
@@ -326,7 +326,7 @@ def make_objective(opt_cfg: dict):
         cfg.lambda_scaling = trial.suggest_float("lambda_scaling", s_range[0], s_range[1], log=True)
         cfg.gamma = trial.suggest_float("gamma", g_range[0], g_range[1], log=True)
 
-        if cfg.use_soft_tube or "lambda_tube" in ranges:
+        if cfg.use_soft_tube and "lambda_tube" in ranges:
             t_range = [float(x) for x in ranges.get("lambda_tube", [1.0e3, 1.0e7])]
             cfg.lambda_tube = trial.suggest_float("lambda_tube", t_range[0], t_range[1], log=True)
 
@@ -366,17 +366,33 @@ def make_objective(opt_cfg: dict):
             trial.set_user_attr("mean_osc", float(mean_osc))
             trial.set_user_attr("joint_traj_err_rad", float(mean_traj_err))
             trial.set_user_attr("cartesian_error_mean_m", float(mean_cart_err))
-            trial.set_user_attr("max_slack", float(max_slack))
-            trial.set_user_attr("mean_slack", float(mean_slack))
-            trial.set_user_attr("unfeasible_count", int(unfeasible_count))
+            if cfg.use_soft_tube:
+                trial.set_user_attr("max_slack", float(max_slack))
+                trial.set_user_attr("mean_slack", float(mean_slack))
+            else:
+                trial.set_user_attr("unfeasible_count", int(unfeasible_count))
             trial.set_user_attr("lap_count", float(lap_count))
         except TimeoutError:
-            return 10.0, 0.0, 10.0, 10.0
+            return (10.0, 0.0, 10.0, 10.0, 1000.0) if not cfg.use_soft_tube else (10.0, 0.0, 10.0, 10.0)
         except Exception:
             # Prevent unexpected worker termination or process errors from aborting the entire study
-            return 10.0, 0.0, 10.0, 10.0
+            return (10.0, 0.0, 10.0, 10.0, 1000.0) if not cfg.use_soft_tube else (10.0, 0.0, 10.0, 10.0)
 
-        return safety_penetration, mean_scale, normalized_jerk, mean_cart_err
+        if not cfg.use_soft_tube:
+            return (
+                safety_penetration,
+                mean_scale,
+                normalized_jerk,
+                mean_cart_err,
+                float(unfeasible_count),
+            )
+        else:
+            return (
+                safety_penetration,
+                mean_scale,
+                normalized_jerk,
+                mean_cart_err,
+            )
 
     return objective
 
@@ -385,6 +401,15 @@ def main(config_file: str = "optimization.yaml") -> None:
     opt_cfg = load_yaml(config_file)
     db_cfg = opt_cfg.get("database", {})
     study_cfg = opt_cfg.get("study", {})
+    ctrl_overrides = opt_cfg.get("controller", {})
+
+    try:
+        base_defaults = load_yaml("controller_defaults.yaml")
+    except Exception:
+        base_defaults = {}
+
+    merged_cfg = {**base_defaults, **ctrl_overrides}
+    use_soft_tube = bool(merged_cfg.get("use_soft_tube", True))
 
     storage = None
     try:
@@ -395,24 +420,37 @@ def main(config_file: str = "optimization.yaml") -> None:
             storage = f"sqlite:///{sqlite_path}"
             print(f"Using SQLite fallback storage: {storage}")
 
+    if not use_soft_tube:
+        directions = ["minimize", "maximize", "minimize", "minimize", "minimize"]
+        metric_names = [
+            "safety_penetration_m",
+            "mean_scaling",
+            "normalized_jerk",
+            "cartesian_error_m",
+            "unfeasible_count",
+        ]
+    else:
+        directions = ["minimize", "maximize", "minimize", "minimize"]
+        metric_names = [
+            "safety_penetration_m",
+            "mean_scaling",
+            "normalized_jerk",
+            "cartesian_error_m",
+        ]
+
     study = optuna.create_study(
-        directions=["minimize", "maximize", "minimize", "minimize"],
+        directions=directions,
         storage=storage,
         study_name=f"{study_cfg.get('name_prefix', 'params_optimal')}_{time.strftime('%Y%m%d-%H%M%S')}",
         sampler=optuna.samplers.NSGAIIISampler(),
         load_if_exists=True,
     )
-    study.set_metric_names([
-        "safety_penetration_m",
-        "mean_scaling",
-        "normalized_jerk",
-        "cartesian_error_m",
-    ])
+    study.set_metric_names(metric_names)
 
     n_trials = int(study_cfg.get("n_trials", 100))
     n_jobs = int(study_cfg.get("n_jobs", 1))
 
-    print(f"Starting Optuna Study '{study.study_name}' for {n_trials} trials...")
+    print(f"Starting Optuna Study '{study.study_name}' for {n_trials} trials (soft_tube={use_soft_tube})...")
     study.optimize(make_objective(opt_cfg), n_trials=n_trials, n_jobs=n_jobs)
 
     weights_dict = opt_cfg.get("weights", {})
@@ -422,6 +460,9 @@ def main(config_file: str = "optimization.yaml") -> None:
         float(weights_dict.get("smoothness", 1.0)),
         float(weights_dict.get("trajectory_error", 1.0)),
     ]
+    if not use_soft_tube:
+        weights.append(float(weights_dict.get("unfeasible_count", 3.0)))
+
     save_data_multiobj(study, filename="log_best_trials.csv", n_samples=5, weights=weights)
 
 

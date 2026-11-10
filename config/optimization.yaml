@@ -23,6 +23,7 @@ weights:
   scaling: 1.5
   smoothness: 1.0
   trajectory_error: 1.0
+  unfeasible_count: 3.0
 
 multitrial:
   scenarios:
@@ -34,8 +35,7 @@ multitrial:
 
 controller:
   C_0: 0.10
-  use_soft_tube: true
-  lambda_tube: 1.0e5
+  use_soft_tube: false
   # Robust Covariance Parameters (99.9% Gaussian confidence)
   beta: 3.291
   sigma_p: 0.015
@@ -57,5 +57,5 @@ ranges:
   lambda_vel: [0.01, 100.0]
   lambda_acc: [1.0e-11, 1.0e-4]
   lambda_scaling: [5.0, 500.0]
-  lambda_tube: [1.0e3, 1.0e7]
+  # lambda_tube: [1.0e3, 1.0e7]
   gamma: [0.5, 15.0]

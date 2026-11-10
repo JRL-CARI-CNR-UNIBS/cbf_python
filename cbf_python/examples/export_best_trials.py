@@ -38,11 +38,13 @@ TOP_N: int = 10
 #   2. Velocity scaling (maximize):    weight 1.5
 #   3. Smoothness / Jerk (minimize):  weight 1.0
 #   4. Trajectory error (minimize):   weight 1.0
+#   5. Infeasibility count (minimize): weight 3.0
 WEIGHTS: Union[Dict[str, float], List[float]] = {
     "safety_penetration": 3.0,
     "scaling": 1.5,
     "smoothness": 1.0,
     "trajectory_error": 1.0,
+    "unfeasible_count": 3.0,
 }
 
 # Metric keyword aliases to ensure seamless matching across legacy and homogenized metric names
@@ -51,6 +53,7 @@ METRIC_ALIASES: Dict[str, List[str]] = {
     "scaling": ["scaling", "scale", "velocity"],
     "smoothness": ["smoothness", "jerk", "oscillation"],
     "trajectory_error": ["trajectory_error", "cartesian_error", "cart_err", "traj_err", "error"],
+    "unfeasible_count": ["unfeasible", "infeasible", "fallback"],
 }
 
 # Exclude solver fallback / numerical failure penalty trials (e.g. values >= 5.0)
@@ -171,7 +174,7 @@ def export_best_trials(
         valid_mask = pd.Series(True, index=df_complete.index)
         for col, is_min in zip(obj_cols, is_minimize_list):
             if is_min:
-                threshold = 9000.0 if "jerk" in col.lower() else fallback_threshold
+                threshold = 900.0 if ("jerk" in col.lower() or "unfeasible" in col.lower()) else fallback_threshold
                 valid_mask &= (df_complete[col] < threshold)
             else:
                 valid_mask &= (df_complete[col] > 0.05)
